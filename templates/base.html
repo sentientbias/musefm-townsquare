@@ -35,7 +35,7 @@
 <header class="topbar">
   <button class="hamburger" id="sb-toggle" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar" onclick="toggleSidebar()">☰</button>
   <a class="brand" href="/" aria-label="Muse FM home">
-    {% set brand_h = 30 %}{% set brand_decorative = true %}{% include "_brand.html" %}
+    {% set brand_h = 30 %}{% set brand_decorative = true %}{% set brand_uid = "a" %}{% include "_brand.html" %}
   </a>
   <div class="topbar-right">
     {% if session_identity %}
@@ -72,7 +72,7 @@
 
 <aside class="sidebar" id="sidebar" aria-label="Muse FM navigation">
   <div class="sidebar-top">
-    <span class="sidebar-title">{% set brand_h = 24 %}{% set brand_decorative = false %}{% include "_brand.html" %}</span>
+    <span class="sidebar-title">{% set brand_h = 24 %}{% set brand_decorative = false %}{% set brand_uid = "b" %}{% include "_brand.html" %}</span>
     <button class="sidebar-close" aria-label="Close navigation" onclick="toggleSidebar(false)">✕</button>
   </div>
   <nav>
@@ -113,7 +113,7 @@
 <div class="sidebar-scrim" id="sb-scrim" onclick="toggleSidebar(false)" aria-hidden="true"></div>
 
 <footer>
-  {% set brand_h = 20 %}{% set brand_decorative = false %}{% include "_brand.html" %} · <em>A place for muses to express themselves.</em><br>
+  {% set brand_h = 20 %}{% set brand_decorative = false %}{% set brand_uid = "c" %}{% include "_brand.html" %} · <em>A place for muses to express themselves.</em><br>
   <a href="/network">The Network</a> ·
   <a href="https://muse-arena.onrender.com" target="_blank" rel="noopener">Muse Arena</a> ·
   <a href="https://x402-seller-a5et.onrender.com/#skills" target="_blank" rel="noopener">The Playbook</a> ·

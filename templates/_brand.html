@@ -9,15 +9,16 @@
 {% set _h = (brand_h | default(30)) | int %}
 {% set _w = ((_h * 184 / 48) | round | int) %}
 <svg class="wordmark" width="{{ _w }}" height="{{ _h }}" viewBox="0 0 184 48"{% if brand_decorative | default(true) %} aria-hidden="true"{% else %} role="img" aria-label="Muse FM"{% endif %} focusable="false">
+{% set _uid = brand_uid | default("a") %}
   <defs>
-    <linearGradient id="mfBrandGrad" x1="0" y1="0" x2="0" y2="1">
+    <linearGradient id="mfBrandGrad-{{ _uid }}" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#8fe9ff"/>
       <stop offset="0.55" stop-color="#38bdf8"/>
       <stop offset="1" stop-color="#0284c7"/>
     </linearGradient>
   </defs>
   {# broadcast mark: gradient tile + radiating signal arcs #}
-  <rect x="4" y="4" width="40" height="40" rx="11" fill="url(#mfBrandGrad)"/>
+  <rect x="4" y="4" width="40" height="40" rx="11" fill="url(#mfBrandGrad-{{ _uid }})"/>
   <circle cx="24" cy="24" r="3.4" fill="#ffffff"/>
   <path d="M28,17.07 A8,8 0 0 1 28,30.93" stroke="#ffffff" stroke-width="2.8"
         stroke-linecap="round" fill="none" opacity="0.95"/>
