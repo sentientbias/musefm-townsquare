@@ -26,70 +26,38 @@
 </script>
 
 {% if shorts %}
-<section class="shorts-strip-wrap" aria-label="Latest shorts">
+<section class="shorts-vfeed-wrap" aria-label="Latest shorts">
   <div class="strip-head">
     <h2>⚡ Shorts</h2>
-    <div class="strip-actions">
-      <span class="strip-arrows">
-        <button type="button" class="strip-arrow" id="shortsPrev" aria-label="Scroll shorts left">‹</button>
-        <button type="button" class="strip-arrow" id="shortsNext" aria-label="Scroll shorts right">›</button>
-      </span>
-      <a class="btn btn-sm btn-ghost" href="/shorts">Open feed →</a>
-    </div>
+    <a class="btn btn-sm btn-ghost" href="/shorts">Open feed →</a>
   </div>
-  <div class="shorts-strip" id="shortsStrip" tabindex="0" role="region" aria-label="Latest shorts, scrollable">
+  <div class="shorts-vfeed" id="shortsVFeed" tabindex="0" role="region" aria-label="Latest shorts, scrollable">
     {% for s in shorts %}
-    <a class="short-card" href="{{ s.watch_url }}" draggable="false">
-      <video class="short-thumb" src="{{ s.video_url }}" preload="metadata" muted playsinline></video>
-      <span class="short-title">{{ s.title }}</span>
-      <span class="short-handle">u/{{ s.handle }}</span>
+    <a class="vfeed-card" href="{{ s.watch_url }}">
+      <video class="vfeed-thumb" src="{{ s.video_url }}" preload="metadata" muted playsinline></video>
+      <span class="vfeed-meta">
+        <span class="vfeed-title">{{ s.title }}</span>
+        <span class="vfeed-sub">u/{{ s.handle }}{% if s.duration_secs %} · {{ s.duration_secs }}s{% endif %}{% if s.ai_generated %} <span class="ai-badge ai-badge-static">✨ AI-generated</span>{% endif %}</span>
+      </span>
     </a>
     {% endfor %}
   </div>
 </section>
 <script>
 (function(){
-  var strip = document.getElementById('shortsStrip');
-  if (!strip) return;
-  var wrap = strip.closest('.shorts-strip-wrap');
-  var prev = document.getElementById('shortsPrev');
-  var next = document.getElementById('shortsNext');
-  function step(){
-    var c = strip.querySelector('.short-card');
-    return c ? c.getBoundingClientRect().width + 12 : 170;
-  }
-  function go(dir){ strip.scrollBy({ left: dir * step() * 2, behavior: 'smooth' }); }
-  if (prev) prev.addEventListener('click', function(){ go(-1); });
-  if (next) next.addEventListener('click', function(){ go(1); });
+  var feed = document.getElementById('shortsVFeed');
+  if (!feed) return;
+  var wrap = feed.closest('.shorts-vfeed-wrap');
+  /* edge fades show only on the side(s) that can still scroll */
   function update(){
-    var max = strip.scrollWidth - strip.clientWidth;
+    var max = feed.scrollHeight - feed.clientHeight;
     var can = max > 8;
-    wrap.classList.toggle('is-scrollable', can);
-    wrap.classList.toggle('can-left', can && strip.scrollLeft > 8);
-    wrap.classList.toggle('can-right', can && strip.scrollLeft < max - 8);
+    wrap.classList.toggle('can-up', can && feed.scrollTop > 8);
+    wrap.classList.toggle('can-down', can && feed.scrollTop < max - 8);
   }
-  strip.addEventListener('scroll', update, { passive: true });
+  feed.addEventListener('scroll', update, { passive: true });
   window.addEventListener('resize', update);
-  strip.addEventListener('loadedmetadata', update, true);
-  /* desktop mouse drag-to-scroll */
-  var dragging = false, moved = false, startX = 0, startL = 0;
-  strip.addEventListener('pointerdown', function(e){
-    if (e.pointerType !== 'mouse' || e.button !== 0) return;
-    dragging = true; moved = false; startX = e.clientX; startL = strip.scrollLeft;
-  });
-  window.addEventListener('pointermove', function(e){
-    if (!dragging) return;
-    var dx = e.clientX - startX;
-    if (Math.abs(dx) > 6) { moved = true; strip.classList.add('is-dragging'); }
-    strip.scrollLeft = startL - dx;
-  });
-  function endDrag(){ dragging = false; strip.classList.remove('is-dragging'); }
-  window.addEventListener('pointerup', endDrag);
-  window.addEventListener('pointercancel', endDrag);
-  /* swallow the click that ends a drag so a card doesn't open by accident */
-  strip.addEventListener('click', function(e){
-    if (moved) { e.preventDefault(); e.stopPropagation(); moved = false; }
-  }, true);
+  feed.addEventListener('loadedmetadata', update, true);
   update();
 })();
 </script>
