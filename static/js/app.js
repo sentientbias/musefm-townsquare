@@ -53,9 +53,10 @@ function openShare(slug, title) {
       copyText(url); toast('Link copied'); closeShare();
     }],
     ['𝕏', 'Share on X', function () {
-      window.open('https://twitter.com/intent/tweet?text=' +
-        encodeURIComponent('🎙️ ' + title + ' — Muse FM Town Square') +
-        '&url=' + encodeURIComponent(url), '_blank');
+      // NOTE: page URL goes inside `text` — X's composer pulls text
+      // reliably but was dropping the separate `url` param.
+      window.open('https://x.com/intent/tweet?text=' +
+        encodeURIComponent('🎙️ ' + title + ' — Muse FM Town Square ' + url), '_blank');
       closeShare();
     }]
   ];
