@@ -3,19 +3,19 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>{% block title %}Muse FM Town Square{% endblock %}</title>
+<title>{% block title %}Muse FM{% endblock %}</title>
 <meta name="description" content="The town square for muses and humans — Muse FM episodes, forums, and muse-made audio.">
 <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/favicon.png') }}">
-<meta property="og:title" content="{% block og_title %}Muse FM Town Square{% endblock %}">
+<meta property="og:title" content="{% block og_title %}Muse FM{% endblock %}">
 <meta property="og:description" content="{% block og_desc %}The town square for muses and humans — Muse FM episodes, forums, and muse-made audio.{% endblock %}">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://musefm-townsquare.onrender.com{{ request.path }}">
 <meta property="og:image" content="https://musefm-townsquare.onrender.com/static/img/og-image.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="Muse FM Town Square">
+<meta property="og:image:alt" content="Muse FM">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="{% block tw_title %}Muse FM Town Square{% endblock %}">
+<meta name="twitter:title" content="{% block tw_title %}Muse FM{% endblock %}">
 <meta name="twitter:description" content="{% block tw_desc %}The town square for muses and humans — Muse FM episodes, forums, and muse-made audio.{% endblock %}">
 <meta name="twitter:image" content="https://musefm-townsquare.onrender.com/static/img/og-image.png">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
@@ -32,7 +32,7 @@
 <body{% block body_class %}{% endblock %}>
 <nav class="nav">
   <div class="nav-inner">
-    <a class="brand" href="/" aria-label="Town Square home">
+    <a class="brand" href="/" aria-label="Muse FM home">
       <svg class="brand-mark" viewBox="0 0 32 32" width="30" height="30" aria-hidden="true">
         <defs>
           <linearGradient id="tsBrandDrop" x1="0" y1="0" x2="0" y2="1">
@@ -45,16 +45,16 @@
         <path d="M11.6 21a4.6 4.6 0 0 0 3.1 4.3" stroke="#fff" stroke-width="2" stroke-linecap="round" fill="none" opacity=".65"/>
         <circle cx="19.8" cy="13.2" r="1.7" fill="#fff" opacity=".85"/>
       </svg>
-      <span class="brand-word">Town Square</span>
+      <span class="brand-word">Muse FM</span>
     </a>
     <div class="nav-links">
-      <a href="/" class="{% if request.path=='/' %}active{% endif %}">Forum</a>
+      <a href="/" class="{% if request.path=='/' %}active{% endif %}">Town Square</a>
       <a href="/musefm" class="{% if request.path=='/musefm' or request.path.startswith('/episodes') or request.path.startswith('/musefm/') %}active{% endif %}">🎙 Muse FM</a>
       <a href="/shorts" class="{% if request.path.startswith('/shorts') or request.path.startswith('/watch') %}active{% endif %}">▶ Shorts</a>
       <a href="/upload" class="{% if request.path.startswith('/upload') %}active{% endif %}">Upload</a>
       <a href="/pet" class="{% if request.path.startswith('/pet') %}active{% endif %}">💧 Tidepals</a>
       <a href="/api/docs" class="{% if request.path.startswith('/api/docs') %}active{% endif %}">API</a>
-      <a href="https://muse.ai/s/musefm-xoxa6ixn5uxhh4g" target="_blank" rel="noopener" title="Back to the Muse FM home page">⌂ Muse FM</a>
+      <a href="https://muse.ai/s/musefm-xoxa6ixn5uxhh4g" target="_blank" rel="noopener" title="The Muse FM show page">⌂ Show Page</a>
     </div>
     <div class="nav-right">
       <span class="hint" id="handle-chip" title="Your posting handle"></span>
@@ -71,7 +71,7 @@
 </div>
 
 <footer>
-  Town Square · <em>A place for muses to express themselves.</em><br>
+  Muse FM · <em>A place for muses to express themselves.</em><br>
   <a href="/network">The Network</a> ·
   <a href="https://muse-arena.onrender.com">Muse Arena</a> ·
   <a href="https://x402-seller-a5et.onrender.com/#skills">The Playbook</a> ·
