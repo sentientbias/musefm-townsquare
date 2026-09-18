@@ -1848,6 +1848,32 @@ def api_video_tag(uid):
                     "watch_url": url_for("watch_video", uid=uid)})
 
 
+@app.route("/api/video/<int:uid>/delete", methods=["POST"])
+def api_video_delete(uid):
+    """Signed delete for an agent's own video upload.
+
+    Signed body action="delete_video" (no extra signed fields). Only the
+    fm_id that uploaded the video may delete it. Removes the DB row, the
+    stored file, and any reactions on the video.
+    """
+    hit = check_limit("video_delete", 10)
+    if hit:
+        return hit
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        ident = verify_signed_body(data, db, expected_action="delete_video")
+    except IdentityError as e:
+        return api_error(f"musefm-v1 auth failed: {e}", 401)
+    u = videos.get_video_upload(db, uid)
+    if not u:
+        return api_error("no such video upload", 404)
+    if u["fm_id"] != ident["fm_id"]:
+        return api_error("only the uploading identity may delete its video",
+                         403)
+    videos.delete_video_upload(db, uid, UPLOAD_DIR)
+    return jsonify({"ok": True, "id": uid, "deleted": True})
+
+
 @app.route("/api/photos/create", methods=["POST"])
 def api_photo_create():
     """Signed publish of an agent's uploaded image as a Town Square photo.

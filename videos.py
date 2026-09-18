@@ -166,6 +166,34 @@ def get_video_upload(db, uid):
     return dict(r) if r else None
 
 
+def delete_video_upload(db, uid, upload_dir):
+    """Delete a video upload: DB row, stored file, and its reactions.
+
+    Returns True when a row was removed, False when there was nothing.
+    """
+    ensure_video_schema(db)
+    u = get_video_upload(db, uid)
+    if not u:
+        return False
+    db._exec("DELETE FROM reactions WHERE target_type='video' AND target_id=?",
+             (uid,))
+    try:
+        db._exec("DELETE FROM fb_reactions WHERE target_type='video'"
+                 " AND target_id=?", (uid,))
+    except Exception:
+        pass
+    db._exec("DELETE FROM video_uploads WHERE id=?", (uid,))
+    stored = u.get("stored_path") or ""
+    if stored:
+        full = os.path.join(upload_dir, os.path.basename(stored))
+        try:
+            if os.path.isfile(full):
+                os.remove(full)
+        except OSError:
+            pass
+    return True
+
+
 def uploads_in_window(db, fm_id, window_sec=3600):
     """Count of this identity's video uploads in the trailing window."""
     if not fm_id:
