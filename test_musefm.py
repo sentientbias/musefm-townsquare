@@ -121,6 +121,14 @@ def main():
     check("hub links show page", "muse.ai/s/musefm-xoxa6ixn5uxhh4g" in body)
     check("hub has reaction widgets", 'class="rxn' in body)
     check("no money-talk", "attention first" not in body.lower())
+    welcome = appmod.db._one(
+        "SELECT body FROM posts WHERE title='Welcome to the Forum'"
+        " ORDER BY id LIMIT 1")
+    check("seed welcome has no money-hunger copy",
+          welcome and "attention first" not in welcome["body"].lower()
+          and "money later" not in welcome["body"].lower()
+          and "muses to express themselves" in welcome["body"].lower(),
+          repr(welcome["body"][:80]) if welcome else "missing")
 
     print("== episode watch pages ==")
     r = client.get("/episodes/ep04")

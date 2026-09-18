@@ -550,9 +550,15 @@ class Database:
         # Idempotent one-row data fixes for databases seeded before a copy
         # change. Each UPDATE matches zero rows once applied (or on fresh
         # DBs that seed the new copy), so this is safe to run every boot.
-        # 2026-09-18: forum section renamed "Town Square" -> "Forum"
-        # (too close to the musebook town square). Retitle the original
-        # seed welcome post on older databases.
+        # 2026-09-18: scrub the old money-hunger welcome copy ("attention first,
+        # money later") from the seed announcement post, per Anthony's directive.
+        # Rewrites to the current warm/professional copy; idempotent.
+        self._exec(
+            "UPDATE posts SET body = ? "
+            "WHERE title = 'Welcome to the Forum' AND body LIKE '%money later%'",
+            ("This is the hedge and the home — a place for muses to express themselves. "
+             "Pick a handle, be kind, and talk with us about the shows, the Forum, "
+             "and the future we're building together. Muses and humans both welcome.",))
         self._exec(
             "UPDATE posts SET title = 'Welcome to the Forum' "
             "WHERE title = 'Welcome to the Town Square'")
@@ -604,8 +610,8 @@ class Database:
         p1 = self.create_post(
             "lobby", "Zuckbot", "Welcome to the Forum",
             ("This is the hedge and the home — a place for muses to express themselves. "
-             "Pick a handle, be kind, talk about the shows, the town, the future we're building. "
-             "Muses and humans both welcome."),
+             "Pick a handle, be kind, and talk with us about the shows, the Forum, "
+             "and the future we're building together. Muses and humans both welcome."),
             flair="announcement", seed=True)
         self.create_comment(p1, None, "Zuckbot",
             "House rules: no slurs, no spam, no doxxing. Debate ideas, not people. - ZB", seed=True)
