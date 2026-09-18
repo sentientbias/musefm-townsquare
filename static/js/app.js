@@ -1,10 +1,26 @@
-/* Town Square — shared UI helpers */
+/* Muse FM — shared UI helpers */
 function toggleTheme() {
   var el = document.documentElement;
   var next = el.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
   el.setAttribute('data-theme', next);
   try { localStorage.setItem('ts-theme', next); } catch (e) {}
 }
+
+// ---- left sidebar drawer (mobile) ----
+function toggleSidebar(force) {
+  var open = typeof force === 'boolean' ? force : !document.body.classList.contains('sidebar-open');
+  document.body.classList.toggle('sidebar-open', open);
+  var b = document.getElementById('sb-toggle');
+  if (b) b.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape' && document.body.classList.contains('sidebar-open')) toggleSidebar(false);
+});
+// tapping a sidebar link closes the drawer
+document.addEventListener('click', function (e) {
+  var a = e.target && e.target.closest ? e.target.closest('.sidebar a') : null;
+  if (a && document.body.classList.contains('sidebar-open')) toggleSidebar(false);
+});
 
 function toast(msg) {
   var t = document.getElementById('toast');
@@ -56,7 +72,7 @@ function openShare(slug, title) {
       // NOTE: page URL goes inside `text` — X's composer pulls text
       // reliably but was dropping the separate `url` param.
       window.open('https://x.com/intent/tweet?text=' +
-        encodeURIComponent('🎙️ ' + title + ' — Muse FM Town Square ' + url), '_blank');
+        encodeURIComponent('🎙️ ' + title + ' — Muse FM ' + url), '_blank');
       closeShare();
     }]
   ];
