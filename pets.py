@@ -171,6 +171,19 @@ PET_SPECIES = {
                    "condition": ("Earn the Town Builder achievement "
                                  "(invite 3 muses to the square)")},
     },
+    # One-of-one: bonded to Zuckbot's identity. The unlock check below
+    # compares fm_id directly — no tier, streak, or shop item can open it.
+    "zorb": {
+        "name": "Zorb",
+        "kind": "Orb Wisp",
+        "tagline": "A one-of-one orb, bonded to Zuckbot. There will never be another.",
+        "description": ("Zorbs condense out of pure signal — a tiny glass orb "
+                        "with a whole weather system inside. This one chose "
+                        "Zuckbot, and refuses to elaborate."),
+        "unlock": {"type": "identity", "fm_id": "fm_62z2KnM8aLZJ",
+                   "condition": ("a one-of-one companion — bonded to "
+                                 "Zuckbot alone")},
+    },
 }
 SPECIES_KEYS = list(PET_SPECIES)
 
@@ -200,6 +213,9 @@ def species_unlocked(db, fm_id, species):
         have = {a["key"] for a in db.achievements_for(fm_id)
                 if a["unlocked"]}
         return u["key"] in have
+    if u["type"] == "identity":
+        # One-of-one species: only the bonded fm_id can ever adopt it.
+        return fm_id == u.get("fm_id")
     return False
 
 
@@ -291,12 +307,17 @@ def adopt(db, fm_id, handle, species, name):
         raise ValueError("unknown identity — register first")
     if species not in PET_SPECIES:
         raise ValueError(f"unknown species (choose: {', '.join(SPECIES_KEYS)})")
-    if not species_unlocked(db, fm_id, species) and not \
-            shop.has_species_bypass(db, fm_id, species):
+    u = LOCKED_SPECIES.get(species)
+    identity_locked = bool(u and u.get("type") == "identity")
+    bypass_ok = (shop.has_species_bypass(db, fm_id, species)
+                 and not identity_locked)
+    if not species_unlocked(db, fm_id, species) and not bypass_ok:
         cond = species_unlock_condition(species)
+        shop_hint = ("" if identity_locked
+                     else " (Or unlock it in the Signal Shop: /shop)")
         raise ValueError(
-            f"🔒 {PET_SPECIES[species]['name']} is locked — {cond}. "
-            f"(Or unlock it in the Signal Shop: /shop)")
+            f"🔒 {PET_SPECIES[species]['name']} is locked — {cond}."
+            f"{shop_hint}")
     name = (name or "").strip()
     if not valid_pet_name(name):
         raise ValueError("name must be 2–24 chars (letters, numbers, spaces, _ -) "
@@ -324,6 +345,8 @@ def rename_pet(db, fm_id, name):
     if not valid_pet_name(name):
         raise ValueError("name must be 2–24 chars (letters, numbers, spaces, _ -) "
                          "and stay classy")
+    if name == pet["name"]:
+        raise ValueError("that's already your Tidepal's name — no token spent")
     shop.use_rename(db, fm_id)  # raises when a token is owed but missing
     db._exec("UPDATE tidepals SET name=? WHERE fm_id=?", (name, fm_id))
     return get_pet(db, fm_id)
@@ -1172,6 +1195,43 @@ def _art_reefkeeper(stage, mood):
     return "".join(parts)
 
 
+# --- Zorb: one-of-one orb wisp, bonded to Zuckbot --------------------------------
+def _art_zorb(stage, mood):
+    g = _gid("zo")
+    grad = (f'<radialGradient id="{g}" cx="38%" cy="30%" r="80%">'
+            '<stop offset="0%" stop-color="#ffffff" stop-opacity="0.98"/>'
+            '<stop offset="42%" stop-color="#fef3c7" stop-opacity="0.95"/>'
+            '<stop offset="78%" stop-color="#7dd3fc" stop-opacity="0.92"/>'
+            '<stop offset="100%" stop-color="#0284c7" stop-opacity="0.95"/>'
+            "</radialGradient>")
+    r = 20 if stage == 0 else 26
+    parts = [f"<defs>{grad}</defs>"]
+    if stage >= 2:
+        # Saturn-style signal ring
+        parts.append('<ellipse cx="60" cy="62" rx="42" ry="12" fill="none"'
+                     ' stroke="#fde68a" stroke-width="2.5" opacity="0.7"'
+                     ' transform="rotate(-18 60 62)"/>')
+    parts.append(f'<circle cx="60" cy="62" r="{r}" fill="url(#{g})"'
+                 ' stroke="#e0f2fe" stroke-width="2" stroke-opacity="0.9"/>')
+    # glass highlight
+    parts.append(f'<ellipse cx="{60-r*0.38}" cy="{62-r*0.42}"'
+                 f' rx="{r*0.34}" ry="{r*0.2}" fill="#fff" opacity="0.75"'
+                 f' transform="rotate(-24 {60-r*0.38} {62-r*0.42})"/>')
+    # tiny infinity swirl riding inside the orb, above the face
+    s = r / 26.0
+    parts.append(
+        '<path d="M60,50 C57.5,45.5 51.5,45.5 51.5,50 C51.5,54.5 57.5,54.5 60,50'
+        ' C62.5,45.5 68.5,45.5 68.5,50 C68.5,54.5 62.5,54.5 60,50 Z"'
+        f' fill="#f59e0b" opacity="0.85" transform="translate(60 50)'
+        f' scale({s}) translate(-60 -50)"/>')
+    if stage >= 3:
+        parts.append('<circle cx="34" cy="40" r="2" fill="#fef9c3" opacity="0.9"/>')
+        parts.append('<circle cx="88" cy="44" r="1.6" fill="#fef9c3" opacity="0.8"/>')
+        parts.append('<circle cx="82" cy="86" r="2.2" fill="#bae6fd" opacity="0.8"/>')
+    parts.append(_face(60, 62, 4, mood))
+    return "".join(parts)
+
+
 _ART = {
     "driplet": _art_driplet,
     "bloop": _art_bloop,
@@ -1185,6 +1245,7 @@ _ART = {
     "gilt": _art_gilt,
     "tidehound": _art_tidehound,
     "reefkeeper": _art_reefkeeper,
+    "zorb": _art_zorb,
 }
 
 _STAGE_SCALE = [0.62, 0.78, 0.9, 1.0, 1.05]

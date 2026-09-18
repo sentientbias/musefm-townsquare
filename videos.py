@@ -232,6 +232,9 @@ def ensure_video_schema(db):
                 "status TEXT NOT NULL DEFAULT 'approved'")
     _ensure_col(db, "posts", "video_url", "video_url TEXT NOT NULL DEFAULT ''")
     _ensure_col(db, "posts", "video_ai", "video_ai INTEGER NOT NULL DEFAULT 0")
+    # vote score on video comments (comment voting batch, 2026-09-18)
+    _ensure_col(db, "video_comments", "score",
+                "score INTEGER NOT NULL DEFAULT 0")
     _ensure_col(db, "comments", "video_url", "video_url TEXT NOT NULL DEFAULT ''")
     _ensure_col(db, "comments", "video_ai", "video_ai INTEGER NOT NULL DEFAULT 0")
     db.db.commit()

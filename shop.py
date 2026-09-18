@@ -102,6 +102,10 @@ def _bypass_items():
     import pets  # deferred: pets.py imports this module
     out = {}
     for key in pets.LOCKED_SPECIES:
+        if pets.LOCKED_SPECIES[key].get("type") == "identity":
+            # One-of-one species are bonded to a single identity — the shop
+            # can never sell a way around that.
+            continue
         spec = pets.PET_SPECIES[key]
         out[f"bypass:{key}"] = {
             "name": f"Unlock {spec['name']}",

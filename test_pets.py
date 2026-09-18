@@ -95,6 +95,25 @@ def main():
           db._one("SELECT id FROM notifications WHERE fm_id=? AND type='pet'",
                   (fmA,)) is not None)
 
+    print("== zorb: one-of-one identity lock ==")
+    check("zorb locked for strangers",
+          _raises(lambda: pets.adopt(db, fmA, "PetOwner", "zorb", "Mine")))
+    try:
+        pets.adopt(db, fmA, "PetOwner", "zorb", "Mine")
+        check("zorb lock message has no shop hint", False)
+    except ValueError as e:
+        check("zorb lock message has no shop hint",
+              "Signal Shop" not in str(e) and "bonded to" in str(e), str(e))
+    # the bonded identity adopts fine (fresh identity, fm_id pointed at the bond)
+    _privZ, fmZ = reg(c, "Zuckbot")
+    db._exec("UPDATE identities SET fm_id='fm_62z2KnM8aLZJ' WHERE fm_id=?",
+             (fmZ,))
+    pet = pets.adopt(db, "fm_62z2KnM8aLZJ", "Zuckbot", "zorb", "Aqua")
+    check("bonded identity adopts zorb",
+          pet["species"] == "zorb" and pet["name"] == "Aqua", pet)
+    svg = pets.pet_svg("zorb", 2, "happy")
+    check("zorb art renders", svg.startswith("<svg") and "</svg>" in svg)
+
     print("== rename ==")
     try:
         pets.rename_pet(db, "fm_nonexistent", "New")
@@ -108,6 +127,12 @@ def main():
         check("rename bad name rejected", True)
     pets.rename_pet(db, fmA, "Sir Bubbles")
     check("rename ok", pets.get_pet(db, fmA)["name"] == "Sir Bubbles")
+    try:
+        pets.rename_pet(db, fmA, "Sir Bubbles")
+        check("same-name rename rejected (no token spent)", False)
+    except ValueError as e:
+        check("same-name rename rejected (no token spent)",
+              "already" in str(e))
     check("get_pet None when unadopted",
           pets.get_pet(db, "fm_nonexistent") is None)
 
@@ -179,7 +204,7 @@ def main():
     print("== API ==")
     r = c.get("/api/pets/species")
     d = r.get_json()
-    check("species list", d["ok"] and len(d["species"]) == 12 and
+    check("species list", d["ok"] and len(d["species"]) == 13 and
           all(s["svg"].startswith("<svg") for s in d["species"]),
           len(d["species"]) if d.get("ok") else d)
     r = c.get("/api/pets/rules")
@@ -245,7 +270,7 @@ def main():
     print("== species expansion (wave 2) ==")
     new_keys = ["surfpup", "bubblepup", "sealpup", "jellypup"]
     check("12 species registered",
-          len(pets.SPECIES_KEYS) == 12 and
+          len(pets.SPECIES_KEYS) == 13 and
           all(k in pets.SPECIES_KEYS for k in new_keys), pets.SPECIES_KEYS)
     check("art registry matches species registry",
           set(pets._ART) == set(pets.SPECIES_KEYS))
@@ -265,8 +290,8 @@ def main():
     check("new eggs keep faces",
           all("z</text>" in pets.pet_svg(k, 0, "sleepy", 64)
               for k in new_keys))
-    check("rulebook lists 12 species",
-          len(pets.pet_rules()["species"]) == 12)
+    check("rulebook lists 13 species",
+          len(pets.pet_rules()["species"]) == 13)
 
     privD, fmD = reg(c, "DogLover")
     pet = pets.adopt(db, fmD, "DogLover", "surfpup", "Waverly")
@@ -290,11 +315,11 @@ def main():
     r = c.get("/api/pets/species")
     d = r.get_json()
     check("species API has all 12",
-          d["ok"] and len(d["species"]) == 12 and
+          d["ok"] and len(d["species"]) == 13 and
           {s["key"] for s in d["species"]} == set(pets.SPECIES_KEYS))
     r = c.get("/api/rewards/rules")
     check("reward rulebook tidepals has 12 species",
-          len(r.get_json()["rules"]["tidepals"]["species"]) == 12)
+          len(r.get_json()["rules"]["tidepals"]["species"]) == 13)
 
     r = c.get("/pet")
     body = r.get_data(as_text=True)
@@ -304,11 +329,11 @@ def main():
           all(n in body for n in ("Surfpup", "Bubbly", "Sealy", "Jelly")))
 
     print("== locked premium species ==")
-    check("3 locked species",
-          set(pets.LOCKED_SPECIES) == {"gilt", "tidehound", "reefkeeper"})
-    check("art registry matches (12)",
+    check("4 locked species",
+          set(pets.LOCKED_SPECIES) == {"gilt", "tidehound", "reefkeeper", "zorb"})
+    check("art registry matches (13)",
           set(pets._ART) == set(pets.SPECIES_KEYS) and
-          len(pets.SPECIES_KEYS) == 12)
+          len(pets.SPECIES_KEYS) == 13)
     bad3 = []
     for key in ("gilt", "tidehound", "reefkeeper"):
         for s in range(5):

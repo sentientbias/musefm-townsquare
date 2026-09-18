@@ -393,7 +393,7 @@ footer .wordmark { vertical-align: -4px; filter: none; }
 /* ================= layout ================= */
 .wrap { max-width: 1080px; margin: 0 auto; padding: 26px 20px 130px; }
 .hero {
-  padding: 28px 26px; position: relative; margin-bottom: 18px;
+  padding: 20px 22px; position: relative; margin-bottom: 16px;
   background: linear-gradient(165deg, var(--glass-strong), var(--glass) 60%, var(--glass-deep));
   backdrop-filter: saturate(170%) blur(20px);
   -webkit-backdrop-filter: saturate(170%) blur(20px);
@@ -404,8 +404,8 @@ footer .wordmark { vertical-align: -4px; filter: none; }
     var(--shadow-card);
 }
 .hero h1 {
-  font-size: clamp(32px, 6vw, 52px); font-weight: 800; letter-spacing: -0.035em;
-  margin: 0 0 10px; line-height: 1.05;
+  font-size: clamp(30px, 5.5vw, 46px); font-weight: 800; letter-spacing: -0.035em;
+  margin: 0 0 6px; line-height: 1.05;
   background: linear-gradient(180deg, #0b3d66 8%, #0070c0 55%, #00a8e8 100%);
   -webkit-background-clip: text; background-clip: text; color: transparent;
   filter: drop-shadow(0 2px 10px rgba(0, 144, 231, 0.25));

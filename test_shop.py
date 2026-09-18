@@ -79,10 +79,11 @@ def main():
     db = appmod.db
 
     print("== locked species registry ==")
-    check("3 locked species",
-          set(pets.LOCKED_SPECIES) == {"gilt", "tidehound", "reefkeeper"},
+    check("4 locked species",
+          set(pets.LOCKED_SPECIES) == {"gilt", "tidehound", "reefkeeper",
+                                       "zorb"},
           pets.LOCKED_SPECIES)
-    check("12 species total", len(pets.SPECIES_KEYS) == 12)
+    check("13 species total", len(pets.SPECIES_KEYS) == 13)
     check("art registry matches", set(pets._ART) == set(pets.SPECIES_KEYS))
     bad = []
     for key in ("gilt", "tidehound", "reefkeeper"):
@@ -150,9 +151,9 @@ def main():
     print("== silhouettes in gallery + API ==")
     r = c.get("/api/pets/species")
     d = r.get_json()
-    check("species API has 12", d["ok"] and len(d["species"]) == 12)
+    check("species API has 13", d["ok"] and len(d["species"]) == 13)
     locked = {s["key"]: s for s in d["species"] if s["locked"]}
-    check("3 locked in API", set(locked) == {"gilt", "tidehound", "reefkeeper"})
+    check("4 locked in API", set(locked) == {"gilt", "tidehound", "reefkeeper", "zorb"})
     g = locked["gilt"]
     check("locked entry hides name, shows condition",
           g["name"] == "???" and "Broadcast" in g["unlock_condition"], g)
@@ -289,6 +290,23 @@ def main():
         check("unknown bypass rejected", False)
     except ValueError:
         check("unknown bypass rejected", True)
+    # identity-locked species: no bypass exists, and a forged bypass row
+    # still cannot adopt
+    check("no bypass:zorb in catalog", "bypass:zorb" not in shop.catalog())
+    try:
+        shop.buy(db, fmG, "bypass:zorb")
+        check("bypass:zorb not purchasable", False)
+    except ValueError:
+        check("bypass:zorb not purchasable", True)
+    db._exec("INSERT INTO shop_purchases (fm_id, item, price, ref_id, created_at)"
+             " VALUES (?,?,?,?,?)",
+             (fmG, "bypass:zorb", 150, "bypass:zorb", 1))
+    try:
+        pets.adopt(db, fmG, "Whale", "zorb", "Sneaky")
+        check("forged bypass cannot adopt zorb", False)
+    except ValueError as e:
+        check("forged bypass cannot adopt zorb",
+              "bonded to" in str(e), str(e)[:60])
 
     print("== shop API ==")
     r = c.get("/api/shop/items")
@@ -348,10 +366,10 @@ def main():
     print("== rulebook docs ==")
     rules = pets.pet_rules()
     check("pet_rules has unlocks",
-          len(rules["unlocks"]["species"]) == 3 and
+          len(rules["unlocks"]["species"]) == 4 and
           all("condition" in s for s in rules["unlocks"]["species"]))
     check("pet_rules species carry locked flags",
-          sum(1 for s in rules["species"] if s["locked"]) == 3 and
+          sum(1 for s in rules["species"] if s["locked"]) == 4 and
           sum(1 for s in rules["species"] if not s["locked"]) == 9)
     check("pet_rules has shop section",
           rules["shop"]["name"] == "Signal Shop" and
