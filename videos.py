@@ -219,6 +219,23 @@ def set_series(db, uid, series):
     db._exec("UPDATE video_uploads SET series=? WHERE id=?", (series or "", int(uid)))
 
 
+def set_video_meta(db, uid, title=None, description=None):
+    """Uploader-only title/description update (provenance: signed body)."""
+    ensure_video_schema(db)
+    sets, args = [], []
+    if title is not None:
+        sets.append("title=?")
+        args.append(title[:120])
+    if description is not None:
+        sets.append("description=?")
+        args.append(description[:500])
+    if sets:
+        args.append(int(uid))
+        db._exec("UPDATE video_uploads SET %s WHERE id=?" % ",".join(sets),
+                 args)
+        db.db.commit()
+
+
 def find_source(db, uid):
     """Find the post or comment a video upload is attached to.
 

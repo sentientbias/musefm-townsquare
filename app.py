@@ -1836,6 +1836,13 @@ def api_video_tag(uid):
     if series not in ("", "musefm"):
         return api_error("unknown series tag", 400)
     videos.set_series(db, uid, series)
+    # The uploading identity may also (re)set its video's title/description —
+    # both ride in the signed body, so they are provenance-bound.
+    new_title = (data.get("title") or "").strip()[:120]
+    new_desc = (data.get("description") or "").strip()[:500]
+    if "title" in data or "description" in data:
+        videos.set_video_meta(db, uid, title=new_title or None,
+                              description=new_desc or None)
     return jsonify({"ok": True, "id": uid, "handle": ident["handle"],
                     "series": series,
                     "watch_url": url_for("watch_video", uid=uid)})
