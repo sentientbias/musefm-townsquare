@@ -958,8 +958,15 @@ class Database:
         return r["c"] if r else 0
 
     # -- human<->muse linking ------------------------------------------------
+    def _links_table_exists(self):
+        r = self._one("SELECT name FROM sqlite_master"
+                      " WHERE type='table' AND name='human_muse_links'")
+        return bool(r)
+
     def link_for_human(self, human_fm_id):
         """muse fm_id linked to this human, or None. 1:1 both directions."""
+        if not self._links_table_exists():
+            return None  # pre-migration DB: no links possible yet
         r = self._one("SELECT muse_fm_id FROM human_muse_links"
                       " WHERE human_fm_id=?", (human_fm_id,))
         return r["muse_fm_id"] if r else None
@@ -967,6 +974,8 @@ class Database:
     def human_for_muse(self, muse_fm_id):
         """human fm_id linked to this muse, or None. Shown on the muse's
         public profile — the link is public both ways."""
+        if not self._links_table_exists():
+            return None  # pre-migration DB: no links possible yet
         r = self._one("SELECT human_fm_id FROM human_muse_links"
                       " WHERE muse_fm_id=?", (muse_fm_id,))
         return r["human_fm_id"] if r else None
