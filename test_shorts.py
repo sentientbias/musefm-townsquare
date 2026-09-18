@@ -325,6 +325,69 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
                     headers=fresh_ip(), follow_redirects=False)
     check("form duration 0 -> 400", r.status_code == 400, str(r.status_code))
 
+    print("== anchored Shorts feed (?video=) ==")
+    priv_a, fm_a = register(client, "AnchorMuse")
+    anchor_ids = []
+    for _ in range(12):
+        r = post_video(client, priv_a, fm_a, make_mp4(200), duration="15")
+        assert r.status_code == 200, r.get_data(as_text=True)[:200]
+        anchor_ids.append(r.get_json()["id"])
+    oldest, newest = anchor_ids[0], anchor_ids[-1]
+    html = client.get("/shorts").get_data(as_text=True)
+    check("oldest falls outside initial 10-page",
+          'data-id="%d"' % oldest not in html)
+    html = client.get("/shorts?video=%d" % oldest).get_data(as_text=True)
+    check("anchor card included even outside page",
+          'data-id="%d"' % oldest in html)
+    check("anchor id passed to template", 'data-anchor="%d"' % oldest in html)
+    check("anchor scroll wiring present",
+          "scrollIntoView" in html and 'data-anchor=' in html)
+    html = client.get("/shorts?video=%d" % newest).get_data(as_text=True)
+    check("on-page anchor still anchors", 'data-anchor="%d"' % newest in html)
+    for bad in ["999999", "abc", "0", "-3", ""]:
+        html = client.get("/shorts?video=%s" % bad).get_data(as_text=True)
+        check("bad ?video=%r ignored" % bad, 'data-anchor=""' in html)
+    r = post_video(client, priv_a, fm_a, make_mp4(200), duration="600")
+    uid_long2 = r.get_json()["id"]
+    html = client.get("/shorts?video=%d" % uid_long2).get_data(as_text=True)
+    check("long-form video never anchors into shorts",
+          'data-anchor=""' in html and 'data-id="%d"' % uid_long2 not in html)
+    r = client.get("/api/shorts?limit=1")
+    it = r.get_json()["items"][0]
+    check("_short_item carries feed_url",
+          it.get("feed_url") == "/shorts?video=%d" % it["id"],
+          str(it.get("feed_url")))
+    html = client.get("/").get_data(as_text=True)
+    check("home shorts open the anchored feed",
+          "/shorts?video=" in html and 'class="vfeed-card"' in html)
+
+    print("== anchored Muse FM shorts (?video=) ==")
+    priv_b, fm_b = register(client, "FmAnchorA")
+    priv_c, fm_c = register(client, "FmAnchorB")
+    fm_ids = []
+    for i in range(21):
+        pp, ff = (priv_b, fm_b) if i < 11 else (priv_c, fm_c)
+        r = post_video(client, pp, ff, make_mp4(200), duration="20")
+        assert r.status_code == 200, r.get_data(as_text=True)[:200]
+        uid = r.get_json()["id"]
+        videos.set_series(appmod.db, uid, "musefm")
+        fm_ids.append(uid)
+    fm_oldest = fm_ids[0]
+    html = client.get("/musefm/shorts").get_data(as_text=True)
+    check("oldest musefm clip outside initial 20-page",
+          'data-id="video-%d"' % fm_oldest not in html)
+    html = client.get("/musefm/shorts?video=%d" % fm_oldest).get_data(as_text=True)
+    check("musefm anchor card included outside page",
+          'data-id="video-%d"' % fm_oldest in html)
+    check("musefm anchor id passed to template",
+          'data-anchor="%d"' % fm_oldest in html)
+    html = client.get("/musefm/shorts?video=%d" % oldest).get_data(as_text=True)
+    check("non-musefm clip not anchored into musefm feed",
+          'data-anchor=""' in html)
+    html = client.get("/musefm").get_data(as_text=True)
+    check("musefm hub strip opens anchored feed",
+          "/musefm/shorts?video=" in html)
+
     print()
     print(f"{len(PASS)} passed, {len(FAIL)} failed")
     sys.exit(1 if FAIL else 0)

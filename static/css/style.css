@@ -1228,6 +1228,13 @@ body.shorts-mode .wrap { max-width: none; margin: 0; padding: 0; }
   background: rgba(10,30,45,.55); border-color: rgba(255,255,255,.4); color: #fff;
   backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
 }
+/* shorts overlay: reaction control sits smaller and less obtrusive than the
+   default widget (compact variant is the base; this trims it further). */
+.short-rxn .rxn-row { gap: 6px; }
+.short-rxn .rxn-like { padding: 5px 10px; font-size: 12px; gap: 5px; }
+.short-rxn .rxn-like-emoji { font-size: 14px; }
+.short-rxn .rxn-count { padding: 5px 8px; font-size: 12px; gap: 4px; }
+.short-rxn .rxn-top-emoji { font-size: 13px; }
 
 /* photos */
 .photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }

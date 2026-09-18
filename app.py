@@ -580,6 +580,7 @@ def musefm_shorts():
             "description": u["description"] or "",
             "video_url": url_for("serve_video", uid=u["id"]),
             "watch_url": url_for("watch_video", uid=u["id"]),
+            "feed_url": "/musefm/shorts?video=%d" % u["id"],
             "duration_secs": u["duration_secs"],
             "ai_generated": bool(u["ai_generated"]),
             "created_at": u["created_at"],
@@ -609,8 +610,32 @@ def musefm_shorts():
         db, [it["target"] for it in items], reactor)
     for it in items:
         it["fb"] = sums[it["target"]]
+    # ?video=<id> deep-link: include the anchored clip even when it falls
+    # outside the initial page (musefm-tagged shorts only here).
+    anchor_id = None
+    au = _feed_anchor_video(request.args.get("video"), require_series="musefm")
+    if au:
+        anchor_id = au["id"]
+        if not any(it["kind"] == "video" and it["id"] == au["id"]
+                   for it in items):
+            anchor_item = {
+                "kind": "video", "id": au["id"], "handle": au["handle"],
+                "title": videos.clean_title(au["title"], au["filename"]),
+                "series": au.get("series") or "",
+                "description": au["description"] or "",
+                "video_url": url_for("serve_video", uid=au["id"]),
+                "watch_url": url_for("watch_video", uid=au["id"]),
+                "feed_url": "/musefm/shorts?video=%d" % au["id"],
+                "duration_secs": au["duration_secs"],
+                "ai_generated": bool(au["ai_generated"]),
+                "created_at": au["created_at"],
+                "target": ("video", au["id"]),
+            }
+            anchor_item["fb"] = fb_reactions.fb_reaction_summaries(
+                db, [("video", au["id"])], reactor)[("video", au["id"])]
+            items.insert(0, anchor_item)
     return render_template("musefm_shorts.html", items=items,
-                           handle=_musefm_handle())
+                           anchor_id=anchor_id, handle=_musefm_handle())
 
 
 @app.route("/musefm/photos")
@@ -1956,6 +1981,7 @@ def _short_item(u):
         "id": u["id"],
         "video_url": url_for("serve_video", uid=u["id"]),
         "watch_url": url_for("watch_video", uid=u["id"]),
+        "feed_url": "/shorts?video=%d" % u["id"],
         "thread_url": thread_url,
         "handle": u["handle"],
         "title": title,
@@ -2004,12 +2030,48 @@ def api_shorts():
                     "next_before": items[-1]["id"] if items else None})
 
 
+def _feed_anchor_video(param, require_series=None):
+    """Parse a ?video=<id> deep-link param for the Shorts feeds.
+
+    Returns the upload dict when the id names a real short-eligible video
+    (NULL or <180s duration; plus the required series tag when given),
+    else None. Never raises on bad input.
+    """
+    try:
+        vid = int(param)
+    except (TypeError, ValueError):
+        return None
+    if vid <= 0:
+        return None
+    videos._ensure_series_col(db)
+    u = videos.get_video_upload(db, vid)
+    if not u:
+        return None
+    dur = u.get("duration_secs")
+    if dur is not None and dur >= videos.SHORTS_MAX_SECS:
+        return None
+    if require_series and (u.get("series") or "") != require_series:
+        return None
+    return u
+
+
 @app.route("/shorts")
 def shorts_page():
-    """TikTok-style vertical feed of short videos."""
+    """TikTok-style vertical feed of short videos.
+
+    ?video=<id> deep-links one clip: the feed opens scrolled to that
+    exact card, which is included even when it falls outside the
+    initial page. Bad ids are ignored silently.
+    """
     items = [_short_item(u) for u in videos.list_shorts(db, limit=10)]
+    anchor_id = None
+    au = _feed_anchor_video(request.args.get("video"))
+    if au:
+        anchor_id = au["id"]
+        if not any(it["id"] == au["id"] for it in items):
+            items.insert(0, _short_item(au))
     _attach_short_fb(items, _fb_web_reactor())
-    return render_template("shorts.html", items=items,
+    return render_template("shorts.html", items=items, anchor_id=anchor_id,
                            handle=_musefm_handle())
 
 

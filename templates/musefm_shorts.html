@@ -41,7 +41,7 @@
 {% endmacro %}
 
 {% block content %}
-<div class="shorts-feed" id="shorts-feed">
+<div class="shorts-feed" id="shorts-feed" data-anchor="{{ anchor_id or '' }}">
   {% for it in items %}{{ short_card(it) }}{% endfor %}
   {% if not items %}
   <div class="shorts-empty">
@@ -70,6 +70,14 @@
       else if (v) v.pause();
     });
   }, { root: feed, threshold: [0, 0.6, 1] });
+  // ?video= deep-link: jump to the anchored card before autoplay
+  // observation settles, so the right clip plays instead of the first.
+  (function () {
+    var a = feed.getAttribute('data-anchor');
+    if (!a) return;
+    var t = feed.querySelector('.short-item[data-id="video-' + a + '"]');
+    if (t) t.scrollIntoView({ block: 'start' });
+  })();
   feed.querySelectorAll('.short-item').forEach(card => {
     const v = card.querySelector('video');
     const muteBtn = card.querySelector('.short-mute');

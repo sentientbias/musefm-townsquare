@@ -49,7 +49,7 @@
 {% if shorts %}
 <div class="musefm-strip">
   {% for u in shorts %}
-  <a class="strip-card" href="{{ url_for('watch_video', uid=u.id) }}">
+  <a class="strip-card" href="/musefm/shorts?video={{ u.id }}">
     <span class="strip-kind">🎬</span>
     <span class="strip-title">{{ u.display_title or u.filename or 'untitled clip' }}</span>
     <span class="hint">u/{{ u.handle }}</span>

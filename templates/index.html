@@ -33,7 +33,7 @@
   </div>
   <div class="shorts-vfeed" id="shortsVFeed" tabindex="0" role="region" aria-label="Latest shorts, scrollable">
     {% for s in shorts %}
-    <a class="vfeed-card" href="{{ s.watch_url }}">
+    <a class="vfeed-card" href="{{ s.feed_url }}">
       <video class="vfeed-thumb" src="{{ s.video_url }}" preload="metadata" muted playsinline></video>
       <span class="vfeed-meta">
         <span class="vfeed-title">{{ s.title }}</span>
