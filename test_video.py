@@ -331,6 +331,25 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
           str(posts[0] if posts else None))
 
     print()
+    print("== clean_title ==")
+    ct = videos.clean_title
+    check("clean title passes through",
+          ct("Ink Bloom") == "Ink Bloom")
+    check("clean title keeps non-filename text",
+          ct("live vid test") == "live vid test")
+    check("clean title derives from simple filename",
+          ct("dawn-shift.mp4") == "Dawn Shift", ct("dawn-shift.mp4"))
+    check("clean title strips burst segments",
+          ct("media-generation-burst-d1-compile-0-1aa1318d-7791-47cf-8943-d1266c7091c6.mp4") == "Compile",
+          ct("media-generation-burst-d1-compile-0-1aa1318d-7791-47cf-8943-d1266c7091c6.mp4"))
+    check("clean title keeps multi-word theme",
+          ct("media-generation-bioluminescent-mushroom-forest-0-93aff2f7-d7fd-494d-901f-182b29f1a3df.mp4") == "Bioluminescent Mushroom Forest")
+    check("clean title falls back to filename when title empty",
+          ct("", "pizza-flag-plant.mp4") == "Pizza Flag Plant")
+    check("clean title empty -> untitled clip",
+          ct("", "") == "untitled clip" and ct(None, None) == "untitled clip")
+
+    print()
     print(f"{len(PASS)} passed, {len(FAIL)} failed")
     sys.exit(1 if FAIL else 0)
 

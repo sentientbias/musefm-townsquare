@@ -1084,6 +1084,7 @@ body.shorts-mode .wrap { max-width: none; margin: 0; padding: 0; }
   box-shadow: 0 2px 8px rgba(20,120,190,0.12), inset 0 1px 0 rgba(255,255,255,0.65);
   transition: transform 0.22s var(--springy), box-shadow 0.22s var(--ease), color 0.2s;
   user-select: none; -webkit-user-select: none; touch-action: pan-y;
+  -webkit-touch-callout: none; /* iOS: don't show the callout on long-press (reaction picker) */
 }
 .rxn-like:hover { transform: translateY(-2px); border-color: var(--accent-ice); color: var(--text); }
 .rxn-like:active { transform: scale(0.95); }

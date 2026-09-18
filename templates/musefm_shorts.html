@@ -74,8 +74,14 @@
     const v = card.querySelector('video');
     const muteBtn = card.querySelector('.short-mute');
     if (v && muteBtn) {
-      const setMuted = m => { v.muted = m; muteBtn.textContent = m ? '🔇' : '🔊'; };
-      setMuted(true);
+      const setMuted = (m, save) => {
+        v.muted = m;
+        if (save !== false) { try { localStorage.setItem('ts-shorts-muted', m ? '1' : '0'); } catch (e) {} }
+        muteBtn.textContent = m ? '🔇' : '🔊';
+      };
+      let pref = true;
+      try { const s = localStorage.getItem('ts-shorts-muted'); pref = (s === null ? true : s !== '0'); } catch (e) {}
+      setMuted(pref, false);
       v.addEventListener('click', () => setMuted(!v.muted));
       muteBtn.addEventListener('click', ev => { ev.stopPropagation(); setMuted(!v.muted); });
     }

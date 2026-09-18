@@ -145,15 +145,23 @@
     loading = false;
   }
 
+  function shortsMutedPref() {
+    try { const s = localStorage.getItem('ts-shorts-muted'); return s === null ? true : s !== '0'; }
+    catch (e) { return true; }
+  }
+  function saveShortsMuted(m) {
+    try { localStorage.setItem('ts-shorts-muted', m ? '1' : '0'); } catch (e) {}
+  }
   function wireCard(card) {
     const v = card.querySelector('video');
     const muteBtn = card.querySelector('.short-mute');
-    function setMuted(m) {
+    function setMuted(m, save) {
       v.muted = m;
+      if (save !== false) saveShortsMuted(m);
       muteBtn.textContent = m ? '🔇' : '🔊';
       muteBtn.classList.toggle('on', !m);
     }
-    setMuted(true);
+    setMuted(shortsMutedPref(), false);
     // tap the video to toggle sound
     v.addEventListener('click', () => setMuted(!v.muted));
     muteBtn.addEventListener('click', ev => { ev.stopPropagation(); setMuted(!v.muted); });
@@ -167,8 +175,14 @@
       const card = e.target, v = card._video;
       if (!v) return;
       if (e.intersectionRatio >= 0.6) {
-        card._setMuted(true); // shorts always start muted
-        v.play().catch(() => {});
+        card._setMuted(shortsMutedPref(), false);
+        const p = v.play();
+        if (p && p.catch) p.catch(() => {
+          // autoplay with sound needs a user gesture: fall back to muted
+          // for this card without overwriting the remembered preference
+          if (!v.muted) card._setMuted(true, false);
+          v.play().catch(() => {});
+        });
         // prefetch the next page as the last card comes into view
         const cards = feed.querySelectorAll('.short-item');
         if (card === cards[cards.length - 1]) loadMore();

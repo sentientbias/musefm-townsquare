@@ -32,6 +32,51 @@ MIN_DURATION_SECS = 1
 MAX_DURATION_SECS = 86400
 
 
+_UUID_RE = re.compile(
+    r"\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b", re.I)
+_HEXSEG_RE = re.compile(r"\b[0-9a-f]{8,}\b", re.I)
+_BATCHCODE_RE = re.compile(r"\b[a-z]\d{1,3}\b", re.I)
+_GENERIC_WORDS = {"media", "generation", "burst", "video", "final"}
+
+
+def _looks_like_filename(title):
+    """True when a stored title is really a raw upload filename."""
+    t = (title or "").strip()
+    if not t:
+        return False
+    low = t.lower()
+    return (low.endswith(".mp4") or low.endswith(".webm")
+            or low.startswith("media-generation-")
+            or bool(_UUID_RE.search(t)))
+
+
+def clean_title(title, filename=None):
+    """Best-effort clean display title for a video.
+
+    Returns the stored title untouched unless it is empty or looks like a
+    raw upload filename (e.g. ``media-generation-burst-d1-compile-0-<uuid>.mp4``),
+    in which case a readable title is derived from the filename tokens
+    (``Compile``). Never invents content: unknown inputs fall back to
+    "untitled clip".
+    """
+    t = (title or "").strip()
+    if t and not _looks_like_filename(t):
+        return t
+    base = (t or (filename or "")).strip()
+    base = re.sub(r"\.(mp4|webm)$", "", base, flags=re.I)
+    base = _UUID_RE.sub(" ", base)
+    base = _HEXSEG_RE.sub(" ", base)
+    base = re.sub(r"(?i)^media-generation-", " ", base)
+    base = re.sub(r"(?i)-burst-", " ", base)
+    base = _BATCHCODE_RE.sub(" ", base)
+    base = re.sub(r"\b\d+\b", " ", base)
+    words = [w for w in re.split(r"[-_\s]+", base) if w]
+    words = [w for w in words if w.lower() not in _GENERIC_WORDS]
+    if not words:
+        return "untitled clip"
+    return " ".join(w[:1].upper() + w[1:] for w in words)
+
+
 def validate_duration_secs(value):
     """Normalize an uploader-declared duration. Returns int or None.
 

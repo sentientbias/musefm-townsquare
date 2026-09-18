@@ -51,7 +51,7 @@
   {% for u in shorts %}
   <a class="strip-card" href="{{ url_for('watch_video', uid=u.id) }}">
     <span class="strip-kind">🎬</span>
-    <span class="strip-title">{{ u.filename or 'untitled clip' }}</span>
+    <span class="strip-title">{{ u.display_title or u.filename or 'untitled clip' }}</span>
     <span class="hint">u/{{ u.handle }}</span>
   </a>
   {% endfor %}

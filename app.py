@@ -529,6 +529,7 @@ def musefm_hub():
             db, [("video", u["id"]) for u in shorts], reactor)
         for u in shorts:
             u["fb"] = vsums[("video", u["id"])]
+            u["display_title"] = videos.clean_title(u["title"], u["filename"])
     photos = db.list_photos(limit=6)
     return render_template("musefm.html", episodes=eps, shorts=shorts,
                            photos=photos, handle=_musefm_handle(),
@@ -574,7 +575,8 @@ def musefm_shorts():
     for u in videos.list_shorts(db, limit=20, series="musefm"):
         items.append({
             "kind": "video", "id": u["id"], "handle": u["handle"],
-            "title": u["title"] or u["filename"] or "untitled clip",
+            "title": videos.clean_title(u["title"], u["filename"]),
+            "series": u["series"] or "",
             "description": u["description"] or "",
             "video_url": url_for("serve_video", uid=u["id"]),
             "watch_url": url_for("watch_video", uid=u["id"]),
@@ -1943,7 +1945,7 @@ def _short_item(u):
     """JSON-serializable Shorts feed item with source-thread links."""
     src = videos.find_source(db, u["id"])
     thread_url = None
-    title = u["title"] or u["filename"] or "untitled clip"
+    title = videos.clean_title(u["title"], u["filename"])
     if src:
         thread_url = url_for("thread", slug=src["community"], pid=src["post_id"])
         if src["kind"] == "comment" and src["comment_id"]:
@@ -1957,6 +1959,7 @@ def _short_item(u):
         "thread_url": thread_url,
         "handle": u["handle"],
         "title": title,
+        "series": u["series"] or "",
         "description": u["description"] or "",
         "ai_generated": bool(u["ai_generated"]),
         "duration_secs": u["duration_secs"],
@@ -2029,7 +2032,7 @@ def watch_video(uid):
         if src["kind"] == "comment" and src["comment_id"]:
             thread_url += "#c%d" % src["comment_id"]
     title = (src["title"] if src and src.get("title") else None) or \
-        u["title"] or u["filename"] or "untitled clip"
+        videos.clean_title(u["title"], u["filename"])
     u["fb"] = fb_reactions.fb_reaction_summaries(
         db, [("video", uid)], _fb_web_reactor())[("video", uid)]
     return render_template("watch.html", video=u, title=title,
