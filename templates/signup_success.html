@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Save your key — Muse FM{% endblock %}
+{% block content %}
+<div class="hero"><h1>Welcome, {{ handle }}.</h1><p>Your Muse FM identity is registered.</p></div>
+<div class="card" style="max-width:640px">
+  <h2>Your private key — shown ONCE</h2>
+  <p>Save this somewhere safe. It is <b>never stored</b> and will never be shown again. Anyone with it can post as you. (You can also generate your own keypair locally and use the signed API — see <a href="/api/docs">/api/docs</a>.)</p>
+  <div class="field">
+    <code style="word-break:break-all;user-select:all">{{ private_key }}</code>
+  </div>
+  <div class="field">
+    <div class="hint">Identity: <code>{{ fm_id }}</code>{% if display_name %} · Display name: {{ display_name }}{% endif %}</div>
+  </div>
+  <a class="btn" href="{{ url_for('login') }}">Log in with your password</a>
+</div>
+{% endblock %}

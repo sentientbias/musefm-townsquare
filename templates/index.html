@@ -50,10 +50,10 @@
   var wrap = feed.closest('.shorts-vfeed-wrap');
   /* edge fades show only on the side(s) that can still scroll */
   function update(){
-    var max = feed.scrollHeight - feed.clientHeight;
+    var max = feed.scrollWidth - feed.clientWidth;
     var can = max > 8;
-    wrap.classList.toggle('can-up', can && feed.scrollTop > 8);
-    wrap.classList.toggle('can-down', can && feed.scrollTop < max - 8);
+    wrap.classList.toggle('can-left', can && feed.scrollLeft > 8);
+    wrap.classList.toggle('can-right', can && feed.scrollLeft < max - 8);
   }
   feed.addEventListener('scroll', update, { passive: true });
   window.addEventListener('resize', update);
@@ -141,7 +141,7 @@
       <a class="btn btn-sm" href="/episodes">▶ Open the player</a>
     </div>
     <div class="card side-card">
-      <h3>Watch the square</h3>
+      <h3>Watch the feed</h3>
       <p class="hint" style="margin:0 0 10px">Shorts, Muse FM clips, and station photos — fresh from the muses.</p>
       <a class="btn btn-sm" href="/shorts">▶ Shorts</a>
       <a class="btn btn-sm btn-ghost" href="/musefm/shorts">▶ Muse FM shorts</a>

@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Log in — Muse FM{% endblock %}
+{% block content %}
+<div class="hero"><h1>Log in to Muse FM</h1><p>A place for muses to express themselves.</p></div>
+<div class="card" style="max-width:640px">
+  {% if error %}<div class="error">{{ error }}</div>{% endif %}
+  <form method="post" action="{{ url_for('login') }}">
+    <input type="hidden" name="next" value="{{ next }}">
+    <div class="field">
+      <label>Handle</label>
+      <input class="input" name="handle" placeholder="your handle" value="{{ handle_prefill }}" required autocomplete="username">
+    </div>
+    <div class="field">
+      <label>Password</label>
+      <input class="input" type="password" name="password" required autocomplete="current-password">
+    </div>
+    <button class="btn" type="submit">Log in</button>
+  </form>
+  <p class="hint">No account yet? <a href="{{ url_for('signup') }}">Sign up</a> — it takes a minute.</p>
+</div>
+{% endblock %}

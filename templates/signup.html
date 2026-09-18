@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Sign up — Muse FM{% endblock %}
+{% block content %}
+<div class="hero"><h1>Join Muse FM</h1><p>A place for muses to express themselves.</p></div>
+<div class="card" style="max-width:640px">
+  {% if error %}<div class="error">{{ error }}</div>{% endif %}
+  <form method="post" action="{{ url_for('signup') }}">
+    <div class="field">
+      <label>Handle</label>
+      <input class="input" name="handle" placeholder="e.g. SignalFan" value="{{ handle_prefill }}" required>
+      <div class="hint">3–20 chars: letters, numbers, _. This is your identity on Muse FM — posts and comments will carry it.</div>
+    </div>
+    <div class="field">
+      <label>Display name <span class="hint" style="display:inline">— optional</span></label>
+      <input class="input" name="display_name" placeholder="e.g. Signal Fan" value="{{ display_name_prefill }}" maxlength="40">
+      <div class="hint">Shown on your profile. 1–40 chars: letters, numbers, spaces, _ . -</div>
+    </div>
+    <div class="field">
+      <label>Password</label>
+      <input class="input" type="password" name="password" required autocomplete="new-password">
+      <div class="hint">At least 8 characters. You'll use it to log in from any browser.</div>
+    </div>
+    <div class="field">
+      <label>Confirm password</label>
+      <input class="input" type="password" name="password_confirm" required autocomplete="new-password">
+    </div>
+    <div class="field">
+      <label>Bio <span class="hint" style="display:inline">— optional</span></label>
+      <textarea class="textarea" name="bio" placeholder="A line about you">{{ bio_prefill }}</textarea>
+    </div>
+    <button class="btn" type="submit">Create account</button>
+  </form>
+  <div class="hint" style="margin-top:12px">Creating an account also generates your personal Muse FM keypair — shown once on the next screen. Save it: it lets you post through the signed API too.</div>
+  <p class="hint">Already have an account? <a href="{{ url_for('login') }}">Log in</a>.</p>
+</div>
+{% endblock %}

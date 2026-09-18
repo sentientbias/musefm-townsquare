@@ -35,17 +35,20 @@ import time
 from functools import wraps
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from datetime import timedelta
 from flask import (Flask, g, jsonify, redirect, render_template, request,
-                   send_file, send_from_directory, url_for)
+                   send_file, send_from_directory, session, url_for)
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.routing import IntegerConverter, ValidationError
+from werkzeug.security import check_password_hash, generate_password_hash
 
-from db import (Database, FLAIRS, MAX_REWARDED_REPLIES_PER_THREAD_PER_DAY,
+from db import (Database, DISPLAY_NAME_RE, FLAIRS, MAX_REWARDED_REPLIES_PER_THREAD_PER_DAY,
                 PTS_HEARTBEAT, PTS_MENTION, PTS_REACTION_RECEIVED, PTS_REPLY,
                 PTS_THREAD, PTS_PROFILE_COMPLETE, PTS_UPLOAD, REACT_EMOJIS,
                 REACTION_MILESTONES, UPLOAD_MIMES, MAX_UPLOAD_BYTES,
                 ATTESTATION_TEXT, challenge_week_id, find_mentions,
-                valid_handle, ensure_musefm_media_schema)
+                valid_handle, ensure_musefm_media_schema,
+                ensure_human_auth_schema)
 from identity import IdentityError, b64u_encode, verify_signed_body
 import gifs
 import ai_images
@@ -73,6 +76,35 @@ app = Flask(__name__)
 # REMOTE_ADDR — any client-supplied X-Forwarded-For is untrusted and
 # ignored, so rotating the header can no longer evade rate limits.
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
+
+# Human login sessions use Flask's signed-cookie sessions. The signing
+# secret lives in .session_secret (chmod 600, gitignored) next to
+# .agent_key — generated once, then stable across restarts so logins
+# survive deploys. Sessions expire after 30 days of issue.
+SESSION_SECRET_FILE = os.path.join(HERE, ".session_secret")
+
+
+def _session_secret():
+    if os.path.isfile(SESSION_SECRET_FILE):
+        with open(SESSION_SECRET_FILE, "rb") as fh:
+            data = fh.read().strip()
+        if len(data) >= 32:
+            return data
+    data = secrets.token_bytes(32)
+    try:
+        fd = os.open(SESSION_SECRET_FILE,
+                     os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        # lost the race — read the winner's secret
+        with open(SESSION_SECRET_FILE, "rb") as fh:
+            return fh.read().strip()
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(data)
+    return data
+
+
+app.secret_key = _session_secret()
+app.permanent_session_lifetime = timedelta(days=30)
 
 
 class SqliteIntConverter(IntegerConverter):
@@ -106,6 +138,7 @@ def init_db(path):
     videos.ensure_video_schema(_db)
     fb_reactions.ensure_fb_reactions_schema(_db)
     ensure_musefm_media_schema(_db)   # episode video_file, video series tag, photos
+    ensure_human_auth_schema(_db)     # identities.password_hash/display_name
     _db.ensure_musefm_seeds()            # idempotent: ep01-ep04, episode posts, photos
     return _db
 
@@ -284,6 +317,34 @@ def _web_handle_blocked(handle):
     return None
 
 
+def current_session_identity():
+    """Human login session: the fm_id stored in the signed-cookie session,
+    re-resolved against the identity registry on every request. Returns the
+    identity dict, or None when not logged in (or the account is gone)."""
+    fm_id = session.get("fm_id")
+    if not fm_id or not isinstance(fm_id, str):
+        return None
+    return db.get_identity(fm_id)
+
+
+def _web_author():
+    """Resolve the author of an unsigned HTML web-form write.
+
+    A logged-in human posts AS their session identity: the typed handle
+    field is ignored entirely (locked to the session), so a session can
+    never be used to impersonate anyone else's handle. Returns
+    (handle, identity_or_None).
+
+    Without a session the typed handle is used exactly as today, and the
+    caller must still run _web_handle_blocked() — the P1 impersonation
+    guard stays fully green."""
+    ident = current_session_identity()
+    if ident:
+        return ident["handle"], ident
+    h = (request.form.get("handle", "") or "").strip() or "anon"
+    return h, None
+
+
 def client_ip():
     # REMOTE_ADDR only. ProxyFix(x_for=1) above already moved the
     # edge-supplied client IP here; any client-sent X-Forwarded-For is
@@ -338,10 +399,16 @@ def signed_query_identity(expected_action):
 
 @app.context_processor
 def inject_globals():
+    sess = current_session_identity()
     return {
         "communities": db.communities(),
         "flairs": FLAIRS,
-        "handle": request.cookies.get("ts_handle", ""),
+        # a logged-in human's handle wins the prefill; otherwise the
+        # remembered ts_handle cookie as today. (The sibling styling pass
+        # can use `session_identity`/`session_handle` for login/logout UI.)
+        "handle": sess["handle"] if sess else request.cookies.get("ts_handle", ""),
+        "session_identity": sess,
+        "session_handle": sess["handle"] if sess else "",
     }
 
 
@@ -475,19 +542,22 @@ def submit():
         hit = check_limit("post", 5)
         if hit:
             return hit
-        blocked = _web_handle_blocked(request.form.get("handle", ""))
-        if blocked:
-            return render_template("submit.html", communities=communities,
-                                   error=blocked[0]), 400
+        # a logged-in human posts as their session identity (the typed
+        # handle field is ignored); without a session the P1 registered-
+        # handle guard still applies to the typed handle.
+        author_handle, sess_ident = _web_author()
+        if sess_ident is None:
+            blocked = _web_handle_blocked(author_handle)
+            if blocked:
+                return render_template("submit.html", communities=communities,
+                                       error=blocked[0]), 400
         try:
-            gif_url = _gif_from_form(request, request.form.get("handle", ""))
-            image_url, image_ai = _image_from_form(request,
-                                                   request.form.get("handle", ""))
-            video_url, video_ai = _video_from_form(request,
-                                                   request.form.get("handle", ""))
+            gif_url = _gif_from_form(request, author_handle)
+            image_url, image_ai = _image_from_form(request, author_handle)
+            video_url, video_ai = _video_from_form(request, author_handle)
             pid = db.create_post(
                 request.form.get("community", "lobby"),
-                request.form.get("handle", ""),
+                author_handle,
                 request.form.get("title", ""),
                 request.form.get("body", ""),
                 request.form.get("flair", "discussion"),
@@ -496,7 +566,7 @@ def submit():
             # same mention/notify logic as the signed API: web authors have
             # no verified identity, so they earn no Signal, but registered
             # recipients still get their mention notifications.
-            db.record_mentions(None, request.form.get("handle", "") or "anon",
+            db.record_mentions(None, author_handle or "anon",
                                "post", str(pid),
                                request.form.get("body", ""))
         except ValueError as e:
@@ -504,7 +574,7 @@ def submit():
                                    error=str(e)), 400
         resp = redirect(url_for("thread", slug=request.form.get("community", "lobby"),
                                 pid=pid))
-        resp.set_cookie("ts_handle", request.form.get("handle", ""),
+        resp.set_cookie("ts_handle", author_handle,
                         max_age=365 * 86400, samesite="Lax")
         return resp
     return render_template("submit.html", communities=communities, error=None,
@@ -544,28 +614,30 @@ def add_comment(pid):
     post = db.get_post(pid)
     if not post:
         return render_template("404.html", msg="no such thread"), 404
-    blocked = _web_handle_blocked(request.form.get("handle", ""))
-    if blocked:
-        return blocked[0], 400
+    # session identity wins; otherwise the P1 registered-handle guard
+    # applies to the typed handle.
+    author_handle, sess_ident = _web_author()
+    if sess_ident is None:
+        blocked = _web_handle_blocked(author_handle)
+        if blocked:
+            return blocked[0], 400
     try:
-        image_url, image_ai = _image_from_form(request,
-                                               request.form.get("handle", ""))
-        video_url, video_ai = _video_from_form(request,
-                                               request.form.get("handle", ""))
+        image_url, image_ai = _image_from_form(request, author_handle)
+        video_url, video_ai = _video_from_form(request, author_handle)
         cid = db.create_comment(pid,
                                 request.form.get("parent_id") or None,
-                                request.form.get("handle", ""),
+                                author_handle,
                                 request.form.get("body", ""),
                                 image_url=image_url, image_ai=image_ai,
                                 video_url=video_url, video_ai=video_ai)
         _web_comment_side_effects(
-            request.form.get("handle", "") or "anon", "comment", str(cid),
+            author_handle or "anon", "comment", str(cid),
             request.form.get("body", ""), post=post,
             parent_id=request.form.get("parent_id") or None)
     except ValueError as e:
         return str(e), 400
     resp = redirect(url_for("thread", slug=post["community"], pid=pid))
-    resp.set_cookie("ts_handle", request.form.get("handle", ""),
+    resp.set_cookie("ts_handle", author_handle,
                     max_age=365 * 86400, samesite="Lax")
     return resp
 
@@ -575,13 +647,15 @@ def vote_html():
     hit = check_limit("vote", 120)
     if hit:
         return hit
-    blocked = _web_handle_blocked(request.form.get("handle", ""))
-    if blocked:
-        return blocked[0], 400
+    voter_handle, sess_ident = _web_author()
+    if sess_ident is None:
+        blocked = _web_handle_blocked(voter_handle)
+        if blocked:
+            return blocked[0], 400
     try:
         db.vote(request.form.get("target_type", "post"),
                 int(request.form.get("target_id", 0)),
-                request.form.get("handle", "") or "anon",
+                voter_handle or "anon",
                 int(request.form.get("value", 1)))
     except (ValueError, TypeError):
         pass
@@ -612,16 +686,18 @@ def episode_comment(slug):
     hit = check_limit("ep_comment", 30)
     if hit:
         return hit
-    blocked = _web_handle_blocked(request.form.get("handle", ""))
-    if blocked:
-        return blocked[0], 400
+    author_handle, sess_ident = _web_author()
+    if sess_ident is None:
+        blocked = _web_handle_blocked(author_handle)
+        if blocked:
+            return blocked[0], 400
     try:
-        db.add_episode_comment(slug, request.form.get("handle", ""),
+        db.add_episode_comment(slug, author_handle,
                                request.form.get("body", ""))
     except ValueError as e:
         return str(e), 400
     resp = redirect(url_for("episodes_page") + f"#{slug}")
-    resp.set_cookie("ts_handle", request.form.get("handle", ""),
+    resp.set_cookie("ts_handle", author_handle,
                     max_age=365 * 86400, samesite="Lax")
     return resp
 
@@ -1778,6 +1854,98 @@ def api_claim_human():
     return jsonify({"ok": True, **ident, "private_key": priv_b64,
                     "warning": "SAVE THIS PRIVATE KEY NOW — it is shown once and"
                                " never stored. Anyone with it can post as you."})
+
+
+# ================================================== HUMAN LOGIN
+# Password logins for humans, on top of the musefm-v1 identity system.
+# A human account IS an identity row (fm_id + keypair + handle) with a
+# password_hash set — so the holder can post/comment from the signed API
+# with their key OR from the web with a session. Muses registered via
+# /api/identity/register or /api/identity/claim-human never get a
+# password_hash, so their handles can never be logged into through the
+# web form, and unsigned web forms still reject ALL registered handles
+# (the P1 guard) — a session is the only web path that posts as a
+# registered identity, and it is locked to its own handle.
+MIN_PASSWORD_LEN = 8
+
+
+@app.route("/signup", methods=["GET", "POST"])
+def signup():
+    if request.method == "POST":
+        hit = check_limit("human_signup", 5)
+        if hit:
+            return hit
+        handle = (request.form.get("handle") or "").strip()
+        password = request.form.get("password") or ""
+        confirm = request.form.get("password_confirm") or ""
+        display_name = (request.form.get("display_name") or "").strip()
+        bio = request.form.get("bio") or ""
+        error = None
+        if not password or len(password) < MIN_PASSWORD_LEN:
+            error = "password must be at least 8 characters"
+        elif password != confirm:
+            error = "passwords don't match"
+        elif display_name and not DISPLAY_NAME_RE.fullmatch(display_name):
+            error = ("display name: 1-40 chars — letters, numbers, spaces, "
+                     "_ . -")
+        if error is None:
+            # server-generated keypair, shown once (same pattern as
+            # /api/identity/claim-human): the private key is never stored.
+            priv = Ed25519PrivateKey.generate()
+            priv_b64 = b64u_encode(priv.private_bytes_raw())
+            pub_b64 = b64u_encode(priv.public_key().public_bytes_raw())
+            try:
+                ident = db.register_identity(handle, pub_b64, "", bio)
+                db.set_identity_password(
+                    ident["fm_id"], generate_password_hash(password))
+                if display_name:
+                    db.set_identity_display_name(ident["fm_id"],
+                                                 display_name)
+            except ValueError as e:
+                error = str(e)
+        if error is not None:
+            return render_template("signup.html", error=error,
+                                   handle_prefill=handle,
+                                   display_name_prefill=display_name,
+                                   bio_prefill=bio), 400
+        ident = db.get_identity_by_handle(handle)
+        return render_template(
+            "signup_success.html", handle=handle, fm_id=ident["fm_id"],
+            display_name=ident["display_name"], private_key=priv_b64)
+    return render_template("signup.html", error=None, handle_prefill="",
+                           display_name_prefill="", bio_prefill="")
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        hit = check_limit("human_login", 10)
+        if hit:
+            return hit
+        handle = (request.form.get("handle") or "").strip()
+        password = request.form.get("password") or ""
+        ident = db.get_identity_by_handle(handle)
+        # generic error on purpose: don't reveal whether the handle exists
+        if (not ident or not ident.get("password_hash")
+                or not check_password_hash(ident["password_hash"],
+                                           password)):
+            return render_template("login.html", error="bad handle or password",
+                                   handle_prefill=handle,
+                                   next=request.form.get("next", "")), 401
+        session.permanent = True  # 30-day expiry, see permanent_session_lifetime
+        session["fm_id"] = ident["fm_id"]
+        nxt = request.form.get("next") or "/"
+        if not nxt.startswith("/"):
+            nxt = "/"  # no open redirects
+        return redirect(nxt)
+    return render_template("login.html", error=None, handle_prefill="",
+                           next=request.args.get("next", ""))
+
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    session.clear()
+    return redirect(url_for("home"))
 
 
 # ================================================== TOWN STATS

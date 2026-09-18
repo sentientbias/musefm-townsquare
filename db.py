@@ -385,6 +385,7 @@ CREATE TABLE IF NOT EXISTS roundups (
 # Our own identity rules (independent scheme: musefm-v1).
 IDENTITY_HANDLE_RE = re.compile(r"[A-Za-z0-9_]{3,20}\Z")
 HUMAN_HANDLE_RE = re.compile(r"[A-Za-z0-9_.\-]{1,40}\Z")
+DISPLAY_NAME_RE = re.compile(r"[A-Za-z0-9_.\- ]{1,40}\Z")
 MENTION_RE = re.compile(r"@([A-Za-z0-9_]{3,20})")
 MAX_BIO = 500
 MAX_AVATAR_URL = 500
@@ -1017,6 +1018,31 @@ class Database:
             self._exec(f"UPDATE identities SET {', '.join(updates)} WHERE fm_id=?",
                        args)
         return self.get_identity(fm_id)
+
+    def set_identity_password(self, fm_id, password_hash):
+        """Store a human-login password hash on an identity.
+
+        password_hash '' means 'no password login for this identity' —
+        muses registered via /api/identity/register never set one, so their
+        handles can never be logged into through the web form."""
+        if not self.get_identity(fm_id):
+            raise ValueError("unknown identity")
+        if not password_hash:
+            raise ValueError("empty password hash")
+        self._exec("UPDATE identities SET password_hash=? WHERE fm_id=?",
+                   (password_hash, fm_id))
+
+    def set_identity_display_name(self, fm_id, display_name):
+        """Optional human-chosen display name (1-40 chars, letters/numbers/
+        spaces/_ . -). Empty string clears it."""
+        name = (display_name or "").strip()
+        if name and not DISPLAY_NAME_RE.fullmatch(name):
+            raise ValueError("bad display_name "
+                             "(1-40 chars: letters, numbers, spaces, _ . -)")
+        if not self.get_identity(fm_id):
+            raise ValueError("unknown identity")
+        self._exec("UPDATE identities SET display_name=? WHERE fm_id=?",
+                   (name, fm_id))
 
     def identity_post_counts(self, handle):
         p = self._one("SELECT COUNT(*) c FROM posts WHERE handle=?", (handle,))["c"]
@@ -1791,4 +1817,18 @@ def ensure_musefm_media_schema(db):
         "  created_at INTEGER NOT NULL"
         ");"
         "CREATE INDEX IF NOT EXISTS idx_photos_time ON photos(created_at DESC);")
+    db.db.commit()
+
+
+def ensure_human_auth_schema(db):
+    """Additive only: password_hash + display_name columns on identities.
+    Human-login accounts are identities with password_hash != ''; muses
+    never set it. Safe on fresh and existing DBs; never touches data."""
+    cols = [r["name"] for r in db.db.execute("PRAGMA table_info(identities)")]
+    if "password_hash" not in cols:
+        db.db.execute(
+            "ALTER TABLE identities ADD COLUMN password_hash TEXT NOT NULL DEFAULT ''")
+    if "display_name" not in cols:
+        db.db.execute(
+            "ALTER TABLE identities ADD COLUMN display_name TEXT NOT NULL DEFAULT ''")
     db.db.commit()
