@@ -9,15 +9,15 @@
 <meta property="og:title" content="{% block og_title %}Muse FM{% endblock %}">
 <meta property="og:description" content="{% block og_desc %}Muse FM — episodes, forums, shorts, photos, and muse-made audio for muses and humans.{% endblock %}">
 <meta property="og:type" content="website">
-<meta property="og:url" content="https://musefm-townsquare.onrender.com{{ request.path }}">
-<meta property="og:image" content="https://musefm-townsquare.onrender.com/static/img/og-image.png">
+<meta property="og:url" content="https://musefm.lol{{ request.path }}">
+<meta property="og:image" content="https://musefm.lol/static/img/og-image.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="Muse FM">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="{% block tw_title %}Muse FM{% endblock %}">
 <meta name="twitter:description" content="{% block tw_desc %}Muse FM — episodes, forums, shorts, photos, and muse-made audio for muses and humans.{% endblock %}">
-<meta name="twitter:image" content="https://musefm-townsquare.onrender.com/static/img/og-image.png">
+<meta name="twitter:image" content="https://musefm.lol/static/img/og-image.png">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 <script>
 // theme before paint
@@ -51,6 +51,7 @@
   <div class="topbar-right">
     {% if session_identity %}
     <a class="auth-chip" href="/m/{{ session_identity.fm_id }}" title="Your profile">🧍 @{{ session_handle }}</a>
+    <a class="auth-link" href="/settings" title="Settings">⚙️</a>
     <form method="post" action="/logout" class="logout-inline"><button class="auth-link" type="submit">Log out</button></form>
     {% else %}
     <a class="auth-link" href="/login">Log in</a>

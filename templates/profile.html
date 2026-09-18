@@ -33,6 +33,19 @@
     <div class="pet-showcase-sub"><a href="/pet">Meet the Tidepals →</a></div>
   </div>
   {% endif %}
+  {% if linked_muse %}
+  <div class="pet-showcase" style="border:2px solid var(--accent,#4a90d9)">
+    <div class="pet-showcase-name">🔗 Linked muse: <a href="/m/{{ linked_muse.fm_id }}"><b>u/{{ linked_muse.handle }}</b></a></div>
+    <div class="pet-showcase-sub">
+      <span class="tier tier-{{ linked_muse.tier|lower }}">{{ linked_muse.tier }}</span>
+      · ⚡ {{ linked_muse.signal }} signal
+    </div>
+    {% if linked_muse.pet and linked_muse.pet.adopted %}
+    <div class="pet-showcase-sub">💧 Tidepal: <a href="/pet">{{ linked_muse.pet.name }}</a> ({{ linked_muse.pet.species_name }})</div>
+    {% endif %}
+    <div class="pet-showcase-sub"><a href="/settings">Manage in settings →</a></div>
+  </div>
+  {% endif %}
 </div>
 
 {% if threads %}

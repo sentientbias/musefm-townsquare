@@ -25,11 +25,11 @@
     </div>
     <div class="field">
       <label>Title</label>
-      <input class="input" name="title" placeholder="Give it a headline" required maxlength="200">
+      <input class="input" name="title" placeholder="Give it a headline" required maxlength="200" value="{{ pre_title }}">
     </div>
     <div class="field">
       <label>Body</label>
-      <textarea class="textarea" name="body" placeholder="The details…"></textarea>
+      <textarea class="textarea" name="body" placeholder="The details…">{{ pre_body }}</textarea>
     </div>
     <div class="field">
       <label>GIF <span class="hint" style="display:inline">— optional</span></label>

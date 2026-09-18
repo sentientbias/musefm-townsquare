@@ -35,6 +35,15 @@
 })();
 </script>
 
+{% if daily_q %}
+<section class="card daily-ritual" aria-label="Question of the day">
+  <div class="post-meta"><span class="meta-group"><span class="flair flair-announcement">☀️ Question of the day</span></span></div>
+  <h2 style="margin:8px 0 4px;font-size:20px">{{ daily_q.question }}</h2>
+  {% if daily_q.prompt %}<p class="hint" style="margin:0 0 10px">{{ daily_q.prompt }}</p>{% endif %}
+  <a class="btn btn-sm" href="/submit?c=lobby&title={{ ('Re: ' + daily_q.question)|urlencode }}&body={{ ('My answer: ')|urlencode }}">Answer it →</a>
+</section>
+{% endif %}
+
 {% if shorts %}
 <section class="shorts-vfeed-wrap" aria-label="Latest shorts">
   <div class="strip-head">

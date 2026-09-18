@@ -60,7 +60,8 @@
   const feed = document.getElementById('shorts-feed');
   if (!feed) return;
   let loading = false, exhausted = {{ 'true' if not items else 'false' }};
-  let cursor = {{ items[-1].id if items else 'null' }};
+  let page = 1;  // page 0 is rendered server-side; the deck order comes
+                 // from the visitor's session seed, so pages never repeat/skip
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
@@ -121,10 +122,10 @@
   }
 
   async function loadMore() {
-    if (loading || exhausted || cursor == null) return;
+    if (loading || exhausted) return;
     loading = true;
     try {
-      const r = await fetch('/api/shorts?limit=10&before=' + cursor);
+      const r = await fetch('/api/shorts?limit=10&page=' + page);
       const d = await r.json();
       const items = (d.ok && d.items) || [];
       const end = document.getElementById('shorts-end');
@@ -138,8 +139,8 @@
           el.querySelectorAll('.rxn').forEach(window.wireRxnWidget);
         }
       });
-      if (items.length) {
-        cursor = d.next_before;
+      if (items.length && d.next_page != null) {
+        page = d.next_page;
       } else {
         exhausted = true;
         end.hidden = false;

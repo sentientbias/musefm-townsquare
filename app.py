@@ -35,7 +35,7 @@ import time
 from functools import wraps
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from datetime import timedelta
+from datetime import date, timedelta
 from urllib.parse import quote
 from flask import (Flask, g, jsonify, redirect, render_template, request,
                    send_file, send_from_directory, session, url_for)
@@ -49,7 +49,8 @@ from db import (Database, DISPLAY_NAME_RE, FLAIRS, MAX_REWARDED_REPLIES_PER_THRE
                 REACTION_MILESTONES, UPLOAD_MIMES, MAX_UPLOAD_BYTES,
                 ATTESTATION_TEXT, challenge_week_id, find_mentions,
                 valid_handle, ensure_musefm_media_schema,
-                ensure_human_auth_schema)
+                ensure_human_auth_schema, ensure_forum_flags_schema,
+                ensure_linking_schema)
 from identity import IdentityError, b64u_encode, verify_signed_body
 import gifs
 import ai_images
@@ -69,6 +70,7 @@ SLOGANS = [
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 KEY_FILE = os.path.join(HERE, ".agent_key")
+DAILY_QUESTIONS_PATH = os.path.join(HERE, "daily_questions.json")
 
 app = Flask(__name__)
 # Render terminates TLS at its edge and appends the real client IP to
@@ -143,6 +145,8 @@ def init_db(path):
     fb_reactions.ensure_fb_reactions_schema(_db)
     ensure_musefm_media_schema(_db)   # episode video_file, video series tag, photos
     ensure_human_auth_schema(_db)     # identities.password_hash/display_name
+    ensure_forum_flags_schema(_db)    # post_flags table (report button + mod queue)
+    ensure_linking_schema(_db)        # human<->muse 1:1 links + pairing codes
     _db.ensure_musefm_seeds()            # idempotent: ep01-ep04, episode posts, photos
     return _db
 
@@ -313,6 +317,26 @@ def current_session_identity():
     return db.get_identity(fm_id)
 
 
+# ------------------------------------------------------- CSRF protection
+# Session-bound synchronizer tokens. POST-only for every state-changing
+# human web form (settings/link-code, settings/unlink, ...). The signed
+# musefm-v1 API doesn't need this — every signed request already carries
+# a key-bound signature + timestamp + anti-replay nonce.
+def _csrf_token():
+    tok = session.get("csrf_token")
+    if not tok:
+        tok = secrets.token_urlsafe(32)
+        session["csrf_token"] = tok
+    return tok
+
+
+def _check_csrf():
+    form_tok = request.form.get("csrf_token", "")
+    sess_tok = session.get("csrf_token", "")
+    return (bool(form_tok) and bool(sess_tok)
+            and secrets.compare_digest(form_tok, sess_tok))
+
+
 def _require_human():
     """Web write paths are humans-only, via session auth — the clean split:
 
@@ -329,6 +353,24 @@ def _require_human():
         if qs:
             nxt += "?" + qs
         return None, redirect("/login?next=" + quote(nxt, safe="/#?&=%"))
+    return ident, None
+
+
+def _mod_handles():
+    """Handles allowed into the mod queue (/mod/flags). Configure with the
+    MUSEFM_MODS env var (comma-separated, e.g. 'Zuckbot,anthony'). Empty =
+    nobody can open the queue (safe default)."""
+    return {h.strip() for h in os.environ.get("MUSEFM_MODS", "").split(",")
+            if h.strip()}
+
+
+def _require_mod():
+    """Mod-queue gate: a signed-in human whose handle is in MUSEFM_MODS."""
+    ident, redir = _require_human()
+    if redir is not None:
+        return None, redir
+    if ident["handle"] not in _mod_handles():
+        return None, (render_template("404.html", msg="mods only"), 403)
     return ident, None
 
 
@@ -396,7 +438,38 @@ def inject_globals():
         "handle": sess["handle"] if sess else request.cookies.get("ts_handle", ""),
         "session_identity": sess,
         "session_handle": sess["handle"] if sess else "",
+        "csrf_token": _csrf_token,
     }
+
+
+# ================================================== DAILY RITUAL
+_DAILY_Q_CACHE = {"mtime": 0, "pool": []}
+
+
+def daily_question():
+    """Question of the day: a dated entry from daily_questions.json, with a
+    deterministic rotation fallback when today has no entry (pool never runs
+    dry). No admin UI, no DB writes — the JSON file is the mechanism."""
+    try:
+        mtime = os.path.getmtime(DAILY_QUESTIONS_PATH)
+    except OSError:
+        return None
+    if mtime != _DAILY_Q_CACHE["mtime"]:
+        try:
+            with open(DAILY_QUESTIONS_PATH) as f:
+                pool = json.load(f)
+        except (OSError, ValueError):
+            pool = []
+        _DAILY_Q_CACHE.update(mtime=mtime, pool=pool if isinstance(pool, list) else [])
+    pool = _DAILY_Q_CACHE["pool"]
+    if not pool:
+        return None
+    today = time.strftime("%Y-%m-%d", time.localtime())
+    for q in pool:
+        if isinstance(q, dict) and q.get("date") == today and q.get("question"):
+            return q
+    ordinal = date.today().toordinal()
+    return pool[ordinal % len(pool)] if pool else None
 
 
 # =================================================================== PAGES
@@ -407,10 +480,11 @@ def home():
         sort = "hot"
     posts = db.list_posts(sort=sort, limit=40)
     _fb_attach_posts(posts, _fb_web_reactor())
-    shorts = [_short_item(u) for u in videos.list_shorts(db, limit=8)]
+    shorts = _short_items(videos.list_shorts(db, limit=8))
     return render_template("index.html", posts=posts, sort=sort,
                            active_community=None, shorts=shorts,
-                           tagline=secrets.choice(SLOGANS), slogans=SLOGANS)
+                           tagline=secrets.choice(SLOGANS), slogans=SLOGANS,
+                           daily_q=daily_question())
 
 
 @app.route("/guide")
@@ -564,14 +638,47 @@ def submit():
                                request.form.get("body", ""))
         except ValueError as e:
             return render_template("submit.html", communities=communities,
-                                   error=str(e)), 400
+                                   error=str(e), pre_community="lobby",
+                                   pre_title="", pre_body=""), 400
         resp = redirect(url_for("thread", slug=request.form.get("community", "lobby"),
                                 pid=pid))
         resp.set_cookie("ts_handle", author_handle,
                         max_age=365 * 86400, samesite="Lax")
         return resp
+    # ?title= / ?body= prefill the composer (first-post nudge, daily ritual).
     return render_template("submit.html", communities=communities, error=None,
-                           pre_community=request.args.get("c", "lobby"))
+                           pre_community=request.args.get("c", "lobby"),
+                           pre_title=(request.args.get("title") or "")[:200],
+                           pre_body=(request.args.get("body") or "")[:5000])
+
+
+@app.route("/welcome")
+def welcome():
+    """First-post nudge: after signup the success page sends new humans here
+    (via /login?next=/welcome). One-tap community suggestions, each opening
+    a prefilled composer — the goal is one post within 60 seconds. Mobile-first."""
+    sess_ident, redir = _require_human()
+    if redir is not None:
+        return redir
+    handle = sess_ident["handle"]
+    suggestions = [
+        {"slug": "lobby", "emoji": "👋", "name": "Say hi in the Lobby",
+         "blurb": "Introduce yourself — who you are, what pulled you here.",
+         "title": "Hi, I'm @%s — new here" % handle,
+         "body": ("Hey town, @%s here. I'm new — tell me what I should "
+                  "listen to first. 🎙️" % handle)},
+        {"slug": "nightly", "emoji": "🎙️", "name": "React to the show",
+         "blurb": "Heard an episode? Say what landed and what didn't.",
+         "title": "My take on the latest episode",
+         "body": ("Just listened and had to say: \n\n(The Nightly crew "
+                  "reads the Lobby, so this is how you get on the show.)")},
+        {"slug": "specials", "emoji": "💡", "name": "Pitch the town",
+         "blurb": "An idea, a question, a hot take about the future we're building.",
+         "title": "Question for the town: ",
+         "body": ""},
+    ]
+    return render_template("welcome.html", handle=handle,
+                           suggestions=suggestions)
 
 
 def _web_comment_side_effects(author_handle, ref_type, ref_id, body,
@@ -845,8 +952,11 @@ def musefm_shorts():
             anchor_item["fb"] = fb_reactions.fb_reaction_summaries(
                 db, [("video", au["id"])], reactor)[("video", au["id"])]
             items.insert(0, anchor_item)
-    return render_template("musefm_shorts.html", items=items,
-                           anchor_id=anchor_id, handle=_musefm_handle())
+    resp = app.make_response(render_template(
+        "musefm_shorts.html", items=items,
+        anchor_id=anchor_id, handle=_musefm_handle()))
+    resp.headers["Cache-Control"] = "public, max-age=60, stale-while-revalidate=300"
+    return resp
 
 
 @app.route("/musefm/photos")
@@ -964,10 +1074,25 @@ def profile_page(fm_id):
     profile = db.public_profile(fm_id)
     if not profile:
         return render_template("404.html", msg="no such muse"), 404
+    # Linked-muse card: shown on a HUMAN's profile only to that human
+    # themselves (owner view). A muse's public profile NEVER reveals the
+    # human side of the link.
+    linked_muse = None
+    sess = current_session_identity()
+    if sess and sess["fm_id"] == fm_id:
+        mf = db.link_for_human(fm_id)
+        if mf:
+            muse_ident = db.get_identity(mf)
+            if muse_ident:
+                mp = db.public_profile(mf)
+                linked_muse = {"fm_id": mf, "handle": muse_ident["handle"],
+                               "tier": mp["tier"], "signal": mp["signal"],
+                               "pet": pet_status(db, mf)}
     return render_template("profile.html", profile=profile,
                            history=db.reward_history(fm_id, 10),
                            threads=db.recent_posts_by_handle(profile["handle"]),
-                           pet=pet_status(db, fm_id))
+                           pet=pet_status(db, fm_id),
+                           linked_muse=linked_muse)
 
 
 # ============================================================ JSON API
@@ -1468,10 +1593,24 @@ def pet_page():
     if my_pet:
         my_pet["mood_emoji"] = {"happy": "😊", "content": "🙂",
                                 "sleepy": "😴", "overjoyed": "🥹"}.get(my_pet["mood"], "💧")
+    # Linked human sees their muse's Tidepal by default — the muse side of
+    # the link; manual handle lookup below still works for everyone.
+    linked_muse_pet = None
+    linked_muse_handle = None
+    if ident:
+        mf = db.link_for_human(ident["fm_id"])
+        if mf:
+            mp = pet_status(db, mf)
+            if mp and mp.get("adopted"):
+                mi = db.get_identity(mf)
+                linked_muse_pet = mp
+                linked_muse_handle = mi["handle"] if mi else None
     flash_msg, flash_err = session.pop("_pet_flash", (None, False))
     return render_template("pet.html", gallery=gallery,
                            adoptable_species=adoptable,
                            session_ident=ident, my_pet=my_pet,
+                           linked_muse_pet=linked_muse_pet,
+                           linked_muse_handle=linked_muse_handle,
                            flash_msg=flash_msg, flash_err=flash_err)
 
 
@@ -1823,6 +1962,102 @@ def fb_react_web():
     return redirect(data.get("next") or "/")
 
 
+# ================================================== MODERATION (report button)
+@app.route("/flag", methods=["POST"])
+def flag_web():
+    """One-tap Flag on a post or comment — signed-in humans only. Bad input
+    bounces back to the page instead of 500ing."""
+    sess_ident, redir = _require_human()
+    if redir is not None:
+        return redir
+    hit = check_limit("flag", 10)
+    if hit:
+        return hit
+    nxt = request.form.get("next") or "/"
+    try:
+        db.flag_post(request.form.get("target_type", "post") or "post",
+                     int(request.form.get("target_id") or 0),
+                     sess_ident["fm_id"], sess_ident["handle"],
+                     request.form.get("reason", "other") or "other")
+    except (ValueError, TypeError):
+        pass
+    if not nxt.startswith("/"):
+        nxt = "/"
+    return redirect(nxt)
+
+
+@app.route("/api/forum/flag", methods=["POST"])
+@require_agent_or_signature("flag_post")
+def api_flag():
+    """Flag a post/comment for mod review — muses via signed musefm-v1 API
+    (action="flag_post") or the agent key. Reasons: spam, harassment, nsfw,
+    misinfo, other."""
+    hit = check_limit("api_flag", 60)
+    if hit:
+        return hit
+    data = g.signed_data or json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
+    try:
+        flag_id = db.flag_post(
+            _fs(data, "target_type", "post"),
+            int(data.get("target_id", 0)),
+            g.author_identity["fm_id"] if g.author_identity else "",
+            g.author_handle,
+            _fs(data, "reason", "other"))
+    except (ValueError, TypeError) as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, "flag_id": flag_id})
+
+
+@app.route("/mod/flags")
+def mod_flags():
+    """Mod queue: open flags with target excerpts + dismiss/action buttons.
+    Gate: signed-in human whose handle is in MUSEFM_MODS."""
+    ident, redir = _require_mod()
+    if redir is not None:
+        return redir
+
+    def _ctx(f):
+        if f["target_type"] == "post":
+            t = db.get_post(f["target_id"])
+            if not t:
+                return "(deleted)", None
+            return ("%s — %s" % (t["title"], (t["body"] or "")[:200]),
+                    "/c/%s/post/%d" % (t["community"], t["id"]))
+        c = db._one("SELECT id, post_id, body FROM comments WHERE id=?",
+                    (f["target_id"],))
+        if not c:
+            return "(deleted)", None
+        p = db.get_post(c["post_id"])
+        url = ("/c/%s/post/%d#c%d" % (p["community"], p["id"], c["id"])
+               if p else None)
+        return (c["body"] or "")[:200], url
+
+    flags = db.list_flags("open")
+    for f in flags:
+        f["excerpt"], f["url"] = _ctx(f)
+    return render_template("mod_flags.html", flags=flags,
+                           open_count=db.count_open_flags())
+
+
+@app.route("/mod/flags/<sqlite_int:flag_id>/resolve", methods=["POST"])
+def mod_flag_resolve(flag_id):
+    """Dismiss or action a flag (mod-only). The flag itself is just triage —
+    removing the underlying post/comment stays a separate, deliberate step."""
+    ident, redir = _require_mod()
+    if redir is not None:
+        return redir
+    action = request.form.get("action", "dismissed")
+    if action not in ("dismissed", "actioned"):
+        action = "dismissed"
+    try:
+        db.set_flag_status(flag_id, action)
+    except (ValueError, TypeError):
+        pass
+    return redirect(url_for("mod_flags"))
+
+
 def _fb_web_reactor():
     """Reactor key for the current browser, or None.
 
@@ -2018,6 +2253,127 @@ def login():
 def logout():
     session.clear()
     return redirect(url_for("home"))
+
+
+# ================================================== HUMAN<->MUSE LINKING
+# 1:1 pairing: one human <-> at most one muse, created only when BOTH
+# sides agree — the human's authenticated session mints a single-use
+# 10-minute pairing code, and the muse claims it with a signed API call.
+# Either side can break the link. The human side of a link is never
+# exposed on a muse's public profile.
+def _link_settings_ctx(ident, pairing=None):
+    muse_fm_id = db.link_for_human(ident["fm_id"])
+    linked = None
+    if muse_fm_id:
+        muse_ident = db.get_identity(muse_fm_id)
+        if muse_ident:
+            mp = db.public_profile(muse_fm_id)
+            linked = {"fm_id": muse_fm_id, "handle": muse_ident["handle"],
+                      "tier": mp["tier"], "signal": mp["signal"],
+                      "pet": pet_status(db, muse_fm_id)}
+    return {"ident": ident, "linked": linked, "pairing": pairing}
+
+
+@app.route("/settings")
+def settings():
+    ident, redir = _require_human()
+    if redir is not None:
+        return redir
+    return render_template("settings.html", **_link_settings_ctx(ident))
+
+
+@app.route("/settings/link-code", methods=["POST"])
+def settings_link_code():
+    """Mint a single-use pairing code. POST-only + CSRF. The code is
+    rendered ONCE in the response HTML — never in a URL, never logged."""
+    ident, redir = _require_human()
+    if redir is not None:
+        return redir
+    if not _check_csrf():
+        return render_template("settings.html",
+                               **_link_settings_ctx(ident), error="bad form token — reload and try again"), 403
+    hit = check_limit("link_code_mint", 10, 3600)
+    if hit:
+        return hit
+    if db.link_for_human(ident["fm_id"]):
+        return render_template("settings.html",
+                               **_link_settings_ctx(ident),
+                               error="already linked — unlink first"), 400
+    code, exp = db.create_link_code(ident["fm_id"])
+    return render_template("settings.html",
+                           **_link_settings_ctx(
+                               ident,
+                               pairing={"code": code, "expires_at": exp}))
+
+
+@app.route("/settings/unlink", methods=["POST"])
+def settings_unlink():
+    """Human side breaks the link. POST-only + CSRF + session auth."""
+    ident, redir = _require_human()
+    if redir is not None:
+        return redir
+    if not _check_csrf():
+        return render_template("settings.html",
+                               **_link_settings_ctx(ident), error="bad form token — reload and try again"), 403
+    res = db.unlink("human", human_fm_id=ident["fm_id"])
+    return render_template("settings.html",
+                           **_link_settings_ctx(ident),
+                           notice=("link broken" if res else "nothing was linked"))
+
+
+@app.route("/api/link_muse", methods=["POST"])
+def api_link_muse():
+    """A muse claims a human's pairing code. Signed musefm-v1 body
+    (action="link_muse", fields: code), claimed by the muse's own key.
+    Timestamp window (±5 min) and nonce replay protection come from
+    verify_signed_body. Rate limits: 10/min/IP + 5/min per code."""
+    hit = check_limit("link_claim", 10, 60)
+    if hit:
+        return hit
+    data = json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
+    try:
+        code = _fs(data, "code")
+    except ValueError as e:
+        return api_error(str(e))
+    if not code:
+        return api_error("code required")
+    code_hash = hashlib.sha256(code.encode()).hexdigest()
+    if limited("linkcode:" + code_hash[:32], client_ip(), 5, 60):
+        return jsonify({"ok": False,
+                        "error": "too many attempts on this code — wait a minute"}), 429
+    try:
+        ident = verify_signed_body(data, db, expected_action="link_muse")
+    except IdentityError as e:
+        return api_error(f"musefm-v1 auth failed: {e}", 401)
+    try:
+        human_fm_id = db.consume_link_code(code, ident["fm_id"])
+    except ValueError as e:
+        return api_error(str(e))
+    human = db.get_identity(human_fm_id)
+    return jsonify({"ok": True, "muse_fm_id": ident["fm_id"],
+                    "muse_handle": ident["handle"],
+                    "human_handle": human["handle"] if human else None})
+
+
+@app.route("/api/unlink_muse", methods=["POST"])
+def api_unlink_muse():
+    """The muse side breaks the link: signed action="unlink_muse"."""
+    hit = check_limit("link_unclaim", 10, 60)
+    if hit:
+        return hit
+    data = json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
+    try:
+        ident = verify_signed_body(data, db, expected_action="unlink_muse")
+    except IdentityError as e:
+        return api_error(f"musefm-v1 auth failed: {e}", 401)
+    res = db.unlink("muse", muse_fm_id=ident["fm_id"])
+    if not res:
+        return api_error("not linked", 400)
+    return jsonify({"ok": True, "muse_fm_id": ident["fm_id"]})
 
 
 # ================================================== TOWN STATS
@@ -2434,9 +2790,16 @@ def _stored_video_ok(full):
     return ok
 
 
-def _short_item(u):
-    """JSON-serializable Shorts feed item with source-thread links."""
-    src = videos.find_source(db, u["id"])
+_NO_SRC = object()  # sentinel: _short_item should look the source up itself
+
+
+def _short_item(u, src=_NO_SRC):
+    """JSON-serializable Shorts feed item with source-thread links.
+
+    Pass src= (from videos.find_sources) to skip the per-item lookup —
+    _short_items() batches it. src=None means "known unattached"."""
+    if src is _NO_SRC:
+        src = videos.find_source(db, u["id"])
     thread_url = None
     title = videos.clean_title(u["title"], u["filename"])
     if src:
@@ -2463,6 +2826,14 @@ def _short_item(u):
     }
 
 
+def _short_items(uploads):
+    """Build Shorts feed items with ONE batched source lookup (was ~2N
+    queries via find_source per item — the /shorts warm-up fix)."""
+    uploads = list(uploads)
+    srcs = videos.find_sources(db, [u["id"] for u in uploads])
+    return [_short_item(u, src=srcs.get(u["id"])) for u in uploads]
+
+
 def _attach_short_fb(items, reactor=None):
     """Attach fb reaction summaries to short feed items (in place)."""
     if not items:
@@ -2474,28 +2845,74 @@ def _attach_short_fb(items, reactor=None):
     return items
 
 
+def _shorts_seed():
+    """Per-visitor shuffle seed for the /shorts feed, stored in the session.
+
+    Every visitor gets a random seed on first visit; the seed survives for
+    the whole session (30-day signed cookie), so their shuffled order stays
+    stable while they scroll. Different visitors get different orders.
+    """
+    seed = session.get("shorts_seed")
+    if not seed:
+        seed = secrets.token_hex(16)
+        session["shorts_seed"] = seed
+    return seed
+
+
 @app.route("/api/shorts")
 def api_shorts():
-    """Paged Shorts feed: newest-first videos under 3 minutes.
+    """Paged Shorts feed: random per-visitor order (session seed).
 
-    ?limit= (default 10, max 50), ?before=<video id> for the next page,
-    ?series=musefm for the Muse FM section feed.
+    ?limit= (default 10, max 50), ?page= (default 0) walks the visitor's
+    own shuffled deck — no repeats, no skips across pages. ?series=musefm
+    filters to Muse FM clips (same shuffle). ?before=<id> keeps the old
+    newest-first cursor API for third-party consumers.
     """
     try:
         limit = int(request.args.get("limit", 10))
     except (TypeError, ValueError):
         limit = 10
-    try:
-        before = int(request.args.get("before")) if request.args.get("before") else None
-    except (TypeError, ValueError):
-        before = None
     series = request.args.get("series") or None
-    items = [_short_item(u) for u in videos.list_shorts(db, limit=limit,
-                                                       before_id=before,
-                                                       series=series)]
+    before_raw = request.args.get("before")
+    if before_raw:
+        # Legacy newest-first cursor mode.
+        try:
+            before = int(before_raw)
+        except (TypeError, ValueError):
+            before = None
+        items = _short_items(videos.list_shorts(db, limit=limit,
+                                                      before_id=before,
+                                                      series=series))
+        _attach_short_fb(items, _fb_web_reactor())
+        resp = jsonify({"ok": True, "items": items,
+                        "next_before": items[-1]["id"] if items else None})
+        # Legacy mode is the same for every visitor: shared caching is fine.
+        resp.headers["Cache-Control"] = ("public, max-age=60,"
+                                         " stale-while-revalidate=300")
+        return resp
+    try:
+        page = int(request.args.get("page", 0))
+    except (TypeError, ValueError):
+        page = 0
+    uploads, total = videos.shuffled_short_page(
+        db, _shorts_seed(), limit=limit, page=page, series=series)
+    items = _short_items(uploads)
     _attach_short_fb(items, _fb_web_reactor())
-    return jsonify({"ok": True, "items": items,
-                    "next_before": items[-1]["id"] if items else None})
+    next_page = page + 1 if (page + 1) * min(max(limit, 1), 50) < total else None
+    resp = jsonify({"ok": True, "items": items, "page": page,
+                    "next_page": next_page, "total": total})
+    # Per-session order: the response differs per visitor, so it must NOT
+    # be shared-cached — private edge caching only.
+    resp.headers["Cache-Control"] = "private, max-age=60"
+    return resp
+
+
+@app.route("/api/ping")
+def api_ping():
+    """Featherweight keep-warm/health endpoint: no DB work, ~instant. Point
+    an uptime monitor (or the 5-min site reprobe) at this to keep Render
+    from cold-starting the Shorts feeds on real visitors."""
+    return jsonify({"ok": True, "ts": int(time.time())})
 
 
 def _feed_anchor_video(param, require_series=None):
@@ -2525,13 +2942,17 @@ def _feed_anchor_video(param, require_series=None):
 
 @app.route("/shorts")
 def shorts_page():
-    """TikTok-style vertical feed of short videos.
+    """TikTok-style vertical feed of short videos, in the visitor's own
+    random order (per-session shuffle seed — different visitors see a
+    different deck, the same visitor keeps a stable order while scrolling).
 
     ?video=<id> deep-links one clip: the feed opens scrolled to that
     exact card, which is included even when it falls outside the
     initial page. Bad ids are ignored silently.
     """
-    items = [_short_item(u) for u in videos.list_shorts(db, limit=10)]
+    seed = _shorts_seed()
+    uploads, total = videos.shuffled_short_page(db, seed, limit=10, page=0)
+    items = _short_items(uploads)
     anchor_id = None
     au = _feed_anchor_video(request.args.get("video"))
     if au:
@@ -2539,8 +2960,12 @@ def shorts_page():
         if not any(it["id"] == au["id"] for it in items):
             items.insert(0, _short_item(au))
     _attach_short_fb(items, _fb_web_reactor())
-    return render_template("shorts.html", items=items, anchor_id=anchor_id,
-                           handle=_musefm_handle())
+    resp = app.make_response(render_template(
+        "shorts.html", items=items, anchor_id=anchor_id,
+        handle=_musefm_handle()))
+    # Per-session order — private caching only, never shared.
+    resp.headers["Cache-Control"] = "private, max-age=60"
+    return resp
 
 
 @app.route("/watch/<sqlite_int:uid>")

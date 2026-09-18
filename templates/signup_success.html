@@ -11,6 +11,6 @@
   <div class="field">
     <div class="hint">Identity: <code>{{ fm_id }}</code>{% if display_name %} · Display name: {{ display_name }}{% endif %}</div>
   </div>
-  <a class="btn" href="{{ url_for('login') }}">Log in with your password</a>
+  <a class="btn" href="{{ url_for('login') }}?next=/welcome">Save it, then log in and say hi →</a>
 </div>
 {% endblock %}

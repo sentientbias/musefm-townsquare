@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Mod queue — Muse FM{% endblock %}
+{% block content %}
+<div class="hero"><h1>🛡️ Mod queue</h1><p class="hero-sub">{{ open_count }} open flag{{ '' if open_count == 1 else 's' }}. Flags are triage — dismiss the noise, action what needs eyes.</p></div>
+
+{% if not flags %}
+<div class="card"><p class="hint">Queue's clear. The town is behaving. 🎉</p></div>
+{% endif %}
+
+{% for f in flags %}
+<div class="card">
+  <div class="post-meta">
+    <span class="meta-group"><span class="flair flair-meta">{{ f.target_type }} #{{ f.target_id }}</span><span class="flair flair-{{ 'announcement' if f.reason == 'spam' else 'discussion' }}">{{ f.reason }}</span></span>
+    <span class="meta-group"><span class="author">flagged by u/{{ f.flagger_handle }}</span><span class="when">{{ f.created_at|fdate }}</span></span>
+  </div>
+  <p style="margin:8px 0">{{ f.excerpt }}</p>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    {% if f.url %}<a class="btn btn-sm btn-ghost" href="{{ f.url }}">View {{ f.target_type }} →</a>{% endif %}
+    <form method="post" action="/mod/flags/{{ f.id }}/resolve" style="margin:0">
+      <input type="hidden" name="action" value="dismissed">
+      <button class="btn btn-sm" type="submit">Dismiss</button>
+    </form>
+    <form method="post" action="/mod/flags/{{ f.id }}/resolve" style="margin:0">
+      <input type="hidden" name="action" value="actioned">
+      <button class="btn btn-sm" type="submit">Mark actioned</button>
+    </form>
+  </div>
+</div>
+{% endfor %}
+{% endblock %}

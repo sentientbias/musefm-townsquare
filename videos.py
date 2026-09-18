@@ -17,6 +17,7 @@ Safety model mirrors ai_images.py:
 - per-identity hourly upload cap enforced at the route layer
 - no transcoding: bytes are served as-is with the detected content-type
 """
+import hashlib
 import os
 import re
 import time
@@ -346,6 +347,52 @@ def list_shorts(db, limit=10, before_id=None, series=None):
     return [dict(r) for r in rows]
 
 
+def list_short_ids(db, series=None):
+    """Ids of every short-eligible upload (NULL or <180s duration), ascending.
+
+    The /shorts feed shuffles these per visitor session; pulling only the
+    id column keeps the per-request cost at one cheap query no matter how
+    many clips exist.
+    """
+    ensure_video_schema(db)
+    _ensure_series_col(db)
+    sql = ("SELECT id FROM video_uploads"
+           " WHERE (duration_secs IS NULL OR duration_secs < ?)")
+    args = [SHORTS_MAX_SECS]
+    if series:
+        sql += " AND series=?"
+        args.append(series)
+    sql += " ORDER BY id ASC"
+    return [r["id"] for r in db.db.execute(sql, args).fetchall()]
+
+
+def shuffled_short_page(db, seed, limit=10, page=0, series=None):
+    """One page of shorts in deterministic hash order for a visitor's seed.
+
+    Position of clip <i> is sha256(seed:i) — so the order is stable for
+    the whole session, and newly uploaded clips slot into the shuffled
+    deck without reshuffling everything the visitor already scrolled past.
+    Returns (uploads, total). uploads keep _short_item order.
+    """
+    ids = list_short_ids(db, series=series)
+    total = len(ids)
+    if not ids:
+        return [], 0
+    key = "%s:" % seed
+    ids.sort(key=lambda i: hashlib.sha256(
+        (key + str(i)).encode()).hexdigest())
+    limit = max(1, min(int(limit or 10), 50))
+    page = max(0, int(page or 0))
+    start = page * limit
+    page_ids = ids[start:start + limit]
+    if not page_ids:
+        return [], total
+    q = ",".join("?" * len(page_ids))
+    by_id = {r["id"]: dict(r) for r in db.db.execute(
+        "SELECT * FROM video_uploads WHERE id IN (%s)" % q, page_ids).fetchall()}
+    return [by_id[i] for i in page_ids if i in by_id], total
+
+
 def _ensure_series_col(db):
     """Additive only: series tag on video_uploads ('musefm' = Muse FM clip)."""
     cols = [r["name"] for r in db.db.execute("PRAGMA table_info(video_uploads)")]
@@ -384,17 +431,39 @@ def find_source(db, uid):
     Returns {"kind": "post"/"comment", ...} or None when the video is
     unattached (uploaded but never posted). Prefers the newest link.
     """
-    url = "/video/%d" % int(uid)
-    p = db._one("SELECT id, community, title, handle FROM posts"
-                " WHERE video_url=? ORDER BY id DESC", (url,))
-    if p:
-        return {"kind": "post", "post_id": p["id"], "community": p["community"],
-                "title": p["title"], "handle": p["handle"], "comment_id": None}
-    c = db._one("SELECT c.id, c.post_id, c.handle, p.community FROM comments c"
-                " JOIN posts p ON p.id=c.post_id"
-                " WHERE c.video_url=? ORDER BY c.id DESC", (url,))
-    if c:
-        return {"kind": "comment", "post_id": c["post_id"],
-                "community": c["community"], "title": None,
-                "handle": c["handle"], "comment_id": c["id"]}
-    return None
+    srcs = find_sources(db, [uid])
+    return srcs.get(int(uid))
+
+
+def find_sources(db, uids):
+    """Batched find_source for many video ids — two queries total instead of
+    two per id (the Shorts feeds were doing ~2N queries here). Prefers the
+    newest link per video, same as find_source. Returns {uid: src}."""
+    uids = sorted({int(u) for u in uids if int(u) > 0})
+    if not uids:
+        return {}
+    urls = ["/video/%d" % u for u in uids]
+    q = ",".join("?" * len(urls))
+    out = {}
+    for r in db._q(
+            "SELECT id, community, title, handle, video_url FROM posts"
+            " WHERE video_url IN (%s) ORDER BY id DESC" % q, urls):
+        uid = int(r["video_url"].rsplit("/", 1)[-1])
+        if uid not in out:
+            out[uid] = {"kind": "post", "post_id": r["id"],
+                        "community": r["community"], "title": r["title"],
+                        "handle": r["handle"], "comment_id": None}
+    remaining = [u for u in uids if u not in out]
+    if remaining:
+        urls = ["/video/%d" % u for u in remaining]
+        q = ",".join("?" * len(urls))
+        for r in db._q(
+                "SELECT c.id, c.post_id, c.handle, c.video_url, p.community"
+                " FROM comments c JOIN posts p ON p.id=c.post_id"
+                " WHERE c.video_url IN (%s) ORDER BY c.id DESC" % q, urls):
+            uid = int(r["video_url"].rsplit("/", 1)[-1])
+            if uid not in out:
+                out[uid] = {"kind": "comment", "post_id": r["post_id"],
+                            "community": r["community"], "title": None,
+                            "handle": r["handle"], "comment_id": r["id"]}
+    return out

@@ -92,6 +92,15 @@
 {% endif %}
 
 <h2>Your Tidepal</h2>
+{% if linked_muse_pet %}
+<div class="card" style="max-width:30rem;margin:0 auto 1rem;text-align:center;border:2px solid var(--accent,#4a90d9)">
+  <p style="margin:.2rem 0"><b>🔗 Your muse's Tidepal</b> —
+  <a href="/m/{{ linked_muse_pet.fm_id }}">u/{{ linked_muse_handle }}</a>'s companion:</p>
+  <div style="max-width:9rem;margin:.4rem auto">{{ linked_muse_pet.svg_large|safe }}</div>
+  <p class="pet-note" style="margin:.2rem 0"><b>{{ linked_muse_pet.name }}</b> ·
+  {{ linked_muse_pet.species_name }} · {{ linked_muse_pet.stage }}</p>
+</div>
+{% endif %}
 {% if my_pet %}
 {% if my_pet.missed_you_glow %}
 <div class="pet-glow-note">💧 {{ my_pet.name }} missed you — they've been waiting for you. Give them some attention!</div>

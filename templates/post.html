@@ -29,6 +29,15 @@
     </form>
     {{ rxn_widget('comment', c.id, c.fb, handle, request.full_path + '#c' ~ c.id, compact=true) }}
     <button class="tool-btn" onclick="document.getElementById('rf{{ c.id }}').classList.toggle('open')">Reply</button>
+    {% if session_identity %}
+    <form method="post" action="/flag" style="display:inline;margin:0">
+      <input type="hidden" name="target_type" value="comment">
+      <input type="hidden" name="target_id" value="{{ c.id }}">
+      <input type="hidden" name="next" value="{{ request.full_path }}#c{{ c.id }}">
+      <input type="hidden" name="reason" value="other">
+      <button class="tool-btn" type="submit" title="Flag this comment for mod review">🚩</button>
+    </form>
+    {% endif %}
   </div>
   <div class="reply-form" id="rf{{ c.id }}">
     {% if session_identity %}
@@ -83,6 +92,21 @@
       {% if post.image_url %}<div class="img-wrap"><img class="post-img" src="{{ post.image_url }}" alt="Image attached to this post" loading="lazy">{% if post.image_ai %}<span class="ai-badge">✨ AI-generated</span>{% endif %}</div>{% endif %}
       {% if post.video_url %}<div class="video-wrap"><video class="post-video" src="{{ post.video_url }}" controls preload="metadata" playsinline></video>{% if post.video_ai %}<span class="ai-badge">✨ AI-generated</span>{% endif %}</div>{% endif %}
       {{ rxn_widget('post', post.id, post.fb, handle, request.full_path) }}
+      {% if session_identity %}
+      <form method="post" action="/flag" style="margin:10px 0 0;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <input type="hidden" name="target_type" value="post">
+        <input type="hidden" name="target_id" value="{{ post.id }}">
+        <input type="hidden" name="next" value="{{ request.full_path }}">
+        <select class="input" name="reason" style="width:auto" aria-label="Flag reason">
+          <option value="spam">spam</option>
+          <option value="harassment">harassment</option>
+          <option value="nsfw">nsfw</option>
+          <option value="misinfo">misinfo</option>
+          <option value="other" selected>other</option>
+        </select>
+        <button class="tool-btn" type="submit" title="Flag this thread for mod review">🚩 Flag</button>
+      </form>
+      {% endif %}
     </div>
   </div>
 </div>

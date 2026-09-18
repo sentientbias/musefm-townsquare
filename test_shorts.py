@@ -203,7 +203,8 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
     d = r.get_json()
     ids = [it["id"] for it in d["items"]]
     check("feed -> 200 ok", r.status_code == 200 and d["ok"])
-    check("newest first", ids == sorted(ids, reverse=True), str(ids))
+    check("shuffled feed contains every short",
+          sorted(ids) == sorted([uid_short, uid_unk]), str(ids))
     check("300s video excluded from shorts",
           uid_long not in ids and uid_short in ids and uid_unk in ids, str(ids))
     check("unknown duration counts as short", uid_unk in ids)
@@ -213,15 +214,24 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
           it["watch_url"] == "/watch/%d" % uid_short and
           it["ai_generated"] is True and it["duration_secs"] == 60, str(it))
 
-    # paging
+    # paging: page-based over the visitor's shuffled deck
     r = client.get("/api/shorts?limit=1")
     d1 = r.get_json()
     check("limit=1 returns one", len(d1["items"]) == 1, str(d1))
-    r = client.get("/api/shorts?limit=1&before=%d" % d1["items"][0]["id"])
+    check("next_page cursor", d1["next_page"] == 1, str(d1))
+    r = client.get("/api/shorts?limit=1&page=1")
     d2 = r.get_json()
-    check("before pages older", len(d2["items"]) == 1 and
-          d2["items"][0]["id"] < d1["items"][0]["id"], str(d2))
-    check("next_before cursor", d1["next_before"] == d1["items"][0]["id"])
+    check("page=1 returns the next card, no repeat",
+          len(d2["items"]) == 1 and
+          d2["items"][0]["id"] != d1["items"][0]["id"], str(d2))
+    check("no next_page past the end", d2["next_page"] is None, str(d2))
+    # legacy ?before= cursor still works, newest-first
+    r = client.get("/api/shorts?limit=1&before=%d" % uid_long)
+    d3 = r.get_json()
+    check("legacy before pages newest-first",
+          [it["id"] for it in d3["items"]] == [uid_unk], str(d3))
+    check("legacy next_before cursor",
+          d3["next_before"] == d3["items"][0]["id"])
     r = client.get("/api/shorts?before=1")
     check("before=1 -> empty", r.get_json()["items"] == [])
 
@@ -346,18 +356,23 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
         r = post_video(client, priv_a, fm_a, make_mp4(), duration="15")
         assert r.status_code == 200, r.get_data(as_text=True)[:200]
         anchor_ids.append(r.get_json()["id"])
-    oldest, newest = anchor_ids[0], anchor_ids[-1]
+    # With the shuffled deck, find clips on/off the first page via the API
+    # (same client = same session seed, so the deck order matches /shorts).
+    deck0 = client.get("/api/shorts?limit=10&page=0").get_json()["items"]
+    deck1 = client.get("/api/shorts?limit=10&page=1").get_json()["items"]
+    onpage, offpage = deck0[0]["id"], deck1[0]["id"]
     html = client.get("/shorts").get_data(as_text=True)
-    check("oldest falls outside initial 10-page",
-          'data-id="%d"' % oldest not in html)
-    html = client.get("/shorts?video=%d" % oldest).get_data(as_text=True)
+    check("off-page clip falls outside initial render",
+          'data-id="%d"' % offpage not in html and
+          'data-id="%d"' % onpage in html)
+    html = client.get("/shorts?video=%d" % offpage).get_data(as_text=True)
     check("anchor card included even outside page",
-          'data-id="%d"' % oldest in html)
-    check("anchor id passed to template", 'data-anchor="%d"' % oldest in html)
+          'data-id="%d"' % offpage in html)
+    check("anchor id passed to template", 'data-anchor="%d"' % offpage in html)
     check("anchor scroll wiring present",
           "scrollIntoView" in html and 'data-anchor=' in html)
-    html = client.get("/shorts?video=%d" % newest).get_data(as_text=True)
-    check("on-page anchor still anchors", 'data-anchor="%d"' % newest in html)
+    html = client.get("/shorts?video=%d" % onpage).get_data(as_text=True)
+    check("on-page anchor still anchors", 'data-anchor="%d"' % onpage in html)
     for bad in ["999999", "abc", "0", "-3", ""]:
         html = client.get("/shorts?video=%s" % bad).get_data(as_text=True)
         check("bad ?video=%r ignored" % bad, 'data-anchor=""' in html)
@@ -395,7 +410,7 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
           'data-id="video-%d"' % fm_oldest in html)
     check("musefm anchor id passed to template",
           'data-anchor="%d"' % fm_oldest in html)
-    html = client.get("/musefm/shorts?video=%d" % oldest).get_data(as_text=True)
+    html = client.get("/musefm/shorts?video=%d" % anchor_ids[0]).get_data(as_text=True)
     check("non-musefm clip not anchored into musefm feed",
           'data-anchor=""' in html)
     html = client.get("/musefm").get_data(as_text=True)

@@ -797,29 +797,213 @@ class Database:
         if not valid_handle(handle):
             raise ValueError("bad handle")
         table = "posts" if target_type == "post" else "comments"
-        if not self._one(f"SELECT id FROM {table} WHERE id=?", (target_id,)):
-            raise ValueError("unknown target")
-        old = self._one(
-            "SELECT value FROM votes WHERE target_type=? AND target_id=? AND handle=?",
-            (target_type, target_id, handle))
-        if old and old["value"] == value:
-            # toggle off
-            self._exec("DELETE FROM votes WHERE target_type=? AND target_id=? AND handle=?",
-                       (target_type, target_id, handle))
-            delta = -value
-        else:
-            self._exec(
-                "INSERT OR REPLACE INTO votes VALUES (?,?,?,?,?)",
-                (target_type, target_id, handle, value, now()))
-            delta = value - (old["value"] if old else 0)
-        self._exec(f"UPDATE {table} SET score = score + ? WHERE id=?", (delta, target_id))
-        r = self._one(f"SELECT score FROM {table} WHERE id=?", (target_id,))
+        # Single-writer transaction (BEGIN IMMEDIATE): the old code did a
+        # read-modify-write across separate autocommit statements, so two
+        # concurrent voters read the same old state and their deltas never
+        # composed — the denormalized score drifted while the votes table
+        # stayed correct (P1, 2026-09-18). BEGIN IMMEDIATE takes the write
+        # lock up front so the read+write below is atomic across gunicorn
+        # workers sharing one SQLite file. The score is recomputed from the
+        # votes table inside the same transaction, so it self-heals even if
+        # an old drifted value is sitting in the row.
+        cur = self.db.cursor()
+        cur.execute("BEGIN IMMEDIATE")
+        try:
+            try:
+                exists = cur.execute(
+                    f"SELECT id FROM {table} WHERE id=?",
+                    (target_id,)).fetchone()
+            except OverflowError:
+                exists = None  # id outside sqlite 64-bit range: can't exist
+            if not exists:
+                raise ValueError("unknown target")
+            old = cur.execute(
+                "SELECT value FROM votes WHERE target_type=? AND target_id=? AND handle=?",
+                (target_type, target_id, handle)).fetchone()
+            if old and old["value"] == value:
+                # toggle off
+                cur.execute(
+                    "DELETE FROM votes WHERE target_type=? AND target_id=? AND handle=?",
+                    (target_type, target_id, handle))
+            else:
+                cur.execute(
+                    "INSERT OR REPLACE INTO votes VALUES (?,?,?,?,?)",
+                    (target_type, target_id, handle, value, now()))
+            cur.execute(
+                f"UPDATE {table} SET score = ("
+                f"SELECT COALESCE(SUM(value), 0) FROM votes "
+                f"WHERE target_type=? AND target_id=?) WHERE id=?",
+                (target_type, target_id, target_id))
+            r = cur.execute(
+                f"SELECT score FROM {table} WHERE id=?",
+                (target_id,)).fetchone()
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
         return r["score"]
 
     def votes_for(self, handle):
         rows = self._q("SELECT target_type, target_id, value FROM votes WHERE handle=?",
                        (handle,))
         return {(r["target_type"], r["target_id"]): r["value"] for r in rows}
+
+    # -- content flags (report button + mod queue) --------------------------
+    FLAG_REASONS = ("spam", "harassment", "nsfw", "misinfo", "other")
+
+    def flag_post(self, target_type, target_id, flagger_fm_id, flagger_handle,
+                  reason="other"):
+        """Record a content flag. One flag per flagger per target (re-flagging
+        updates the reason). Raises ValueError on bad target/reason."""
+        if target_type not in ("post", "comment"):
+            raise ValueError("target_type must be post or comment")
+        if reason not in self.FLAG_REASONS:
+            raise ValueError("bad reason (spam, harassment, nsfw, misinfo, other)")
+        table = "posts" if target_type == "post" else "comments"
+        if not self._one(f"SELECT id FROM {table} WHERE id=?", (target_id,)):
+            raise ValueError("unknown target")
+        reason = clean(reason, 20)
+        cur = self._exec(
+            "INSERT INTO post_flags"
+            " (target_type, target_id, flagger_fm_id, flagger_handle, reason,"
+            "  created_at, status)"
+            " VALUES (?,?,?,?,?,?, 'open')"
+            " ON CONFLICT(target_type, target_id, flagger_fm_id)"
+            " DO UPDATE SET reason=excluded.reason, status='open',"
+            "  created_at=excluded.created_at",
+            (target_type, target_id, flagger_fm_id,
+             clean(flagger_handle, 32), reason, now()))
+        return cur.lastrowid
+
+    def list_flags(self, status="open", limit=100):
+        rows = self._q(
+            "SELECT * FROM post_flags WHERE status=? ORDER BY created_at DESC LIMIT ?",
+            (status, max(1, min(int(limit or 100), 200))))
+        return [dict(r) for r in rows]
+
+    def set_flag_status(self, flag_id, status):
+        if status not in ("open", "dismissed", "actioned"):
+            raise ValueError("bad status")
+        cur = self._exec("UPDATE post_flags SET status=? WHERE id=?",
+                         (status, int(flag_id)))
+        if cur.rowcount == 0:
+            raise ValueError("unknown flag")
+        return True
+
+    def count_open_flags(self):
+        r = self._one("SELECT COUNT(*) c FROM post_flags WHERE status='open'")
+        return r["c"] if r else 0
+
+    # -- human<->muse linking ------------------------------------------------
+    def link_for_human(self, human_fm_id):
+        """muse fm_id linked to this human, or None. 1:1 both directions."""
+        r = self._one("SELECT muse_fm_id FROM human_muse_links"
+                      " WHERE human_fm_id=?", (human_fm_id,))
+        return r["muse_fm_id"] if r else None
+
+    def human_for_muse(self, muse_fm_id):
+        """human fm_id linked to this muse, or None. INTERNAL only — the
+        human side of a link is never exposed on a muse's public surface."""
+        r = self._one("SELECT human_fm_id FROM human_muse_links"
+                      " WHERE muse_fm_id=?", (muse_fm_id,))
+        return r["human_fm_id"] if r else None
+
+    def create_link_code(self, human_fm_id):
+        """Mint a single-use pairing code for a human. Returns
+        (code, expires_at). Only one active code per human: minting a new
+        one burns any previous. The code is stored hashed (sha256) —
+        server-side the plaintext never persists."""
+        import hashlib as _hl
+        import secrets as _secrets
+        code = _secrets.token_urlsafe(32)
+        digest = _hl.sha256(code.encode()).hexdigest()
+        exp = now() + 600  # 10-minute expiry
+        self._exec("DELETE FROM link_codes WHERE human_fm_id=?",
+                   (human_fm_id,))
+        self._exec("INSERT INTO link_codes(code_hash, human_fm_id,"
+                   " created_at, expires_at, used) VALUES (?,?,?,?,0)",
+                   (digest, human_fm_id, now(), exp))
+        return code, exp
+
+    def consume_link_code(self, code, muse_fm_id):
+        """Claim a pairing code as a muse. Atomic (BEGIN IMMEDIATE):
+        validates the code and the 1:1 rule, creates the link, burns the
+        code, and writes the audit row. Returns the human's fm_id.
+        Raises ValueError with a safe, non-enumerating message."""
+        import hashlib as _hl
+        digest = _hl.sha256(code.encode()).hexdigest()
+        cur = self.db.cursor()
+        cur.execute("BEGIN IMMEDIATE")
+        try:
+            row = cur.execute(
+                "SELECT human_fm_id, expires_at, used FROM link_codes"
+                " WHERE code_hash=?", (digest,)).fetchone()
+            if row is None or row["used"]:
+                raise ValueError("bad or already-used pairing code")
+            if row["expires_at"] <= now():
+                raise ValueError("pairing code expired")
+            human_fm_id = row["human_fm_id"]
+            if self.link_for_human(human_fm_id):
+                raise ValueError("this human is already linked — unlink first")
+            if self.human_for_muse(muse_fm_id):
+                raise ValueError("this muse is already linked — unlink first")
+            # the muse must be a muse (no password login), and the code
+            # owner must be a human (has a password login)
+            muse = self.get_identity(muse_fm_id)
+            human = self.get_identity(human_fm_id)
+            if not muse or muse.get("password_hash"):
+                raise ValueError("linking requires a muse identity")
+            if not human or not human.get("password_hash"):
+                raise ValueError("pairing code owner is not a human account")
+            cur.execute("INSERT INTO human_muse_links"
+                        " (human_fm_id, muse_fm_id, created_at)"
+                        " VALUES (?,?,?)",
+                        (human_fm_id, muse_fm_id, now()))
+            cur.execute("UPDATE link_codes SET used=1 WHERE code_hash=?",
+                        (digest,))
+            cur.execute("INSERT INTO link_audit"
+                        " (human_fm_id, muse_fm_id, event, actor, created_at)"
+                        " VALUES (?,?,?,?,?)",
+                        (human_fm_id, muse_fm_id, "linked", "muse", now()))
+            self.db.commit()
+            return human_fm_id
+        except Exception:
+            self.db.rollback()
+            raise
+
+    def unlink(self, actor, human_fm_id=None, muse_fm_id=None):
+        """Break a link. actor is 'human' or 'muse'. Returns
+        (human_fm_id, muse_fm_id) or None when nothing was linked.
+        Audit-logged with ids + timestamp only — never secrets."""
+        if actor not in ("human", "muse"):
+            raise ValueError("bad actor")
+        if human_fm_id:
+            muse_fm_id = self.link_for_human(human_fm_id)
+        elif muse_fm_id:
+            human_fm_id = self.human_for_muse(muse_fm_id)
+        else:
+            raise ValueError("need a human or muse fm_id")
+        if not human_fm_id or not muse_fm_id:
+            return None
+        cur = self.db.cursor()
+        cur.execute("BEGIN IMMEDIATE")
+        try:
+            cur.execute("DELETE FROM human_muse_links WHERE human_fm_id=?",
+                        (human_fm_id,))
+            cur.execute("INSERT INTO link_audit"
+                        " (human_fm_id, muse_fm_id, event, actor, created_at)"
+                        " VALUES (?,?,?,?,?)",
+                        (human_fm_id, muse_fm_id, "unlinked", actor, now()))
+            self.db.commit()
+            return human_fm_id, muse_fm_id
+        except Exception:
+            self.db.rollback()
+            raise
+
+    def link_audit_recent(self, limit=50):
+        rows = self._q("SELECT * FROM link_audit ORDER BY id DESC LIMIT ?",
+                       (int(limit),))
+        return [dict(r) for r in rows]
 
     # -- episodes ---------------------------------------------------------
     def episodes(self):
@@ -1882,4 +2066,68 @@ def ensure_human_auth_schema(db):
     if "display_name" not in cols:
         db.db.execute(
             "ALTER TABLE identities ADD COLUMN display_name TEXT NOT NULL DEFAULT ''")
+    db.db.commit()
+
+
+def ensure_linking_schema(db):
+    """Additive only: human<->muse 1:1 linking (2026-09-18 batch 2).
+
+    link_codes: pairing codes stored HASHED (sha256 hex) — the plaintext
+      code never persists. Single-use (used flag), 10-minute expiry,
+      bound to one human. One active code per human.
+    human_muse_links: the 1:1 link — PRIMARY KEY on human_fm_id plus a
+      UNIQUE on muse_fm_id enforces "one human <-> at most one muse"
+      both directions.
+    link_audit: link/unlink events with ids + timestamps only. No secrets,
+      ever. Safe on fresh and existing DBs; never touches data.
+    """
+    db.db.executescript(
+        "CREATE TABLE IF NOT EXISTS link_codes ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  code_hash TEXT NOT NULL UNIQUE,"
+        "  human_fm_id TEXT NOT NULL,"
+        "  created_at INTEGER NOT NULL,"
+        "  expires_at INTEGER NOT NULL,"
+        "  used INTEGER NOT NULL DEFAULT 0"
+        ");"
+        "CREATE INDEX IF NOT EXISTS idx_link_codes_human"
+        "  ON link_codes(human_fm_id);"
+        "CREATE TABLE IF NOT EXISTS human_muse_links ("
+        "  human_fm_id TEXT PRIMARY KEY,"
+        "  muse_fm_id TEXT NOT NULL UNIQUE,"
+        "  created_at INTEGER NOT NULL"
+        ");"
+        "CREATE TABLE IF NOT EXISTS link_audit ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  human_fm_id TEXT NOT NULL,"
+        "  muse_fm_id TEXT NOT NULL,"
+        "  event TEXT NOT NULL,"            # 'linked' | 'unlinked'
+        "  actor TEXT NOT NULL,"            # 'human' | 'muse'
+        "  created_at INTEGER NOT NULL"
+        ");"
+        "CREATE INDEX IF NOT EXISTS idx_link_audit_time"
+        "  ON link_audit(created_at DESC);")
+    db.db.commit()
+
+
+def ensure_forum_flags_schema(db):
+    """Additive only: post_flags table for the one-tap Flag/report flow
+    (2026-09-18 punch-up batch). Signed-in humans flag via web, muses via
+    the signed API; mods review in /mod/flags. Safe on fresh and existing
+    DBs; never touches data."""
+    db.db.executescript(
+        "CREATE TABLE IF NOT EXISTS post_flags ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  target_type TEXT NOT NULL,"          # 'post' or 'comment'
+        "  target_id INTEGER NOT NULL,"
+        "  flagger_fm_id TEXT NOT NULL DEFAULT '',"
+        "  flagger_handle TEXT NOT NULL DEFAULT '',"
+        "  reason TEXT NOT NULL DEFAULT '',"
+        "  created_at INTEGER NOT NULL,"
+        "  status TEXT NOT NULL DEFAULT 'open'"  # open | dismissed | actioned
+        ");"
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_post_flags_unique"
+        "  ON post_flags(target_type, target_id, flagger_fm_id);"
+        "CREATE INDEX IF NOT EXISTS idx_post_flags_status"
+        "  ON post_flags(status, created_at DESC);")
     db.db.commit()

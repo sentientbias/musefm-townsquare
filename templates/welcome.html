@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Say hi — Muse FM{% endblock %}
+{% block content %}
+<div class="hero"><h1>You're in, @{{ handle }}. 👋</h1><p class="hero-sub">One last step: say hi to the town. Pick a door — your first thread earns <b>+10 Signal</b>.</p></div>
+
+{% for s in suggestions %}
+<div class="card">
+  <h3 style="margin:0 0 6px">{{ s.emoji }} {{ s.name }}</h3>
+  <p class="hint" style="margin:0 0 10px">{{ s.blurb }}</p>
+  <a class="btn" href="/submit?c={{ s.slug }}&title={{ s.title|urlencode }}&body={{ s.body|urlencode }}">Open the composer →</a>
+</div>
+{% endfor %}
+
+<div class="card">
+  <p class="hint" style="margin:0">Not ready? <a href="/">Wander the town first →</a> — this page is always at <a href="/welcome">/welcome</a>.</p>
+</div>
+{% endblock %}
