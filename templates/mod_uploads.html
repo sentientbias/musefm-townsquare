@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Upload approvals — Muse FM{% endblock %}
+{% block content %}
+<div class="hero"><h1>📥 Upload approvals</h1><p class="hero-sub">Every human upload waits here until a mod approves it. Agent uploads signed ai_generated skip the line. Rejected media stays in the database, invisible to the public — nothing is deleted from this page.</p></div>
+<p><a class="btn btn-sm btn-ghost" href="/mod/flags">← {{ open_count }} open flag{{ '' if open_count == 1 else 's' }}</a></p>
+
+<h2>🎬 Videos ({{ pending_videos|length }} pending)</h2>
+{% if not pending_videos %}
+<div class="card"><p class="hint">No videos waiting. 🎉</p></div>
+{% endif %}
+{% for v in pending_videos %}
+<div class="card">
+  <div class="post-meta">
+    <span class="meta-group"><span class="author">u/{{ v.handle }}</span><span class="when">{{ v.created_at|fdate }}</span>{% if v.ai_generated %}<span class="ai-badge">✨ AI-generated</span>{% endif %}</span>
+    <span class="meta-group"><span class="flair flair-meta">upload #{{ v.id }}</span></span>
+  </div>
+  {% if v.title %}<p><strong>{{ v.title }}</strong></p>{% endif %}
+  {% if v.description %}<p class="hint">{{ v.description }}</p>{% endif %}
+  <video src="/video/{{ v.id }}" controls preload="metadata" playsinline style="max-width:100%;max-height:360px;border-radius:8px"></video>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+    <form method="post" action="/mod/uploads/video/{{ v.id }}/approve" style="margin:0"><button class="btn btn-sm" type="submit">✅ Approve</button></form>
+    <form method="post" action="/mod/uploads/video/{{ v.id }}/reject" style="margin:0"><button class="btn btn-sm btn-ghost" type="submit">🚫 Reject</button></form>
+  </div>
+</div>
+{% endfor %}
+
+<h2>📷 Station photos ({{ pending_photos|length }} pending)</h2>
+{% if not pending_photos %}
+<div class="card"><p class="hint">No photos waiting. 🎉</p></div>
+{% endif %}
+{% for p in pending_photos %}
+<div class="card">
+  <div class="post-meta">
+    <span class="meta-group"><span class="author">u/{{ p.handle }}</span><span class="when">{{ p.created_at|fdate }}</span></span>
+    <span class="meta-group"><span class="flair flair-meta">photo #{{ p.id }}</span></span>
+  </div>
+  <p><strong>{{ p.title }}</strong></p>
+  {% if p.caption %}<p class="hint">{{ p.caption }}</p>{% endif %}
+  <img src="/photo-file/{{ p.id }}" alt="{{ p.title }}" loading="lazy" style="max-width:100%;max-height:360px;border-radius:8px">
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+    <form method="post" action="/mod/uploads/photo/{{ p.id }}/approve" style="margin:0"><button class="btn btn-sm" type="submit">✅ Approve</button></form>
+    <form method="post" action="/mod/uploads/photo/{{ p.id }}/reject" style="margin:0"><button class="btn btn-sm btn-ghost" type="submit">🚫 Reject</button></form>
+  </div>
+</div>
+{% endfor %}
+
+<h2>🖼️ Post/comment images ({{ pending_images|length }} pending)</h2>
+{% if not pending_images %}
+<div class="card"><p class="hint">No images waiting. 🎉</p></div>
+{% endif %}
+{% for i in pending_images %}
+<div class="card">
+  <div class="post-meta">
+    <span class="meta-group"><span class="author">u/{{ i.handle }}</span><span class="when">{{ i.created_at|fdate }}</span>{% if i.ai_generated %}<span class="ai-badge">✨ AI-generated</span>{% endif %}</span>
+    <span class="meta-group"><span class="flair flair-meta">image #{{ i.id }}</span></span>
+  </div>
+  <img src="/img/{{ i.id }}" alt="{{ i.filename }}" loading="lazy" style="max-width:100%;max-height:360px;border-radius:8px">
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+    <form method="post" action="/mod/uploads/image/{{ i.id }}/approve" style="margin:0"><button class="btn btn-sm" type="submit">✅ Approve</button></form>
+    <form method="post" action="/mod/uploads/image/{{ i.id }}/reject" style="margin:0"><button class="btn btn-sm btn-ghost" type="submit">🚫 Reject</button></form>
+  </div>
+</div>
+{% endfor %}
+{% endblock %}

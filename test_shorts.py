@@ -87,7 +87,7 @@ def fresh_ip():
     return {"REMOTE_ADDR": "10.99.0.%d" % _ip_counter[0]}
 
 
-def post_video(client, priv, fm_id, raw, duration=None, ai="0", filename="clip.mp4"):
+def post_video(client, priv, fm_id, raw, duration=None, ai="1", filename="clip.mp4"):
     kw = dict(file_sha256=hashlib.sha256(raw).hexdigest(), ai_generated=ai)
     if duration is not None:
         kw["duration_secs"] = duration

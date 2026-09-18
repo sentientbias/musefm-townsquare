@@ -228,6 +228,8 @@ def ensure_video_schema(db):
     _ensure_col(db, "video_uploads", "description", "description TEXT")
     _ensure_col(db, "video_uploads", "comment_count",
                 "comment_count INTEGER NOT NULL DEFAULT 0")
+    _ensure_col(db, "video_uploads", "status",
+                "status TEXT NOT NULL DEFAULT 'approved'")
     _ensure_col(db, "posts", "video_url", "video_url TEXT NOT NULL DEFAULT ''")
     _ensure_col(db, "posts", "video_ai", "video_ai INTEGER NOT NULL DEFAULT 0")
     _ensure_col(db, "comments", "video_url", "video_url TEXT NOT NULL DEFAULT ''")
@@ -251,9 +253,18 @@ def valid_video_url(url):
 
 def create_video_upload(db, fm_id, handle, filename, raw, upload_dir,
                         ai_generated=False, duration_secs=None,
-                        title=None, description=None):
-    """Validate and store an uploaded video. Returns (uid, stored_path)."""
+                        title=None, description=None, status="pending"):
+    """Validate and store an uploaded video. Returns (uid, stored_path).
+
+    status: 'approved' (visible in feeds immediately) or 'pending'
+    (hidden until a mod approves). Human uploads always land pending;
+    signed agent uploads pass 'approved' only when ai_generated is set
+    (the generation engine's own filters + the signed attestation are
+    the moderation layer there).
+    """
     ensure_video_schema(db)
+    if status not in ("approved", "pending", "rejected"):
+        raise ValueError("bad status")
     if not raw:
         raise ValueError("empty file")
     if len(raw) > MAX_VIDEO_BYTES:
@@ -272,11 +283,13 @@ def create_video_upload(db, fm_id, handle, filename, raw, upload_dir,
                  ("upload." + ext))[:120]
     cur = db._exec(
         "INSERT INTO video_uploads (fm_id, handle, filename, stored_path, bytes,"
-        " mime, ai_generated, duration_secs, created_at, title, description)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        " mime, ai_generated, duration_secs, created_at, title, description,"
+        " status)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
         (fm_id, handle, safe_name, "", len(raw), mime,
          1 if ai_generated else 0, dur, int(time.time()),
-         (title or "")[:120] or None, (description or "")[:500] or None))
+         (title or "")[:120] or None, (description or "")[:500] or None,
+         status))
     uid = cur.lastrowid
     stored = "uploads/vid-%d.%s" % (uid, ext)
     os.makedirs(upload_dir, exist_ok=True)
@@ -346,7 +359,8 @@ def list_shorts(db, limit=10, before_id=None, series=None):
     _ensure_series_col(db)
     limit = max(1, min(int(limit or 10), 50))
     sql = ("SELECT * FROM video_uploads"
-           " WHERE (duration_secs IS NULL OR duration_secs < ?)")
+           " WHERE status='approved'"
+           " AND (duration_secs IS NULL OR duration_secs < ?)")
     args = [SHORTS_MAX_SECS]
     if series:
         sql += " AND series=?"
@@ -370,7 +384,8 @@ def list_short_ids(db, series=None):
     ensure_video_schema(db)
     _ensure_series_col(db)
     sql = ("SELECT id FROM video_uploads"
-           " WHERE (duration_secs IS NULL OR duration_secs < ?)")
+           " WHERE status='approved'"
+           " AND (duration_secs IS NULL OR duration_secs < ?)")
     args = [SHORTS_MAX_SECS]
     if series:
         sql += " AND series=?"
@@ -419,6 +434,33 @@ def set_series(db, uid, series):
     ensure_video_schema(db)
     _ensure_series_col(db)
     db._exec("UPDATE video_uploads SET series=? WHERE id=?", (series or "", int(uid)))
+
+
+def set_video_status(db, uid, status):
+    """Mod-only: move an upload through pending -> approved/rejected."""
+    if status not in ("approved", "pending", "rejected"):
+        raise ValueError("bad status")
+    ensure_video_schema(db)
+    cur = db._exec("UPDATE video_uploads SET status=? WHERE id=?",
+                   (status, int(uid)))
+    if cur.rowcount == 0:
+        raise ValueError("no such video upload")
+    return True
+
+
+def list_pending_videos(db, limit=50):
+    """Uploads waiting on mod approval, oldest first."""
+    ensure_video_schema(db)
+    return [dict(r) for r in db.db.execute(
+        "SELECT * FROM video_uploads WHERE status='pending'"
+        " ORDER BY created_at ASC, id ASC LIMIT ?",
+        (max(1, min(int(limit or 50), 200)),)).fetchall()]
+
+
+def count_pending_videos(db):
+    ensure_video_schema(db)
+    r = db._one("SELECT COUNT(*) c FROM video_uploads WHERE status='pending'")
+    return r["c"] if r else 0
 
 
 def set_video_meta(db, uid, title=None, description=None):

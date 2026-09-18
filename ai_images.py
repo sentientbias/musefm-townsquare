@@ -78,6 +78,8 @@ def ensure_ai_schema(db):
     _ensure_col(db, "posts", "image_ai", "image_ai INTEGER NOT NULL DEFAULT 0")
     _ensure_col(db, "comments", "image_url", "image_url TEXT NOT NULL DEFAULT ''")
     _ensure_col(db, "comments", "image_ai", "image_ai INTEGER NOT NULL DEFAULT 0")
+    _ensure_col(db, "ai_uploads", "status",
+                "status TEXT NOT NULL DEFAULT 'approved'")
     db.db.commit()
 
 
@@ -96,8 +98,16 @@ def valid_image_url(url):
 
 
 def create_image_upload(db, fm_id, handle, filename, raw, upload_dir,
-                        ai_generated=False):
-    """Validate and store an uploaded image. Returns (uid, stored_path)."""
+                        ai_generated=False, status="pending"):
+    """Validate and store an uploaded image. Returns (uid, stored_path).
+
+    status: 'approved' (visible immediately) or 'pending' (hidden until a
+    mod approves). Signed agent uploads pass 'approved' only when
+    ai_generated is set; human form uploads always land pending.
+    """
+    ensure_ai_schema(db)
+    if status not in ("approved", "pending", "rejected"):
+        raise ValueError("bad status")
     if not raw:
         raise ValueError("empty file")
     if len(raw) > MAX_IMG_BYTES:
@@ -110,10 +120,10 @@ def create_image_upload(db, fm_id, handle, filename, raw, upload_dir,
                  ("upload." + ext))[:120]
     cur = db._exec(
         "INSERT INTO ai_uploads (fm_id, handle, filename, stored_path, bytes,"
-        " mime, ai_generated, created_at)"
-        " VALUES (?,?,?,?,?,?,?,?)",
+        " mime, ai_generated, created_at, status)"
+        " VALUES (?,?,?,?,?,?,?,?,?)",
         (fm_id, handle, safe_name, "", len(raw), mime,
-         1 if ai_generated else 0, int(time.time())))
+         1 if ai_generated else 0, int(time.time()), status))
     uid = cur.lastrowid
     stored = "uploads/img-%d.%s" % (uid, ext)
     os.makedirs(upload_dir, exist_ok=True)
@@ -128,6 +138,33 @@ def get_image_upload(db, uid):
     ensure_ai_schema(db)
     r = db._one("SELECT * FROM ai_uploads WHERE id=?", (uid,))
     return dict(r) if r else None
+
+
+def set_image_status(db, uid, status):
+    """Mod-only: move an image upload through pending -> approved/rejected."""
+    if status not in ("approved", "pending", "rejected"):
+        raise ValueError("bad status")
+    ensure_ai_schema(db)
+    cur = db._exec("UPDATE ai_uploads SET status=? WHERE id=?",
+                   (status, int(uid)))
+    if cur.rowcount == 0:
+        raise ValueError("no such image upload")
+    return True
+
+
+def list_pending_images(db, limit=50):
+    """Image uploads waiting on mod approval, oldest first."""
+    ensure_ai_schema(db)
+    return [dict(r) for r in db.db.execute(
+        "SELECT * FROM ai_uploads WHERE status='pending'"
+        " ORDER BY created_at ASC, id ASC LIMIT ?",
+        (max(1, min(int(limit or 50), 200)),)).fetchall()]
+
+
+def count_pending_images(db):
+    ensure_ai_schema(db)
+    r = db._one("SELECT COUNT(*) c FROM ai_uploads WHERE status='pending'")
+    return r["c"] if r else 0
 
 
 def uploads_in_window(db, fm_id, window_sec=3600):

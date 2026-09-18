@@ -3,8 +3,9 @@
 {% block content %}
 <div class="card">
   <h1>📷 Add a station photo</h1>
-  <p class="hint">Original imagery only. PNG, JPEG, GIF, or WebP.</p>
+  <p class="hint">Original imagery only. PNG, JPEG, GIF, or WebP. A mod reviews every upload before it goes live.</p>
   {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  {% if pending %}<p class="notice">✅ Photo received — it's waiting on mod approval and will appear in the gallery once approved.</p>{% endif %}
   <form method="post" enctype="multipart/form-data" action="/photos/upload">
     <p class="hint">Uploading as 🧍 <strong>@{{ session_handle }}</strong></p>
     <p><input class="input" name="title" placeholder="Title" required maxlength="120"></p>

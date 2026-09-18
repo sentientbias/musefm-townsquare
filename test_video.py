@@ -330,8 +330,11 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
         video_url=jw["video_url"], video_ai=False), environ_base=fresh_ip())
     pid2 = r.get_json()["id"]
     html2 = client.get("/c/lobby/post/%d" % pid2).get_data(as_text=True)
+    # unflagged video: no badge — and since the upload wasn't marked
+    # AI-generated it now waits in the approval queue, rendering the
+    # pending placeholder instead of the player.
     check("no badge when unflagged",
-          "AI-generated" not in html2 and jw["video_url"] in html2)
+          "AI-generated" not in html2 and "pending mod review" in html2)
 
     # bad video_url rejected
     r = client.post("/api/forum/post", json=signed_body(

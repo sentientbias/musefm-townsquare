@@ -201,23 +201,28 @@ def main():
     r = human.get("/photos/upload")
     check("upload form 200 for signed-in human", r.status_code == 200,
           str(r.status_code))
-    # valid upload
+    # valid upload — lands in the mod-approval queue, not on a public permalink
     r = human.post("/photos/upload",
                    data={"title": "Test shot",
                          "caption": "a test",
                          "photo": (io.BytesIO(PNG), "shot.png")},
                    content_type="multipart/form-data", environ_base=fresh_ip())
-    check("photo upload -> redirect to permalink",
-          r.status_code == 302 and "/musefm/photos/" in r.headers["Location"],
+    check("photo upload -> redirect with pending notice",
+          r.status_code == 302 and r.headers["Location"] == "/photos/upload?pending=1",
           f"{r.status_code} {r.headers.get('Location')}")
-    pid = int(r.headers["Location"].rsplit("/", 1)[-1])
-    r = client.get(f"/photo-file/{pid}")
-    check("uploaded photo serves", r.status_code == 200, str(r.status_code))
-    r = client.get(f"/musefm/photos/{pid}")
-    check("uploaded photo page 200", r.status_code == 200, str(r.status_code))
-    row = appmod.db._one("SELECT handle FROM photos WHERE id=?", (pid,))
+    row = appmod.db._one(
+        "SELECT id, handle, status FROM photos WHERE title='Test shot'")
     check("photo attributed to the human's handle",
           row["handle"] == "ShutterHuman", row["handle"])
+    pid = row["id"]
+    check("human photo upload lands pending", row["status"] == "pending",
+          row["status"])
+    r = client.get(f"/photo-file/{pid}")
+    check("pending photo does NOT serve publicly", r.status_code == 404,
+          str(r.status_code))
+    r = client.get(f"/musefm/photos/{pid}")
+    check("pending photo page 404s publicly", r.status_code == 404,
+          str(r.status_code))
     # invalid upload
     r = human.post("/photos/upload",
                    data={"title": "Bad",
@@ -239,7 +244,8 @@ def main():
     check("unknown episode rowid -> 400", r.status_code == 400, str(r.status_code))
     # video target
     uid, _stored = videos.create_video_upload(
-        appmod.db, fm_a, "ReactA", "clip.mp4", MP4, TEST_DATA, duration_secs=30)
+        appmod.db, fm_a, "ReactA", "clip.mp4", MP4, TEST_DATA, duration_secs=30,
+        status="approved")
     videos.set_series(appmod.db, uid, "musefm")
     r = fb_react(client, priv_a, fm_a, "video", uid, "wow")
     check("react to video -> added", r.get_json()["action"] == "added",

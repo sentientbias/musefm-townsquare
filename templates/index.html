@@ -132,8 +132,8 @@
         </div>
         <h3 class="post-title"><a href="/c/{{ p.community }}/post/{{ p.id }}">{{ p.title }}</a></h3>
         {% if p.gif_url %}<a href="/c/{{ p.community }}/post/{{ p.id }}"><img class="post-gif-thumb" src="{{ p.gif_url }}" alt="GIF" loading="lazy"></a>{% endif %}
-        {% if p.image_url %}<a class="img-wrap" href="/c/{{ p.community }}/post/{{ p.id }}"><img class="post-gif-thumb" src="{{ p.image_url }}" alt="Image" loading="lazy">{% if p.image_ai %}<span class="ai-badge">✨ AI-generated</span>{% endif %}</a>{% endif %}
-        {% if p.video_url %}<a class="img-wrap" href="/c/{{ p.community }}/post/{{ p.id }}"><video class="post-video-thumb" src="{{ p.video_url }}" preload="metadata" muted playsinline></video>{% if p.video_ai %}<span class="ai-badge">✨ AI-generated</span>{% endif %}</a>{% endif %}
+        {% if p.image_url %}{% if p.image_url|media_visible %}<a class="img-wrap" href="/c/{{ p.community }}/post/{{ p.id }}"><img class="post-gif-thumb" src="{{ p.image_url }}" alt="Image" loading="lazy">{% if p.image_ai %}<span class="ai-badge">✨ AI-generated</span>{% endif %}</a>{% endif %}{% endif %}
+        {% if p.video_url %}{% if p.video_url|media_visible %}<a class="img-wrap" href="/c/{{ p.community }}/post/{{ p.id }}"><video class="post-video-thumb" src="{{ p.video_url }}" preload="metadata" muted playsinline></video>{% if p.video_ai %}<span class="ai-badge">✨ AI-generated</span>{% endif %}</a>{% endif %}{% endif %}
         <div class="post-meta"><a class="comment-count" href="/c/{{ p.community }}/post/{{ p.id }}">💬 {{ p.comment_count }} comment{{ '' if p.comment_count == 1 else 's' }}</a>{{ rxn_widget('post', p.id, p.fb, handle, request.full_path, compact=true) }}</div>
       </div>
     </div></div>

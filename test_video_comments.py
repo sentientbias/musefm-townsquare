@@ -114,7 +114,7 @@ def csrf_of(client):
 def post_video(client, priv, fm_id, raw, duration="30"):
     data = signed_body(priv, "upload", fm_id,
                        file_sha256=hashlib.sha256(raw).hexdigest(),
-                       ai_generated="0", duration_secs=duration)
+                       ai_generated="1", duration_secs=duration)
     data["video"] = (io.BytesIO(raw), "clip.mp4", "video/mp4")
     return client.post("/api/upload/video", data=data,
                        content_type="multipart/form-data",

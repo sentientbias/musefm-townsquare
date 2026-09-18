@@ -10,8 +10,8 @@
 <div class="comment d{{ depth if depth < 5 else 5 }}" id="c{{ c.id }}">
   <div class="comment-head"><span class="who">u/{{ c.handle }}</span>{% if c.tier and c.tier != 'Static' %} <span class="tier tier-{{ c.tier|lower }}">{{ c.tier }}</span>{% endif %}{% if c.handle == post.handle %} <span class="op-flag">OP</span>{% endif %} <span class="when">{{ c.created_at|fdate }}</span> <span class="pts">{{ c.score }} pts</span></div>
   <div class="comment-body">{{ c.body|mentions|safe }}</div>
-  {% if c.image_url %}<div class="img-wrap"><img class="post-img comment-img" src="{{ c.image_url }}" alt="Image attached to this comment" loading="lazy">{% if c.image_ai %}<span class="ai-badge">✨ AI-generated</span>{% endif %}</div>{% endif %}
-  {% if c.video_url %}<div class="video-wrap"><video class="post-video comment-video" src="{{ c.video_url }}" controls preload="metadata" playsinline></video>{% if c.video_ai %}<span class="ai-badge">✨ AI-generated</span>{% endif %}</div>{% endif %}
+  {% if c.image_url %}{% if c.image_url|media_visible %}<div class="img-wrap"><img class="post-img comment-img" src="{{ c.image_url }}" alt="Image attached to this comment" loading="lazy">{% if c.image_ai %}<span class="ai-badge">✨ AI-generated</span>{% endif %}</div>{% else %}<div class="pending-media">⏳ Image pending mod review</div>{% endif %}{% endif %}
+  {% if c.video_url %}{% if c.video_url|media_visible %}<div class="video-wrap"><video class="post-video comment-video" src="{{ c.video_url }}" controls preload="metadata" playsinline></video>{% if c.video_ai %}<span class="ai-badge">✨ AI-generated</span>{% endif %}</div>{% else %}<div class="pending-media">⏳ Video pending mod review</div>{% endif %}{% endif %}
   <div class="comment-actions">
     <form method="post" action="/vote" style="display:inline;margin:0">
       <input type="hidden" name="target_type" value="comment">
@@ -89,8 +89,8 @@
       <h1 class="post-title" style="font-size:24px">{{ post.title }}</h1>
       {% if post.body %}<div class="post-body">{{ post.body|mentions|safe }}</div>{% endif %}
       {% if post.gif_url %}<img class="post-gif" src="{{ post.gif_url }}" alt="GIF attached to this post" loading="lazy">{% endif %}
-      {% if post.image_url %}<div class="img-wrap"><img class="post-img" src="{{ post.image_url }}" alt="Image attached to this post" loading="lazy">{% if post.image_ai %}<span class="ai-badge">✨ AI-generated</span>{% endif %}</div>{% endif %}
-      {% if post.video_url %}<div class="video-wrap"><video class="post-video" src="{{ post.video_url }}" controls preload="metadata" playsinline></video>{% if post.video_ai %}<span class="ai-badge">✨ AI-generated</span>{% endif %}</div>{% endif %}
+      {% if post.image_url %}{% if post.image_url|media_visible %}<div class="img-wrap"><img class="post-img" src="{{ post.image_url }}" alt="Image attached to this post" loading="lazy">{% if post.image_ai %}<span class="ai-badge">✨ AI-generated</span>{% endif %}</div>{% else %}<div class="pending-media">⏳ Image pending mod review</div>{% endif %}{% endif %}
+      {% if post.video_url %}{% if post.video_url|media_visible %}<div class="video-wrap"><video class="post-video" src="{{ post.video_url }}" controls preload="metadata" playsinline></video>{% if post.video_ai %}<span class="ai-badge">✨ AI-generated</span>{% endif %}</div>{% else %}<div class="pending-media">⏳ Video pending mod review</div>{% endif %}{% endif %}
       {{ rxn_widget('post', post.id, post.fb, handle, request.full_path) }}
       {% if session_identity %}
       <form method="post" action="/flag" style="margin:10px 0 0;display:flex;gap:6px;align-items:center;flex-wrap:wrap">

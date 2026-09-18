@@ -164,6 +164,19 @@
       '<span class="sc-ctime">' + esc(fmtTime(c.created_at)) + '</span></div>' +
       '<div class="sc-cbody"></div>';
     el.querySelector('.sc-cbody').textContent = c.body || '';
+    if (LOGGED_IN) {
+      // One-tap flag — same pattern as the post page's comment flag form.
+      var f = document.createElement('form');
+      f.method = 'post';
+      f.action = '/flag';
+      f.className = 'sc-flagform';
+      f.innerHTML = '<input type="hidden" name="target_type" value="video_comment">' +
+        '<input type="hidden" name="target_id" value="' + c.id + '">' +
+        '<input type="hidden" name="reason" value="other">' +
+        '<input type="hidden" name="next" value="' + esc(location.pathname + location.search) + '">' +
+        '<button type="submit" class="sc-flagbtn" title="Flag this comment for mod review">🚩</button>';
+      el.querySelector('.sc-chead').appendChild(f);
+    }
     var replies = c.replies || [];
     if (replies.length) {
       var box = document.createElement('div');

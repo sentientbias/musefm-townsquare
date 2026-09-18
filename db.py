@@ -918,12 +918,18 @@ class Database:
                   reason="other"):
         """Record a content flag. One flag per flagger per target (re-flagging
         updates the reason). Raises ValueError on bad target/reason."""
-        if target_type not in ("post", "comment"):
-            raise ValueError("target_type must be post or comment")
+        if target_type not in ("post", "comment", "video_comment"):
+            raise ValueError("target_type must be post, comment, or video_comment")
         if reason not in self.FLAG_REASONS:
             raise ValueError("bad reason (spam, harassment, nsfw, misinfo, other)")
-        table = "posts" if target_type == "post" else "comments"
-        if not self._one(f"SELECT id FROM {table} WHERE id=?", (target_id,)):
+        table = {"post": "posts", "comment": "comments",
+                 "video_comment": "video_comments"}[target_type]
+        try:
+            known = self._one(f"SELECT id FROM {table} WHERE id=?", (target_id,))
+        except sqlite3.OperationalError:
+            # Pre-migration scratch DBs may lack the video_comments table.
+            raise ValueError("unknown target")
+        if not known:
             raise ValueError("unknown target")
         reason = clean(reason, 20)
         cur = self._exec(
@@ -1091,7 +1097,25 @@ class Database:
         return r["rid"] if r else None
 
     # -- photos -----------------------------------------------------------
-    def add_photo(self, title, caption, img_path, credit="", handle="Zuckbot"):
+    def _ensure_photo_status_col(self):
+        # Scratch/test DBs built straight from Database() may predate the
+        # approval-queue migration; add the column lazily instead of failing.
+        cols = [r["name"] for r in self.db.execute("PRAGMA table_info(photos)")]
+        if "status" not in cols:
+            self.db.execute(
+                "ALTER TABLE photos ADD COLUMN status TEXT NOT NULL DEFAULT 'approved'")
+            self.db.commit()
+
+    def add_photo(self, title, caption, img_path, credit="", handle="Zuckbot",
+                  status="approved"):
+        """Add a photo. status 'pending' hides it until a mod approves.
+
+        Human form uploads always land pending; signed agent publishes pass
+        'approved' only when the source upload is AI-generated.
+        """
+        self._ensure_photo_status_col()
+        if status not in ("approved", "pending", "rejected"):
+            raise ValueError("bad status")
         title = clean(title, 120)
         if not title:
             raise ValueError("photo title required")
@@ -1100,9 +1124,10 @@ class Database:
         if has_banned(title + " " + caption):
             raise ValueError("content blocked by the town filter")
         cur = self._exec(
-            "INSERT INTO photos (title, caption, img_path, credit, handle, created_at)"
-            " VALUES (?,?,?,?,?,?)",
-            (title, caption, img_path, credit, handle, now()))
+            "INSERT INTO photos (title, caption, img_path, credit, handle, created_at,"
+            " status)"
+            " VALUES (?,?,?,?,?,?,?)",
+            (title, caption, img_path, credit, handle, now(), status))
         return cur.lastrowid
 
     def get_photo(self, pid):
@@ -1110,9 +1135,35 @@ class Database:
         return dict(r) if r else None
 
     def list_photos(self, limit=50):
+        self._ensure_photo_status_col()
         return [dict(r) for r in self._q(
-            "SELECT * FROM photos ORDER BY created_at DESC, id DESC LIMIT ?",
+            "SELECT * FROM photos WHERE status='approved'"
+            " ORDER BY created_at DESC, id DESC LIMIT ?",
             (int(limit),))]
+
+    def list_pending_photos(self, limit=50):
+        """Photos waiting on mod approval, oldest first."""
+        self._ensure_photo_status_col()
+        return [dict(r) for r in self._q(
+            "SELECT * FROM photos WHERE status='pending'"
+            " ORDER BY created_at ASC, id ASC LIMIT ?",
+            (max(1, min(int(limit or 50), 200)),))]
+
+    def count_pending_photos(self):
+        self._ensure_photo_status_col()
+        r = self._one("SELECT COUNT(*) c FROM photos WHERE status='pending'")
+        return r["c"] if r else 0
+
+    def set_photo_status(self, pid, status):
+        """Mod-only: move a photo through pending -> approved/rejected."""
+        self._ensure_photo_status_col()
+        if status not in ("approved", "pending", "rejected"):
+            raise ValueError("bad status")
+        cur = self._exec("UPDATE photos SET status=? WHERE id=?",
+                         (status, int(pid)))
+        if cur.rowcount == 0:
+            raise ValueError("no such photo")
+        return True
 
     # -- musefm seeds (idempotent: safe to run on every boot) --------------
     def ensure_musefm_seeds(self):
@@ -2124,6 +2175,12 @@ def ensure_musefm_media_schema(db):
         "  created_at INTEGER NOT NULL"
         ");"
         "CREATE INDEX IF NOT EXISTS idx_photos_time ON photos(created_at DESC);")
+    cols = [r["name"] for r in db.db.execute("PRAGMA table_info(photos)")]
+    if "status" not in cols:
+        # 'approved' default: everything published before the approval queue
+        # existed stays visible; new uploads set their own status explicitly.
+        db.db.execute(
+            "ALTER TABLE photos ADD COLUMN status TEXT NOT NULL DEFAULT 'approved'")
     db.db.commit()
 
 

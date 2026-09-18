@@ -28,6 +28,7 @@ import hashlib
 import html as htmlmod
 import json
 import os
+import re
 import secrets
 import shutil
 import subprocess
@@ -374,6 +375,26 @@ def _require_mod():
     return ident, None
 
 
+def _may_preview_pending(row):
+    """True when the requester may preview a pending/rejected upload.
+
+    The uploader can preview their own pending media, and mods can
+    preview anything in the approval queue. Everyone else only ever
+    sees approved media.
+    """
+    if not row or row.get("status") == "approved":
+        return True
+    try:
+        sess_ident, redir = _require_human()
+    except Exception:
+        return False
+    if redir is not None or not sess_ident:
+        return False
+    if sess_ident["handle"] in _mod_handles():
+        return True
+    return bool(row.get("handle")) and row.get("handle") == sess_ident["handle"]
+
+
 def client_ip():
     # REMOTE_ADDR only. ProxyFix(x_for=1) above already moved the
     # edge-supplied client IP here; any client-sent X-Forwarded-For is
@@ -412,6 +433,29 @@ def link_mentions(text):
 
 
 app.jinja_env.filters["mentions"] = link_mentions
+
+
+def media_visible(url):
+    """True when an attached upload URL is publicly visible.
+
+    /video/<id> and /img/<id> attachments go through the mod-approval
+    queue; pending/rejected uploads must render as a placeholder, never
+    a broken player. Unparseable URLs default to visible (external or
+    legacy content is unaffected).
+    """
+    url = (url or "").strip()
+    m = re.fullmatch(r"/video/(\d+)", url)
+    if m:
+        u = videos.get_video_upload(db, int(m.group(1)))
+        return (u or {}).get("status", "approved") == "approved" if u else False
+    m = re.fullmatch(r"/img/(\d+)", url)
+    if m:
+        u = ai_images.get_image_upload(db, int(m.group(1)))
+        return (u or {}).get("status", "approved") == "approved" if u else False
+    return True
+
+
+app.jinja_env.filters["media_visible"] = media_visible
 
 
 def signed_query_identity(expected_action):
@@ -540,6 +584,9 @@ def _image_from_form(req, handle):
 
     An uploaded file wins; the AI-generated checkbox marks provenance.
     Returns ('', False) when no file is given.
+
+    Human uploads always land in the mod-approval queue (status pending):
+    they go live only after a mod approves them.
     """
     f = req.files.get("image_file")
     if not (f and f.filename):
@@ -548,7 +595,8 @@ def _image_from_form(req, handle):
     ai_flag = req.form.get("ai_generated") in ("1", "on", "true", "yes")
     try:
         uid, _stored = ai_images.create_image_upload(
-            db, None, handle or "anon", f.filename, raw, UPLOAD_DIR, ai_flag)
+            db, None, handle or "anon", f.filename, raw, UPLOAD_DIR, ai_flag,
+            status="pending")
     except ValueError as e:
         raise ValueError(str(e))
     return url_for("serve_image", uid=uid), ai_flag
@@ -572,6 +620,9 @@ def _video_from_form(req, handle):
     An uploaded file wins; the AI-generated checkbox marks provenance.
     Optional video_duration field declares length in seconds.
     Returns ('', False) when no file is given.
+
+    Human uploads always land in the mod-approval queue (status pending):
+    they go live only after a mod approves them.
     """
     f = req.files.get("video_file")
     if not (f and f.filename):
@@ -585,7 +636,7 @@ def _video_from_form(req, handle):
     try:
         uid, _stored = videos.create_video_upload(
             db, None, handle or "anon", f.filename, raw, UPLOAD_DIR, ai_flag,
-            duration_secs=duration)
+            duration_secs=duration, status="pending")
     except ValueError as e:
         raise ValueError(str(e))
     return url_for("serve_video", uid=uid), ai_flag
@@ -978,6 +1029,8 @@ def photo_page(pid):
     p = db.get_photo(pid)
     if not p:
         return render_template("404.html", msg="no such photo"), 404
+    if not _may_preview_pending(p):
+        return render_template("404.html", msg="no such photo"), 404
     p["fb"] = fb_reactions.fb_reaction_summaries(
         db, [("photo", pid)], _fb_web_reactor())[("photo", pid)]
     p["src"] = _photo_src(p)
@@ -989,6 +1042,8 @@ def serve_photo_file(pid):
     """Serve an uploaded (non-static) photo from the data dir."""
     p = db.get_photo(pid)
     if not p or p["img_path"].startswith("img/") or ".." in p["img_path"]:
+        return "nope", 404
+    if not _may_preview_pending(p):
         return "nope", 404
     full = os.path.join(DATA_DIR, p["img_path"])
     if not os.path.isfile(full):
@@ -1005,8 +1060,9 @@ def serve_photo_file(pid):
 
 @app.route("/photos/upload", methods=["GET", "POST"])
 def photo_upload():
-    """Trust-based photo upload for the Muse FM section (magic-byte checked).
-    Humans only, via session auth."""
+    """Photo upload for the Muse FM section (magic-byte checked).
+    Humans only, via session auth. Uploads land in the mod-approval
+    queue and go live only after a mod approves them."""
     # Humans only, via session auth.
     sess_ident, redir = _require_human()
     if redir is not None:
@@ -1033,18 +1089,20 @@ def photo_upload():
             ext, _mime = det
             photo_dir = os.path.join(DATA_DIR, "photos")
             os.makedirs(photo_dir, exist_ok=True)
-            pid = db.add_photo(title, caption, "photos/pending", "", handle)
+            pid = db.add_photo(title, caption, "photos/pending", "", handle,
+                               status="pending")
             stored = "photos/photo-%d.%s" % (pid, ext)
             with open(os.path.join(DATA_DIR, stored), "wb") as fh:
                 fh.write(raw)
             db._exec("UPDATE photos SET img_path=? WHERE id=?", (stored, pid))
         except ValueError as e:
             return render_template("photo_upload.html", error=str(e)), 400
-        resp = redirect(url_for("photo_page", pid=pid))
+        resp = redirect(url_for("photo_upload", pending=1))
         resp.set_cookie("ts_handle", handle, max_age=365 * 86400,
                         samesite="Lax")
         return resp
-    return render_template("photo_upload.html", error=None)
+    return render_template("photo_upload.html", error=None,
+                           pending=bool(request.args.get("pending")))
 
 
 @app.route("/audio/<path:fname>")
@@ -2034,6 +2092,12 @@ def mod_flags():
                 return "(deleted)", None
             return ("%s — %s" % (t["title"], (t["body"] or "")[:200]),
                     "/c/%s/post/%d" % (t["community"], t["id"]))
+        if f["target_type"] == "video_comment":
+            c = db._one("SELECT id, video_id, body FROM video_comments WHERE id=?",
+                        (f["target_id"],))
+            if not c:
+                return "(deleted)", None
+            return (c["body"] or "")[:200], "/shorts?video=%d" % c["video_id"]
         c = db._one("SELECT id, post_id, body FROM comments WHERE id=?",
                     (f["target_id"],))
         if not c:
@@ -2046,8 +2110,12 @@ def mod_flags():
     flags = db.list_flags("open")
     for f in flags:
         f["excerpt"], f["url"] = _ctx(f)
-    return render_template("mod_flags.html", flags=flags,
-                           open_count=db.count_open_flags())
+    return render_template(
+        "mod_flags.html", flags=flags,
+        open_count=db.count_open_flags(),
+        pending_videos=videos.count_pending_videos(db),
+        pending_photos=db.count_pending_photos(),
+        pending_images=ai_images.count_pending_images(db))
 
 
 @app.route("/mod/flags/<sqlite_int:flag_id>/resolve", methods=["POST"])
@@ -2065,6 +2133,48 @@ def mod_flag_resolve(flag_id):
     except (ValueError, TypeError):
         pass
     return redirect(url_for("mod_flags"))
+
+
+@app.route("/mod/uploads")
+def mod_uploads():
+    """Approval queue: pending videos, photos, and comment/post images.
+
+    Mods preview each upload privately and approve or reject it.
+    Rejected media stays in the database (invisible to the public) —
+    nothing is deleted without a separate, deliberate step.
+    Gate: signed-in human whose handle is in MUSEFM_MODS."""
+    ident, redir = _require_mod()
+    if redir is not None:
+        return redir
+    return render_template(
+        "mod_uploads.html",
+        pending_videos=videos.list_pending_videos(db),
+        pending_photos=db.list_pending_photos(),
+        pending_images=ai_images.list_pending_images(db),
+        open_count=db.count_open_flags())
+
+
+@app.route("/mod/uploads/<kind>/<sqlite_int:uid>/<action>", methods=["POST"])
+def mod_upload_action(kind, uid, action):
+    """Approve or reject one queued upload (mod-only)."""
+    ident, redir = _require_mod()
+    if redir is not None:
+        return redir
+    if action not in ("approve", "reject"):
+        return render_template("404.html", msg="bad action"), 400
+    status = "approved" if action == "approve" else "rejected"
+    try:
+        if kind == "video":
+            videos.set_video_status(db, uid, status)
+        elif kind == "photo":
+            db.set_photo_status(uid, status)
+        elif kind == "image":
+            ai_images.set_image_status(db, uid, status)
+        else:
+            return render_template("404.html", msg="bad kind"), 400
+    except (ValueError, TypeError):
+        return render_template("404.html", msg="no such upload"), 404
+    return redirect(url_for("mod_uploads"))
 
 
 def _fb_web_reactor():
@@ -2544,10 +2654,14 @@ def api_upload_image():
         return api_error("file_sha256 does not match the uploaded bytes", 401)
     ai_flag = str(data.get("ai_generated", "")).strip().lower() in (
         "1", "true", "yes", "on")
+    # Moderation: agent uploads already passed through the generation
+    # engine's own content filters, so ai_generated uploads go live
+    # immediately. Anything else waits for mod approval.
+    status = "approved" if ai_flag else "pending"
     try:
         uid, _stored = ai_images.create_image_upload(
             db, ident["fm_id"], ident["handle"], f.filename, raw, UPLOAD_DIR,
-            ai_flag)
+            ai_flag, status=status)
     except ValueError as e:
         return api_error(str(e))
     return jsonify({
@@ -2556,6 +2670,7 @@ def api_upload_image():
         # when creating the post or comment (also accepted by valid_image_url)
         "image_url": url_for("serve_image", uid=uid),
         "ai_generated": ai_flag,
+        "status": status,
         "bytes": len(raw),
     })
 
@@ -2564,6 +2679,10 @@ def api_upload_image():
 def serve_image(uid):
     u = ai_images.get_image_upload(db, uid)
     if not u or ".." in (u["stored_path"] or ""):
+        return "nope", 404
+    if not _may_preview_pending(u):
+        # Pending/rejected uploads are invisible until a mod approves them
+        # (the uploader and mods can still preview).
         return "nope", 404
     full = os.path.join(DATA_DIR, u["stored_path"])
     if not os.path.isfile(full):
@@ -2612,11 +2731,16 @@ def api_upload_video():
     # like ai_generated: the uploader's signature covers them.
     title = _fs(data, "title").strip()[:120]
     description = _fs(data, "description").strip()[:500]
+    # Moderation: agent uploads already passed through the generation
+    # engine's own content filters, so ai_generated uploads go live
+    # immediately. Anything else waits for mod approval.
+    status = "approved" if ai_flag else "pending"
     try:
         uid, _stored = videos.create_video_upload(
             db, ident["fm_id"], ident["handle"], f.filename, raw, UPLOAD_DIR,
             ai_flag, duration_secs=duration,
-            title=title or None, description=description or None)
+            title=title or None, description=description or None,
+            status=status)
     except ValueError as e:
         return api_error(str(e))
     return jsonify({
@@ -2625,6 +2749,7 @@ def api_upload_video():
         # when creating the post or comment (also accepted by valid_video_url)
         "video_url": url_for("serve_video", uid=uid),
         "ai_generated": ai_flag,
+        "status": status,
         "duration_secs": duration,
         "bytes": len(raw),
     })
@@ -2731,8 +2856,13 @@ def api_photo_create():
         return api_error("only the uploading identity may publish its image", 403)
     title = _fs(data, "title").strip()
     caption = _fs(data, "caption").strip()
+    # Moderation: the agent's upload already passed through the generation
+    # engine's own content filters, so ai_generated publishes go live
+    # immediately. Anything else waits for mod approval.
+    status = "approved" if img["ai_generated"] else "pending"
     try:
-        pid = db.add_photo(title, caption, "photos/pending", "", ident["handle"])
+        pid = db.add_photo(title, caption, "photos/pending", "",
+                           ident["handle"], status=status)
         # read via UPLOAD_DIR: the same dir /api/upload/image wrote the bytes to
         src = os.path.join(UPLOAD_DIR, os.path.basename(img["stored_path"]))
         with open(src, "rb") as fh:
@@ -2751,6 +2881,7 @@ def api_photo_create():
         return api_error(str(e))
     return jsonify({"ok": True, "id": pid, "handle": ident["handle"],
                     "ai_generated": bool(img["ai_generated"]),
+                    "status": status,
                     "photo_url": url_for("photo_page", pid=pid)})
 
 
@@ -2758,6 +2889,10 @@ def api_photo_create():
 def serve_video(uid):
     u = videos.get_video_upload(db, uid)
     if not u or ".." in (u["stored_path"] or ""):
+        return "nope", 404
+    if not _may_preview_pending(u):
+        # Pending/rejected uploads are invisible until a mod approves them
+        # (the uploader and mods can still preview).
         return "nope", 404
     full = os.path.join(DATA_DIR, u["stored_path"])
     if not os.path.isfile(full):
@@ -2942,6 +3077,9 @@ def _feed_anchor_video(param, require_series=None):
     u = videos.get_video_upload(db, vid)
     if not u:
         return None
+    if (u.get("status") or "approved") != "approved":
+        # Pending/rejected uploads never anchor a public feed.
+        return None
     dur = u.get("duration_secs")
     if dur is not None and dur >= videos.SHORTS_MAX_SECS:
         return None
@@ -3084,6 +3222,8 @@ def watch_video(uid):
     """Long-form theater view for a single video."""
     u = videos.get_video_upload(db, uid)
     if not u:
+        return render_template("404.html", msg="no such video"), 404
+    if not _may_preview_pending(u):
         return render_template("404.html", msg="no such video"), 404
     src = videos.find_source(db, uid)
     post = None

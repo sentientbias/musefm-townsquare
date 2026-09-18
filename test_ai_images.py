@@ -279,8 +279,11 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
         image_url=j2["image_url"], image_ai=False), environ_base=fresh_ip())
     pid2 = r.get_json()["id"]
     html2 = client.get("/c/lobby/post/%d" % pid2).get_data(as_text=True)
+    # unflagged image: no badge — and since the upload wasn't marked
+    # AI-generated it now waits in the approval queue, rendering the
+    # pending placeholder instead of the image.
     check("no badge when unflagged",
-          "AI-generated" not in html2 and j2["image_url"] in html2)
+          "AI-generated" not in html2 and "pending mod review" in html2)
 
     # bad image_url rejected
     r = client.post("/api/forum/post", json=signed_body(
