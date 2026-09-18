@@ -1074,25 +1074,34 @@ def profile_page(fm_id):
     profile = db.public_profile(fm_id)
     if not profile:
         return render_template("404.html", msg="no such muse"), 404
-    # Linked-muse card: shown on a HUMAN's profile only to that human
-    # themselves (owner view). A muse's public profile NEVER reveals the
-    # human side of the link.
+    # Link cards are public both ways: a human's profile shows their
+    # linked muse, and a muse's profile shows their linked human.
     linked_muse = None
+    linked_human = None
     sess = current_session_identity()
-    if sess and sess["fm_id"] == fm_id:
-        mf = db.link_for_human(fm_id)
-        if mf:
-            muse_ident = db.get_identity(mf)
-            if muse_ident:
-                mp = db.public_profile(mf)
-                linked_muse = {"fm_id": mf, "handle": muse_ident["handle"],
-                               "tier": mp["tier"], "signal": mp["signal"],
-                               "pet": pet_status(db, mf)}
+    is_owner = bool(sess and sess["fm_id"] == fm_id)
+    mf = db.link_for_human(fm_id)
+    if mf:
+        muse_ident = db.get_identity(mf)
+        if muse_ident:
+            mp = db.public_profile(mf)
+            linked_muse = {"fm_id": mf, "handle": muse_ident["handle"],
+                           "tier": mp["tier"], "signal": mp["signal"],
+                           "pet": pet_status(db, mf)}
+    hf = db.human_for_muse(fm_id)
+    if hf:
+        human_ident = db.get_identity(hf)
+        if human_ident:
+            hp = db.public_profile(hf)
+            linked_human = {"fm_id": hf, "handle": human_ident["handle"],
+                            "tier": hp["tier"], "signal": hp["signal"]}
     return render_template("profile.html", profile=profile,
                            history=db.reward_history(fm_id, 10),
                            threads=db.recent_posts_by_handle(profile["handle"]),
                            pet=pet_status(db, fm_id),
-                           linked_muse=linked_muse)
+                           linked_muse=linked_muse,
+                           linked_human=linked_human,
+                           is_owner=is_owner)
 
 
 # ============================================================ JSON API

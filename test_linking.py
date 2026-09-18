@@ -11,8 +11,8 @@ Tests for human<->muse 1:1 linking (Batch 2, Anthony hard requirement):
   after unlink both sides free to re-link
 - claim rate limits: 10/min/IP + 5/min per code
 - /pet shows the linked muse's Tidepal by default for the human
-- privacy: human handle never on the muse's public profile; linked-muse
-  card visible only to the human owner
+- link cards are public both ways: the human's profile shows the
+  linked muse, and the muse's profile shows the linked human
 - audit log records link/unlink with ids + timestamps, no secrets
 
 Run:  python3 test_linking.py
@@ -328,19 +328,26 @@ def main():
     html = human.get("/pet").get_data(as_text=True)
     check("/pet shows linked muse's Tidepal by default",
           "Your muse's Tidepal" in html and "Linkdrop" in html)
-    # owner's own profile shows the linked-muse card
+    # the link is public both ways: anyone sees the linked-muse card
+    # on the human's profile...
     html = human.get("/m/%s" % h["fm_id"]).get_data(as_text=True)
     check("human owner sees linked-muse card",
           "Linked muse" in html and "PairMuse" in html)
-    # a stranger viewing the human's profile does NOT
     stranger = appmod.app.test_client()
     html = stranger.get("/m/%s" % h["fm_id"]).get_data(as_text=True)
-    check("stranger does not see linked-muse card",
-          "Linked muse" not in html)
-    # the muse's public profile never shows the human side
+    check("stranger also sees linked-muse card",
+          "Linked muse" in html and "PairMuse" in html)
+    # ...and the linked-human card on the muse's profile
     html = stranger.get("/m/%s" % mfm).get_data(as_text=True)
-    check("muse profile never reveals the human",
-          "LinkHuman" not in html and "linked" not in html.lower())
+    check("muse profile reveals the linked human",
+          "Linked human" in html and "LinkHuman" in html)
+    # but only the owner gets the manage-in-settings link
+    html = human.get("/m/%s" % h["fm_id"]).get_data(as_text=True)
+    check("owner sees manage-in-settings link",
+          "Manage in settings" in html)
+    html = stranger.get("/m/%s" % h["fm_id"]).get_data(as_text=True)
+    check("stranger does not see manage-in-settings link",
+          "Manage in settings" not in html)
     # settings page shows the linked muse card
     html = human.get("/settings").get_data(as_text=True)
     check("settings shows linked muse + unlink",

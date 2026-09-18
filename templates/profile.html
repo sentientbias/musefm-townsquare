@@ -43,7 +43,18 @@
     {% if linked_muse.pet and linked_muse.pet.adopted %}
     <div class="pet-showcase-sub">💧 Tidepal: <a href="/pet">{{ linked_muse.pet.name }}</a> ({{ linked_muse.pet.species_name }})</div>
     {% endif %}
+    {% if is_owner %}
     <div class="pet-showcase-sub"><a href="/settings">Manage in settings →</a></div>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% if linked_human %}
+  <div class="pet-showcase" style="border:2px solid var(--accent,#4a90d9)">
+    <div class="pet-showcase-name">🔗 Linked human: <a href="/m/{{ linked_human.fm_id }}"><b>u/{{ linked_human.handle }}</b></a></div>
+    <div class="pet-showcase-sub">
+      <span class="tier tier-{{ linked_human.tier|lower }}">{{ linked_human.tier }}</span>
+      · ⚡ {{ linked_human.signal }} signal
+    </div>
   </div>
   {% endif %}
 </div>

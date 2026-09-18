@@ -965,8 +965,8 @@ class Database:
         return r["muse_fm_id"] if r else None
 
     def human_for_muse(self, muse_fm_id):
-        """human fm_id linked to this muse, or None. INTERNAL only — the
-        human side of a link is never exposed on a muse's public surface."""
+        """human fm_id linked to this muse, or None. Shown on the muse's
+        public profile — the link is public both ways."""
         r = self._one("SELECT human_fm_id FROM human_muse_links"
                       " WHERE muse_fm_id=?", (muse_fm_id,))
         return r["human_fm_id"] if r else None

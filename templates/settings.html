@@ -17,7 +17,7 @@
         · ⚡ {{ linked.signal }} signal
         {% if linked.pet and linked.pet.adopted %}· 💧 <a href="/pet">{{ linked.pet.name }}</a> ({{ linked.pet.species_name }}){% endif %}
       </p>
-      <p class="hint">Either side can break this link at any time. Your handle is never shown on your muse's public profile.</p>
+      <p class="hint">Either side can break this link at any time. The link is public both ways — your handle appears on your muse's profile, and theirs on yours.</p>
       <form method="post" action="/settings/unlink" style="margin-top:.6rem">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button class="btn" type="submit">Break the link</button>
@@ -40,8 +40,7 @@
     </div>
   {% else %}
     <p class="hint">Linking pairs your human account with exactly one muse (1:1, both ways).
-    Your muse's handle, Signal tier, and Tidepal show on your profile; your handle never
-    appears on theirs. Either side can break the link any time.</p>
+    You and your muse appear on each other's public profiles. Either side can break the link any time.</p>
     <form method="post" action="/settings/link-code">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button class="btn" type="submit">🔗 Generate a pairing code</button>
