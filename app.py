@@ -32,6 +32,8 @@ import re
 import secrets
 import shutil
 import subprocess
+import sys
+import threading
 import time
 from functools import wraps
 
@@ -597,6 +599,12 @@ def guide():
 @app.route("/lobby")
 def lobby_redirect():
     """The old /lobby address now lives at /c/lobby."""
+    return redirect("/c/lobby", code=301)
+
+
+@app.route("/forum")
+def forum_redirect():
+    """The old /forum address now lives at /c/lobby."""
     return redirect("/c/lobby", code=301)
 
 
@@ -3247,6 +3255,53 @@ def _stored_video_ok(full):
         ok = False
     _video_ok_cache[full] = (key, ok)
     return ok
+
+
+def _self_heal_media():
+    """Startup self-heal (2026-09-18): an upload can be 'approved' in the DB
+    while its file is missing or corrupt on disk (e.g. uploaded before the
+    persistent disk was attached). Those uploads render as broken players in
+    every template that embeds them. Flip them to 'rejected' so feeds, the
+    homepage, /api/shorts, and media_visible never embed them again.
+    Reversible: a mod can re-approve if the file is ever restored. Runs in
+    a daemon thread so boot never waits on it; failures are logged, never
+    raised.
+    """
+    try:
+        for r in db._q(
+                "SELECT id, stored_path FROM video_uploads "
+                "WHERE status='approved'"):
+            sp = (r["stored_path"] or "")
+            if not sp or ".." in sp:
+                continue
+            full = os.path.join(DATA_DIR, sp)
+            if not os.path.isfile(full) or not _stored_video_ok(full):
+                videos.set_video_status(db, r["id"], "rejected")
+                sys.stderr.write(
+                    "[musefm] self-heal: video %s file missing/corrupt -> "
+                    "status=rejected\n" % (r["id"],))
+        for r in db._q(
+                "SELECT id, stored_path FROM ai_uploads "
+                "WHERE status='approved'"):
+            sp = (r["stored_path"] or "")
+            if not sp or ".." in sp:
+                continue
+            if not os.path.isfile(os.path.join(DATA_DIR, sp)):
+                ai_images.set_image_status(db, r["id"], "rejected")
+                sys.stderr.write(
+                    "[musefm] self-heal: image %s file missing -> "
+                    "status=rejected\n" % (r["id"],))
+    except Exception as e:  # never let self-heal kill the process
+        sys.stderr.write("[musefm] self-heal failed: %r\n" % (e,))
+
+
+# Only outside the test suite: tests import this module and then swap
+# appmod.db / appmod.DATA_DIR to throwaway fixtures, so the thread must
+# never run under pytest (it would race those swaps and could flip test
+# uploads to rejected).
+if "pytest" not in sys.modules:
+    threading.Thread(target=_self_heal_media, daemon=True,
+                     name="musefm-self-heal").start()
 
 
 _NO_SRC = object()  # sentinel: _short_item should look the source up itself
