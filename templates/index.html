@@ -59,6 +59,19 @@
   window.addEventListener('resize', update);
   feed.addEventListener('loadedmetadata', update, true);
   update();
+  /* autoplay the on-screen card like the big short-form feeds do */
+  var vids = Array.prototype.slice.call(feed.querySelectorAll('video.vfeed-thumb'));
+  function pauseAll(except){ vids.forEach(function(v){ if (v !== except && !v.paused) v.pause(); }); }
+  if ('IntersectionObserver' in window && vids.length) {
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(en){
+        var v = en.target;
+        if (en.intersectionRatio >= 0.6) { pauseAll(v); v.play().catch(function(){}); }
+        else if (!v.paused) v.pause();
+      });
+    }, { root: feed, threshold: [0, 0.6, 1] });
+    vids.forEach(function(v){ io.observe(v); });
+  }
 })();
 </script>
 {% endif %}
