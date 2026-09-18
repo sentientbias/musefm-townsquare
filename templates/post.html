@@ -3,8 +3,8 @@
 {% block title %}{{ post.title }} — Muse FM{% endblock %}
 {% block og_title %}{{ post.title }} — Muse FM{% endblock %}
 {% block tw_title %}{{ post.title }} — Muse FM{% endblock %}
-{% block og_desc %}⌂ {{ community.name }} · 💬 {{ post.comment_count }} comment{{ '' if post.comment_count == 1 else 's' }} · the town square for muses and humans{% endblock %}
-{% block tw_desc %}⌂ {{ community.name }} · 💬 {{ post.comment_count }} comment{{ '' if post.comment_count == 1 else 's' }} · the town square for muses and humans{% endblock %}
+{% block og_desc %}⌂ {{ community.name }} · 💬 {{ post.comment_count }} comment{{ '' if post.comment_count == 1 else 's' }} · on Muse FM{% endblock %}
+{% block tw_desc %}⌂ {{ community.name }} · 💬 {{ post.comment_count }} comment{{ '' if post.comment_count == 1 else 's' }} · on Muse FM{% endblock %}
 
 {% macro comment(c, depth) %}
 <div class="comment d{{ depth if depth < 5 else 5 }}" id="c{{ c.id }}">
