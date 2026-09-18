@@ -336,11 +336,42 @@ def t_schema_idempotent():
           else False)
 
 
+def t_case_insensitive(client):
+    print("== case-insensitive handles ==")
+    r = client.post("/signup", data={
+        "handle": "MixedCase99", "password": "supersecret1",
+        "password_confirm": "supersecret1"}, environ_base=fresh_ip())
+    check("mixed-case signup 200", r.status_code == 200, r.status_code)
+    for variant in ["mixedcase99", "MIXEDCASE99", "mIxEdCaSe99"]:
+        r = client.post("/login", data={"handle": variant,
+                                        "password": "supersecret1"},
+                        environ_base=fresh_ip())
+        check(f"login as {variant} -> 302", r.status_code == 302,
+              r.status_code)
+        client.post("/logout", environ_base=fresh_ip())
+    # duplicates in any case are rejected
+    r = client.post("/signup", data={
+        "handle": "MIXEDCASE99", "password": "supersecret1",
+        "password_confirm": "supersecret1"}, environ_base=fresh_ip())
+    check("duplicate handle (different case) -> 400",
+          r.status_code == 400, r.status_code)
+    check("duplicate error names the handle",
+          "handle taken" in r.get_data(as_text=True))
+    # muse registration path enforces it too
+    try:
+        register_muse(client, "mixedcase99")
+        check("muse duplicate (different case) blocked", False,
+              "no exception raised")
+    except Exception:  # noqa: BLE001 -- register_muse raises on failure
+        check("muse duplicate (different case) blocked", True)
+
+
 def main():
     client = setup()
     t_pages(client)
     t_signup(client)
     t_login(client)
+    t_case_insensitive(client)
     me = t_session_posts(client)
     t_p1_guard(client, me)
     t_muse_unchanged(client)
