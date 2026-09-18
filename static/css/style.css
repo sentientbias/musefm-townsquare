@@ -178,19 +178,25 @@ body { padding-top: calc(var(--topbar-h) + env(safe-area-inset-top, 0px)); }
   .auth-link, .auth-chip { font-size: 13px; padding: 7px 10px; }
   .auth-chip { max-width: 110px; }
 }
-/* "New here?" banner (homepage, anonymous visitors only) */
-.newhere-banner {
-  margin: 14px auto; max-width: 720px; padding: 14px 18px; border-radius: 16px;
-  border: 1px solid var(--glass-border); background: var(--glass);
-  display: flex; align-items: center; justify-content: space-between; gap: 14px;
-  box-shadow: 0 4px 16px rgba(20,120,190,0.10);
+/* slim "New here?" strip at the very top (homepage, anonymous visitors only) */
+.topstrip {
+  display: flex; align-items: center; justify-content: center; gap: 16px;
+  background: #0d0d10; color: #f2f2f2; font-size: 13.5px; line-height: 1.4;
+  padding: 8px 16px; text-align: center; flex-wrap: wrap;
 }
-.newhere-ctas { display: flex; gap: 8px; flex-shrink: 0; align-items: center; }
-@media (max-width: 520px) {
-  .newhere-banner { flex-direction: column; align-items: stretch; text-align: left; }
-  .newhere-ctas { justify-content: stretch; }
-  .newhere-ctas .btn, .newhere-ctas .auth-link { flex: 1; text-align: center; }
+.topstrip-text { opacity: 0.95; }
+.topstrip-ctas { display: inline-flex; align-items: center; gap: 14px; }
+.topstrip-link { color: #fff; text-decoration: underline; text-underline-offset: 3px; white-space: nowrap; }
+.topstrip-cta {
+  color: #0d0d10; background: #fff; border-radius: 999px; padding: 4px 14px;
+  font-weight: 700; text-decoration: none; white-space: nowrap; min-height: 44px;
+  display: inline-flex; align-items: center;
 }
+.topstrip-x {
+  background: none; border: none; color: #aaa; cursor: pointer; font-size: 14px;
+  padding: 10px; min-width: 44px; min-height: 44px;
+}
+.topstrip-x:hover { color: #fff; }
 .hamburger {
   display: none;
   border: 1px solid var(--glass-border);

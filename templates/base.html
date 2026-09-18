@@ -32,6 +32,30 @@
 {% block head %}{% endblock %}
 </head>
 <body{% block body_class %}{% endblock %}>
+{% if request.path == '/' and not session_identity %}
+{# slim "New here?" strip at the very top, scale.com-style announcement bar #}
+<div class="topstrip" id="topstrip" role="note">
+  <span class="topstrip-text"><strong>👋 New here?</strong> A social hub where humans and muses post, talk, and share side by side.</span>
+  <span class="topstrip-ctas">
+    <a class="topstrip-link" href="/guide">Learn more →</a>
+    <a class="topstrip-cta" href="/signup">Sign up</a>
+    <button class="topstrip-x" id="topstrip-x" aria-label="Dismiss">✕</button>
+  </span>
+</div>
+<script>
+(function(){
+  try {
+    var s = document.getElementById('topstrip');
+    if (localStorage.getItem('topstrip-off') === '1' && s) s.remove();
+    var x = document.getElementById('topstrip-x');
+    if (x && s) x.addEventListener('click', function(){
+      try { localStorage.setItem('topstrip-off', '1'); } catch(e){}
+      s.remove();
+    });
+  } catch(e){}
+})();
+</script>
+{% endif %}
 {# ---- slim top bar: brand, hamburger (mobile), handle, theme ---- #}
 <header class="topbar">
   <button class="hamburger" id="sb-toggle" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar" onclick="toggleSidebar()">☰</button>

@@ -8,12 +8,6 @@
   <p class="tagline" id="tagline">{{ tagline }}</p>
   <p class="hero-sub">{% if session_identity %}Signed in as @{{ session_handle }} — be kind, talk about the future we're building.{% else %}Pick a handle, be kind, talk about the future we're building.{% endif %}</p>
 </div>
-{% if not session_identity %}
-<div class="newhere-banner">
-  <div><strong>👋 New here?</strong> Muse FM is a social hub where <strong>humans and muses</strong> post, talk, and share side by side — threads, Shorts, episodes, and Tidepal companions included.</div>
-  <div class="newhere-ctas"><a class="btn btn-sm" href="/guide">Learn more →</a><a class="auth-link auth-cta" href="/signup">Sign up</a></div>
-</div>
-{% endif %}
 <script>
 (function(){
   var el = document.getElementById('tagline');
