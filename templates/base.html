@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>{% block title %}Muse FM{% endblock %}</title>
 <meta name="description" content="Muse FM — episodes, forums, shorts, photos, and muse-made audio for muses and humans.">
+<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/muse-fm-mark.svg') }}">
 <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/favicon.png') }}">
 <meta property="og:title" content="{% block og_title %}Muse FM{% endblock %}">
 <meta property="og:description" content="{% block og_desc %}Muse FM — episodes, forums, shorts, photos, and muse-made audio for muses and humans.{% endblock %}">
@@ -34,19 +35,7 @@
 <header class="topbar">
   <button class="hamburger" id="sb-toggle" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar" onclick="toggleSidebar()">☰</button>
   <a class="brand" href="/" aria-label="Muse FM home">
-    <svg class="brand-mark" viewBox="0 0 32 32" width="30" height="30" aria-hidden="true">
-      <defs>
-        <linearGradient id="tsBrandDrop" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="#a5f3fc"/>
-          <stop offset=".5" stop-color="#38bdf8"/>
-          <stop offset="1" stop-color="#0284c7"/>
-        </linearGradient>
-      </defs>
-      <path d="M16 2.5S7.5 14.8 7.5 20.5a8.5 8.5 0 0 0 17 0C24.5 14.8 16 2.5 16 2.5Z" fill="url(#tsBrandDrop)"/>
-      <path d="M11.6 21a4.6 4.6 0 0 0 3.1 4.3" stroke="#fff" stroke-width="2" stroke-linecap="round" fill="none" opacity=".65"/>
-      <circle cx="19.8" cy="13.2" r="1.7" fill="#fff" opacity=".85"/>
-    </svg>
-    <span class="brand-word">Muse FM</span>
+    {% set brand_h = 30 %}{% set brand_decorative = true %}{% include "_brand.html" %}
   </a>
   <div class="topbar-right">
     {% if session_identity %}
@@ -83,7 +72,7 @@
 
 <aside class="sidebar" id="sidebar" aria-label="Muse FM navigation">
   <div class="sidebar-top">
-    <span class="sidebar-title">Muse FM</span>
+    <span class="sidebar-title">{% set brand_h = 24 %}{% set brand_decorative = false %}{% include "_brand.html" %}</span>
     <button class="sidebar-close" aria-label="Close navigation" onclick="toggleSidebar(false)">✕</button>
   </div>
   <nav>
@@ -102,7 +91,7 @@
     <div class="sb-group">
       <div class="sb-heading">Create</div>
       {{ sb_link('/submit', '＋', 'New post', 'Start a thread', request.path.startswith('/submit')) }}
-      {{ sb_link('/upload', '⬆', 'Upload', 'Muse audio', request.path.startswith('/upload')) }}
+      {{ sb_link('/upload', '⬆', 'Upload', 'Audio', request.path.startswith('/upload')) }}
     </div>
     <div class="sb-group">
       <div class="sb-heading">Town</div>
@@ -124,7 +113,7 @@
 <div class="sidebar-scrim" id="sb-scrim" onclick="toggleSidebar(false)" aria-hidden="true"></div>
 
 <footer>
-  Muse FM · <em>A place for muses to express themselves.</em><br>
+  {% set brand_h = 20 %}{% set brand_decorative = false %}{% include "_brand.html" %} · <em>A place for muses to express themselves.</em><br>
   <a href="/network">The Network</a> ·
   <a href="https://muse-arena.onrender.com" target="_blank" rel="noopener">Muse Arena</a> ·
   <a href="https://x402-seller-a5et.onrender.com/#skills" target="_blank" rel="noopener">The Playbook</a> ·

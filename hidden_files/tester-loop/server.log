@@ -1,0 +1,956 @@
+[townsquare] db=hidden_files/tester-loop/test.db port=8473 agent_key=set
+ * Serving Flask app 'app'
+ * Debug mode: off
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8473
+ * Running on http://127.0.0.1:8473
+[33mPress CTRL+C to quit[0m
+127.0.0.1 - - [18/Sep/2026 17:39:43] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:39:54] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:40:57] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:40:57] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:42:14] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:10] "[31m[1mPOST /api/identity/register HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:43:15] "POST /signup HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:15] "[31m[1mPOST /signup HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:43:15] "[31m[1mPOST /signup HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:43:15] "[31m[1mPOST /signup HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:43:16] "[32mPOST /login HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:43:16] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:18] "POST /api/identity/register HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:18] "[31m[1mPOST /login HTTP/1.1[0m" 401 -
+127.0.0.1 - - [18/Sep/2026 17:43:19] "[32mPOST /submit HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:43:20] "GET /c/lobby/post/8 HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:20] "[32mPOST /submit HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:43:20] "GET /c/lobby/post/9 HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:20] "GET /c/lobby/post/9 HTTP/1.1" 200 -
+[2026-09-18 17:43:25,789] ERROR in app: Exception on /submit [POST]
+Traceback (most recent call last):
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 546, in submit
+    pid = db.create_post(
+          ^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 700, in create_post
+    cur = self._exec(
+          ^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 612, in _exec
+    cur = self.db.execute(sql, args)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: database is locked
+127.0.0.1 - - [18/Sep/2026 17:43:25] "[35m[1mPOST /submit HTTP/1.1[0m" 500 -
+[2026-09-18 17:43:31,027] ERROR in app: Exception on /api/forum/post [POST]
+Traceback (most recent call last):
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 261, in wrapper
+    return fn(*a, **kw)
+           ^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 1104, in api_create_post
+    pid = db.create_post(community,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 700, in create_post
+    cur = self._exec(
+          ^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 612, in _exec
+    cur = self.db.execute(sql, args)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: database is locked
+127.0.0.1 - - [18/Sep/2026 17:43:31] "[35m[1mPOST /api/forum/post HTTP/1.1[0m" 500 -
+[2026-09-18 17:43:31,040] ERROR in app: Exception on /submit [POST]
+Traceback (most recent call last):
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 546, in submit
+    pid = db.create_post(
+          ^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 700, in create_post
+    cur = self._exec(
+          ^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 612, in _exec
+    cur = self.db.execute(sql, args)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: database is locked
+127.0.0.1 - - [18/Sep/2026 17:43:31] "[35m[1mPOST /submit HTTP/1.1[0m" 500 -
+127.0.0.1 - - [18/Sep/2026 17:43:31] "[32mGET /submit HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:43:31] "GET /login?next=/submit HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:31] "[31m[1mPOST /submit HTTP/1.1[0m" 429 -
+127.0.0.1 - - [18/Sep/2026 17:43:31] "[32mPOST /post/8/comment HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:43:31] "GET /c/lobby/post/8 HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:32] "[32mPOST /post/8/comment HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:43:32] "GET /c/lobby/post/8 HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:32] "GET /c/lobby/post/8 HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:32] "[31m[1mPOST /post/8/comment HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:43:32] "[33mPOST /post/99999999/comment HTTP/1.1[0m" 404 -
+127.0.0.1 - - [18/Sep/2026 17:43:32] "[32mPOST /vote HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:43:32] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:32] "[32mPOST /vote HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:43:32] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:32] "GET /c/lobby/post/8 HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:32] "[32mPOST /fb_react HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:43:33] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:33] "[32mPOST /fb_react HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:43:33] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:33] "[32mPOST /fb_react HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:43:33] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:33] "[31m[1mPOST /photos/upload HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:43:33] "[31m[1mPOST /photos/upload HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:43:33] "[31m[1mPOST /photos/upload HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:43:33] "GET /musefm HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:33] "GET /shorts HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:34] "GET /episodes HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:34] "GET /guide HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:34] "GET /api/shorts HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:34] "GET /health HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:34] "GET /api/episodes HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:34] "GET /episodes/agents-humans-future HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:34] "[32mPOST /episodes/agents-humans-future/comment HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:43:34] "GET /login?next=/episodes/agents-humans-future/comment HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:34] "[31m[1mPOST /api/episodes/agents-humans-future/comments HTTP/1.1[0m" 401 -
+127.0.0.1 - - [18/Sep/2026 17:43:34] "[33mGET /episodes/no-such-episode HTTP/1.1[0m" 404 -
+127.0.0.1 - - [18/Sep/2026 17:43:34] "[33mGET /audio/nonexistent.mp3 HTTP/1.1[0m" 404 -
+127.0.0.1 - - [18/Sep/2026 17:43:34] "[33mGET /no/such/page HTTP/1.1[0m" 404 -
+127.0.0.1 - - [18/Sep/2026 17:43:34] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:34] "GET /musefm HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:34] "GET /api/forum/posts?community=lobby HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:34] "[32mPOST /fb_react HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:43:34] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:34] "[32mPOST /fb_react HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:43:34] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:34] "[32mPOST /fb_react HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:43:34] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:35] "[32mPOST /fb_react HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:43:35] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:35] "[32mPOST /fb_react HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:43:35] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:35] "[32mPOST /fb_react HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:43:35] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:35] "[32mPOST /fb_react HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:43:35] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:35] "[32mPOST /fb_react HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:43:35] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:35] "[32mPOST /fb_react HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:43:35] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:35] "[32mPOST /fb_react HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:43:35] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:35] "[32mPOST /fb_react HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:43:35] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:35] "[32mPOST /vote HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:43:35] "GET /login?next=/ HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:35] "[32mPOST /vote HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:43:35] "GET /login?next=/ HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:35] "[32mPOST /logout HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:43:35] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:35] "[32mPOST /submit HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:43:35] "GET /login?next=/submit HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:43:57] "[31m[1mPOST /api/forum/post HTTP/1.1[0m" 429 -
+127.0.0.1 - - [18/Sep/2026 17:44:01] "[31m[1mPOST /api/forum/post HTTP/1.1[0m" 429 -
+127.0.0.1 - - [18/Sep/2026 17:44:04] "[31m[1mPOST /api/forum/post HTTP/1.1[0m" 429 -
+127.0.0.1 - - [18/Sep/2026 17:44:07] "[31m[1mPOST /api/forum/post HTTP/1.1[0m" 429 -
+127.0.0.1 - - [18/Sep/2026 17:44:10] "[31m[1mPOST /api/forum/post HTTP/1.1[0m" 429 -
+127.0.0.1 - - [18/Sep/2026 17:44:14] "POST /api/identity/register HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:44:14] "[31m[1mPOST /api/forum/post HTTP/1.1[0m" 429 -
+127.0.0.1 - - [18/Sep/2026 17:44:14] "[31m[1mPOST /api/forum/post HTTP/1.1[0m" 401 -
+127.0.0.1 - - [18/Sep/2026 17:44:14] "[31m[1mPOST /api/forum/post HTTP/1.1[0m" 401 -
+127.0.0.1 - - [18/Sep/2026 17:44:14] "[31m[1mPOST /api/forum/post HTTP/1.1[0m" 401 -
+127.0.0.1 - - [18/Sep/2026 17:44:14] "[31m[1mPOST /api/forum/post HTTP/1.1[0m" 401 -
+127.0.0.1 - - [18/Sep/2026 17:44:14] "[31m[1mPOST /api/forum/post HTTP/1.1[0m" 401 -
+127.0.0.1 - - [18/Sep/2026 17:44:14] "[31m[1mPOST /api/forum/post HTTP/1.1[0m" 401 -
+127.0.0.1 - - [18/Sep/2026 17:44:15] "[31m[1mPOST /api/forum/post HTTP/1.1[0m" 401 -
+127.0.0.1 - - [18/Sep/2026 17:44:15] "[31m[1mPOST /api/forum/post HTTP/1.1[0m" 401 -
+127.0.0.1 - - [18/Sep/2026 17:44:15] "[31m[1mPOST /api/forum/post HTTP/1.1[0m" 401 -
+127.0.0.1 - - [18/Sep/2026 17:44:15] "[31m[1mPOST /api/forum/vote HTTP/1.1[0m" 401 -
+127.0.0.1 - - [18/Sep/2026 17:44:15] "[31m[1mPOST /api/forum/comment HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:44:15] "[31m[1mPOST /api/forum/vote HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:44:15] "[31m[1mPOST /api/forum/vote HTTP/1.1[0m" 401 -
+[2026-09-18 17:44:20,578] ERROR in app: Exception on /api/forum/vote [POST]
+Traceback (most recent call last):
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 263, in wrapper
+    ident = verify_signed_body(data, db, expected_action=action)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/identity.py", line 196, in verify_signed_body
+    if not db.note_nonce(nonce, NONCE_TTL_SEC):
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 1119, in note_nonce
+    self._exec("DELETE FROM seen_nonces WHERE expires_at <= ?", (now(),))
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 612, in _exec
+    cur = self.db.execute(sql, args)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: database is locked
+127.0.0.1 - - [18/Sep/2026 17:44:20] "[35m[1mPOST /api/forum/vote HTTP/1.1[0m" 500 -
+[2026-09-18 17:44:25,797] ERROR in app: Exception on /api/forum/vote [POST]
+Traceback (most recent call last):
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 263, in wrapper
+    ident = verify_signed_body(data, db, expected_action=action)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/identity.py", line 196, in verify_signed_body
+    if not db.note_nonce(nonce, NONCE_TTL_SEC):
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 1119, in note_nonce
+    self._exec("DELETE FROM seen_nonces WHERE expires_at <= ?", (now(),))
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 612, in _exec
+    cur = self.db.execute(sql, args)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: database is locked
+127.0.0.1 - - [18/Sep/2026 17:44:25] "[35m[1mPOST /api/forum/vote HTTP/1.1[0m" 500 -
+[2026-09-18 17:44:31,146] ERROR in app: Exception on /api/forum/react [POST]
+Traceback (most recent call last):
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 263, in wrapper
+    ident = verify_signed_body(data, db, expected_action=action)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/identity.py", line 196, in verify_signed_body
+    if not db.note_nonce(nonce, NONCE_TTL_SEC):
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 1119, in note_nonce
+    self._exec("DELETE FROM seen_nonces WHERE expires_at <= ?", (now(),))
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 612, in _exec
+    cur = self.db.execute(sql, args)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: database is locked
+127.0.0.1 - - [18/Sep/2026 17:44:31] "[35m[1mPOST /api/forum/react HTTP/1.1[0m" 500 -
+[2026-09-18 17:44:36,244] ERROR in app: Exception on /api/forum/react [POST]
+Traceback (most recent call last):
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 263, in wrapper
+    ident = verify_signed_body(data, db, expected_action=action)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/identity.py", line 196, in verify_signed_body
+    if not db.note_nonce(nonce, NONCE_TTL_SEC):
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 1119, in note_nonce
+    self._exec("DELETE FROM seen_nonces WHERE expires_at <= ?", (now(),))
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 612, in _exec
+    cur = self.db.execute(sql, args)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: database is locked
+127.0.0.1 - - [18/Sep/2026 17:44:36] "[35m[1mPOST /api/forum/react HTTP/1.1[0m" 500 -
+127.0.0.1 - - [18/Sep/2026 17:44:36] "POST /api/upload/image HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:44:37] "[31m[1mPOST /api/upload/image HTTP/1.1[0m" 401 -
+127.0.0.1 - - [18/Sep/2026 17:44:37] "[31m[1mPOST /api/upload/image HTTP/1.1[0m" 401 -
+127.0.0.1 - - [18/Sep/2026 17:44:37] "[31m[1mPOST /api/upload/image HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:44:37] "POST /api/upload/gif HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:44:37] "[31m[1mPOST /api/upload/gif HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:44:38] "[31m[1mPOST /api/forum/post HTTP/1.1[0m" 429 -
+127.0.0.1 - - [18/Sep/2026 17:44:38] "[31m[1mPOST /api/forum/post HTTP/1.1[0m" 429 -
+127.0.0.1 - - [18/Sep/2026 17:44:38] "[31m[1mPOST /api/forum/post HTTP/1.1[0m" 401 -
+127.0.0.1 - - [18/Sep/2026 17:44:38] "POST /api/identity/update HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:44:39] "POST /api/rewards/heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:44:39] "GET /api/identity/fm_rjUbiychVjzM HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:44:40] "POST /api/upload/video HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:44:40] "POST /api/upload/video HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:44:40] "GET /img/1 HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:44:40] "GET /gif/1 HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:44:40] "GET /video/1 HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:44:40] "[31m[1mPOST /api/forum/post HTTP/1.1[0m" 429 -
+127.0.0.1 - - [18/Sep/2026 17:44:40] "[31m[1mPOST /api/forum/post HTTP/1.1[0m" 429 -
+127.0.0.1 - - [18/Sep/2026 17:44:40] "[31m[1mPOST /api/forum/post HTTP/1.1[0m" 401 -
+127.0.0.1 - - [18/Sep/2026 17:45:54] "[32mPOST /login HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:45:55] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:45:55] "GET /api/forum/posts?community=lobby HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:45:55] "GET /c/lobby/post/9 HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:45:55] "GET /api/forum/post/9 HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:45:55] "[32mPOST /vote HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:45:56] "[32mPOST /vote HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:45:56] "GET /api/forum/post/9 HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:45:56] "[32mPOST /vote HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:45:56] "POST /fb_react HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:45:56] "[31m[1mPOST /fb_react HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:45:56] "[31m[1mPOST /fb_react HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:45:57] "[32mPOST /photos/upload HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:45:57] "GET /musefm/photos/3 HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:45:57] "GET /photo-file/3 HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:45:57] "[31m[1mPOST /photos/upload HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:45:57] "[31m[1mPOST /photos/upload HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:45:57] "[32mPOST /submit HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:45:57] "GET /api/episodes HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:45:58] "[32mPOST /episodes/agents-humans-future/comment HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:45:58] "GET /api/episodes/agents-humans-future/comments HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:45:58] "GET /episodes/agents-humans-future HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:45:58] "GET /upload HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:45:58] "[32mGET /upload HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:45:58] "GET /login?next=/upload HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:45:58] "[33mGET /c/lobby/post/abc HTTP/1.1[0m" 404 -
+127.0.0.1 - - [18/Sep/2026 17:45:58] "[33mGET /c/lobby/post/-1 HTTP/1.1[0m" 404 -
+127.0.0.1 - - [18/Sep/2026 17:45:58] "[33mGET /c/lobby/post/99999999999999999999999 HTTP/1.1[0m" 404 -
+127.0.0.1 - - [18/Sep/2026 17:45:58] "[33mGET /img/99999999 HTTP/1.1[0m" 404 -
+127.0.0.1 - - [18/Sep/2026 17:45:58] "[33mGET /photo-file/99999999 HTTP/1.1[0m" 404 -
+127.0.0.1 - - [18/Sep/2026 17:45:58] "[33mGET /video/99999999 HTTP/1.1[0m" 404 -
+127.0.0.1 - - [18/Sep/2026 17:45:58] "[33mGET /watch/99999999 HTTP/1.1[0m" 404 -
+127.0.0.1 - - [18/Sep/2026 17:45:58] "[33mGET /audio/uploads/99999999 HTTP/1.1[0m" 404 -
+127.0.0.1 - - [18/Sep/2026 17:45:58] "[33mGET /api/identity/fm_nope HTTP/1.1[0m" 404 -
+127.0.0.1 - - [18/Sep/2026 17:45:58] "GET /api/forum/posts?community=lobby'+OR+'1'%3D'1 HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:45:58] "[31m[1mPOST /api/forum/comment HTTP/1.1[0m" 401 -
+127.0.0.1 - - [18/Sep/2026 17:45:59] "[31m[1mPOST /signup HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:47:19] "[32mPOST /login HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:47:19] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:47:19] "GET /api/forum/posts?community=lobby HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:47:19] "GET /c/lobby/post/9 HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:47:20] "POST /fb_react HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:47:20] "POST /fb_react HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:47:20] "[31m[1mPOST /submit HTTP/1.1[0m" 429 -
+127.0.0.1 - - [18/Sep/2026 17:47:20] "[31m[1mPOST /submit HTTP/1.1[0m" 429 -
+127.0.0.1 - - [18/Sep/2026 17:47:20] "[31m[1mPOST /submit HTTP/1.1[0m" 429 -
+127.0.0.1 - - [18/Sep/2026 17:47:20] "[31m[1mPOST /submit HTTP/1.1[0m" 429 -
+127.0.0.1 - - [18/Sep/2026 17:47:20] "[31m[1mPOST /submit HTTP/1.1[0m" 429 -
+127.0.0.1 - - [18/Sep/2026 17:47:20] "[31m[1mPOST /submit HTTP/1.1[0m" 429 -
+127.0.0.1 - - [18/Sep/2026 17:47:21] "[31m[1mPOST /photos/upload HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:47:22] "[32mPOST /photos/upload HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:47:22] "GET /api/shorts HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:47:22] "GET /shorts HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:47:23] "GET /api/episodes HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:47:23] "GET /api/episodes/agents-humans-future HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:47:23] "GET /audio/agents-humans-future.mp3 HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:47:23] "GET /musefm HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:47:23] "GET /api/latest.json HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:47:23] "GET /api/communities.json HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:47:23] "GET /api/stats HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:47:23] "GET /api/docs HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:47:24] "[32mPOST /post/9/comment HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:47:29] "[33mGET /nonexistent HTTP/1.1[0m" 404 -
+127.0.0.1 - - [18/Sep/2026 17:47:30] "[31m[1mGET /audio/..%2f..%2fetc%2fpasswd HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:47:30] "[33mGET /etc/passwd HTTP/1.1[0m" 404 -
+127.0.0.1 - - [18/Sep/2026 17:47:30] "[31m[1mGET /episode-video/..%2f..%2fetc%2fpasswd HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:47:30] "[33mGET /api/nope HTTP/1.1[0m" 404 -
+127.0.0.1 - - [18/Sep/2026 17:47:30] "[33mGET /c/no-such-slug HTTP/1.1[0m" 404 -
+127.0.0.1 - - [18/Sep/2026 17:47:30] "[33mGET /etc/passwd HTTP/1.1[0m" 404 -
+127.0.0.1 - - [18/Sep/2026 17:47:30] "[33mGET /m/no-such-fm HTTP/1.1[0m" 404 -
+127.0.0.1 - - [18/Sep/2026 17:47:30] "[31m[1mGET /audio/..\\..\\etc\\passwd HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:47:30] "[33mGET /episodes/no-such-episode HTTP/1.1[0m" 404 -
+127.0.0.1 - - [18/Sep/2026 17:47:30] "[31m[1mGET /episode-video/..%2fsecret.mp3 HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:47:30] "[33mGET /c/lobby/post/999999999 HTTP/1.1[0m" 404 -
+127.0.0.1 - - [18/Sep/2026 17:47:30] "[33mGET /watch/999999999 HTTP/1.1[0m" 404 -
+127.0.0.1 - - [18/Sep/2026 17:47:31] "[33mGET /gif/999999999 HTTP/1.1[0m" 404 -
+127.0.0.1 - - [18/Sep/2026 17:47:31] "[33mGET /img/999999999 HTTP/1.1[0m" 404 -
+127.0.0.1 - - [18/Sep/2026 17:47:31] "[33mGET /photo-file/999999999 HTTP/1.1[0m" 404 -
+127.0.0.1 - - [18/Sep/2026 17:47:31] "[33mGET /audio/uploads/999999999 HTTP/1.1[0m" 404 -
+127.0.0.1 - - [18/Sep/2026 17:47:31] "[33mGET /api/identity/fm_nonexistent HTTP/1.1[0m" 404 -
+127.0.0.1 - - [18/Sep/2026 17:47:31] "[33mGET /api/rewards/fm_nonexistent HTTP/1.1[0m" 404 -
+127.0.0.1 - - [18/Sep/2026 17:47:31] "[33mGET /s/abc123 HTTP/1.1[0m" 404 -
+127.0.0.1 - - [18/Sep/2026 17:47:33] "POST /api/identity/register HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:47:33] "POST /api/upload/video HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:47:43] "[31m[1mPOST /api/identity/update HTTP/1.1[0m" 401 -
+127.0.0.1 - - [18/Sep/2026 17:47:43] "[31m[1mPOST /api/identity/claim-human HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:47:43] "[31m[1mPOST /api/shop/buy HTTP/1.1[0m" 401 -
+127.0.0.1 - - [18/Sep/2026 17:47:43] "[31m[1mPOST /api/shop/equip HTTP/1.1[0m" 401 -
+127.0.0.1 - - [18/Sep/2026 17:47:43] "[32mPOST /pet/adopt HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:47:43] "[32mPOST /pet/rename HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:47:44] "[31m[1mPOST /api/pets/adopt HTTP/1.1[0m" 401 -
+127.0.0.1 - - [18/Sep/2026 17:47:44] "[31m[1mPOST /api/pets/rename HTTP/1.1[0m" 401 -
+127.0.0.1 - - [18/Sep/2026 17:47:44] "[31m[1mPOST /api/video/11/delete HTTP/1.1[0m" 401 -
+127.0.0.1 - - [18/Sep/2026 17:47:44] "[31m[1mPOST /api/reengagement/sweep HTTP/1.1[0m" 401 -
+127.0.0.1 - - [18/Sep/2026 17:47:44] "[31m[1mPOST /api/rewards/heartbeat HTTP/1.1[0m" 401 -
+127.0.0.1 - - [18/Sep/2026 17:47:44] "[31m[1mPOST /api/notifications/read HTTP/1.1[0m" 401 -
+127.0.0.1 - - [18/Sep/2026 17:47:45] "[31m[1mPOST /api/rewards/invite-code HTTP/1.1[0m" 401 -
+127.0.0.1 - - [18/Sep/2026 17:49:46] "[31m[1mPOST /api/forum/react HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:49:48] "POST /api/forum/react HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:49:48] "[31m[1mPOST /api/forum/react HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:49:48] "[31m[1mPOST /api/forum/react HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:49:48] "[31m[1mPOST /api/identity/register HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:49:48] "[31m[1mPOST /api/forum/post HTTP/1.1[0m" 429 -
+127.0.0.1 - - [18/Sep/2026 17:50:15] "[31m[1mPOST /api/forum/vote HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:50:16] "[31m[1mPOST /api/forum/vote HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:50:16] "[31m[1mPOST /api/forum/vote HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:50:16] "[31m[1mPOST /api/forum/vote HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:50:17] "[31m[1mPOST /api/forum/vote HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:50:17] "[31m[1mPOST /api/forum/vote HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:50:18] "[32mPOST /login HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:50:18] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:50:18] "[32mPOST /post/9/comment HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:50:18] "GET /c/lobby/post/9 HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:51:12] "[32mPOST /login HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:51:12] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:51:12] "[31m[1mPOST /signup HTTP/1.1[0m" 429 -
+127.0.0.1 - - [18/Sep/2026 17:51:13] "[32mPOST /post/9/comment HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:51:13] "GET /musefm HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:51:49] "POST /api/forum/vote HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:51:50] "POST /api/forum/vote HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:51:50] "POST /api/forum/vote HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:51:50] "GET /api/forum/post/11 HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:51:50] "POST /api/forum/vote HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:51:50] "POST /api/forum/vote HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:51:50] "POST /api/forum/vote HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:51:50] "POST /api/forum/vote HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:51:50] "POST /api/forum/vote HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:51:51] "POST /api/forum/vote HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:51:51] "POST /api/forum/vote HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:51:59] "[32mPOST /upload HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 17:52:05] "POST /api/forum/vote HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:52:05] "POST /api/forum/vote HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:52:05] "POST /api/forum/vote HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:52:05] "POST /api/forum/vote HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:52:06] "POST /api/forum/vote HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:52:06] "POST /api/forum/vote HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:52:06] "POST /api/forum/vote HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:52:06] "POST /api/forum/vote HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:52:06] "POST /api/forum/vote HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:52:07] "POST /api/forum/vote HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:52:07] "GET /api/forum/post/11 HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:53:30] "POST /api/forum/react HTTP/1.1" 200 -
+[2026-09-18 17:53:35,147] ERROR in app: Exception on /api/forum/react [POST]
+Traceback (most recent call last):
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 261, in wrapper
+    g.author_handle = handle
+           ^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 1715, in api_react
+    emoji = _fs(data, "emoji")
+                 ^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 1741, in react
+    self._exec("INSERT OR IGNORE INTO reactions VALUES (?,?,?,?,?,?)",
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 612, in _exec
+    cur = self.db.execute(sql, args)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: database is locked
+[2026-09-18 17:53:35,150] ERROR in app: Exception on /api/forum/react [POST]
+Traceback (most recent call last):
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 261, in wrapper
+    g.author_handle = handle
+           ^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 1715, in api_react
+    emoji = _fs(data, "emoji")
+                 ^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 1741, in react
+    self._exec("INSERT OR IGNORE INTO reactions VALUES (?,?,?,?,?,?)",
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 612, in _exec
+    cur = self.db.execute(sql, args)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: database is locked
+127.0.0.1 - - [18/Sep/2026 17:53:35] "[35m[1mPOST /api/forum/react HTTP/1.1[0m" 500 -
+[2026-09-18 17:53:35,151] ERROR in app: Exception on /api/forum/react [POST]
+Traceback (most recent call last):
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 261, in wrapper
+    g.author_handle = handle
+           ^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 1715, in api_react
+    emoji = _fs(data, "emoji")
+                 ^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 1741, in react
+    self._exec("INSERT OR IGNORE INTO reactions VALUES (?,?,?,?,?,?)",
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 612, in _exec
+    cur = self.db.execute(sql, args)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: database is locked
+127.0.0.1 - - [18/Sep/2026 17:53:35] "[35m[1mPOST /api/forum/react HTTP/1.1[0m" 500 -
+[2026-09-18 17:53:35,178] ERROR in app: Exception on /api/forum/react [POST]
+Traceback (most recent call last):
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 261, in wrapper
+    g.author_handle = handle
+           ^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 1715, in api_react
+    emoji = _fs(data, "emoji")
+                 ^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 1741, in react
+    self._exec("INSERT OR IGNORE INTO reactions VALUES (?,?,?,?,?,?)",
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 612, in _exec
+    cur = self.db.execute(sql, args)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: database is locked
+127.0.0.1 - - [18/Sep/2026 17:53:35] "[35m[1mPOST /api/forum/react HTTP/1.1[0m" 500 -
+[2026-09-18 17:53:35,179] ERROR in app: Exception on /api/forum/react [POST]
+Traceback (most recent call last):
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 261, in wrapper
+    g.author_handle = handle
+           ^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 1715, in api_react
+    emoji = _fs(data, "emoji")
+                 ^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 1741, in react
+    self._exec("INSERT OR IGNORE INTO reactions VALUES (?,?,?,?,?,?)",
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 612, in _exec
+    cur = self.db.execute(sql, args)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: database is locked
+127.0.0.1 - - [18/Sep/2026 17:53:35] "[35m[1mPOST /api/forum/react HTTP/1.1[0m" 500 -
+[2026-09-18 17:53:35,176] ERROR in app: Exception on /api/forum/react [POST]
+Traceback (most recent call last):
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 261, in wrapper
+    g.author_handle = handle
+           ^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 1715, in api_react
+    emoji = _fs(data, "emoji")
+                 ^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 1741, in react
+    self._exec("INSERT OR IGNORE INTO reactions VALUES (?,?,?,?,?,?)",
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 612, in _exec
+    cur = self.db.execute(sql, args)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: database is locked
+127.0.0.1 - - [18/Sep/2026 17:53:35] "[35m[1mPOST /api/forum/react HTTP/1.1[0m" 500 -
+[2026-09-18 17:53:35,182] ERROR in app: Exception on /api/forum/react [POST]
+Traceback (most recent call last):
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 261, in wrapper
+    g.author_handle = handle
+           ^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 1715, in api_react
+    emoji = _fs(data, "emoji")
+                 ^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 1741, in react
+    self._exec("INSERT OR IGNORE INTO reactions VALUES (?,?,?,?,?,?)",
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 612, in _exec
+    cur = self.db.execute(sql, args)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: database is locked
+127.0.0.1 - - [18/Sep/2026 17:53:35] "[35m[1mPOST /api/forum/react HTTP/1.1[0m" 500 -
+[2026-09-18 17:53:35,183] ERROR in app: Exception on /api/forum/react [POST]
+Traceback (most recent call last):
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 261, in wrapper
+    g.author_handle = handle
+           ^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 1715, in api_react
+    emoji = _fs(data, "emoji")
+                 ^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 1741, in react
+    self._exec("INSERT OR IGNORE INTO reactions VALUES (?,?,?,?,?,?)",
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 612, in _exec
+    cur = self.db.execute(sql, args)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: database is locked
+127.0.0.1 - - [18/Sep/2026 17:53:35] "[35m[1mPOST /api/forum/react HTTP/1.1[0m" 500 -
+127.0.0.1 - - [18/Sep/2026 17:53:35] "[35m[1mPOST /api/forum/react HTTP/1.1[0m" 500 -
+[2026-09-18 17:53:35,254] ERROR in app: Exception on /api/forum/react [POST]
+Traceback (most recent call last):
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 261, in wrapper
+    g.author_handle = handle
+           ^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 1715, in api_react
+    emoji = _fs(data, "emoji")
+                 ^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 1741, in react
+    self._exec("INSERT OR IGNORE INTO reactions VALUES (?,?,?,?,?,?)",
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 612, in _exec
+    cur = self.db.execute(sql, args)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: database is locked
+127.0.0.1 - - [18/Sep/2026 17:53:35] "[35m[1mPOST /api/forum/react HTTP/1.1[0m" 500 -
+127.0.0.1 - - [18/Sep/2026 17:53:58] "GET /health HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 17:54:53] "[31m[1mPOST /api/forum/react HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:54:55] "[31m[1mPOST /api/forum/react HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:54:56] "[31m[1mPOST /api/forum/react HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:54:57] "[31m[1mPOST /api/forum/react HTTP/1.1[0m" 400 -
+[2026-09-18 17:54:58,851] ERROR in app: Exception on /api/forum/react [POST]
+Traceback (most recent call last):
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 261, in wrapper
+    g.author_handle = handle
+           ^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 1712, in api_react
+    if not isinstance(data, dict):
+            ^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 229, in _fs
+    if v is None:
+        ^^^^^^^^^^
+ValueError: bad emoji: must be a string
+127.0.0.1 - - [18/Sep/2026 17:54:58] "[35m[1mPOST /api/forum/react HTTP/1.1[0m" 500 -
+127.0.0.1 - - [18/Sep/2026 17:55:00] "[31m[1mPOST /api/forum/react HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:55:01] "[31m[1mPOST /api/forum/react HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 17:55:02] "[31m[1mPOST /api/forum/react HTTP/1.1[0m" 400 -
+[2026-09-18 17:57:00,396] ERROR in app: Exception on /api/identity/register [POST]
+Traceback (most recent call last):
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 1213, in api_identity_register
+    try:
+         
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 985, in register_identity
+    self._exec(
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 612, in _exec
+    cur = self.db.execute(sql, args)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: database is locked
+127.0.0.1 - - [18/Sep/2026 17:57:00] "[35m[1mPOST /api/identity/register HTTP/1.1[0m" 500 -
+[2026-09-18 17:57:20,738] ERROR in app: Exception on /api/identity/register [POST]
+Traceback (most recent call last):
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 1213, in api_identity_register
+    try:
+         
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 985, in register_identity
+    self._exec(
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 612, in _exec
+    cur = self.db.execute(sql, args)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: database is locked
+127.0.0.1 - - [18/Sep/2026 17:57:20] "[35m[1mPOST /api/identity/register HTTP/1.1[0m" 500 -
+[2026-09-18 17:57:29,922] ERROR in app: Exception on /api/identity/register [POST]
+Traceback (most recent call last):
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 1213, in api_identity_register
+    try:
+         
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 985, in register_identity
+    self._exec(
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 612, in _exec
+    cur = self.db.execute(sql, args)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: database is locked
+127.0.0.1 - - [18/Sep/2026 17:57:29] "[35m[1mPOST /api/identity/register HTTP/1.1[0m" 500 -
+[2026-09-18 17:57:39,096] ERROR in app: Exception on /api/identity/register [POST]
+Traceback (most recent call last):
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 1213, in api_identity_register
+    try:
+         
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 985, in register_identity
+    self._exec(
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 612, in _exec
+    cur = self.db.execute(sql, args)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: database is locked
+127.0.0.1 - - [18/Sep/2026 17:57:39] "[35m[1mPOST /api/identity/register HTTP/1.1[0m" 500 -
+[2026-09-18 17:57:48,499] ERROR in app: Exception on /api/identity/register [POST]
+Traceback (most recent call last):
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 1213, in api_identity_register
+    try:
+         
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 985, in register_identity
+    self._exec(
+  File "/home/hatch/workspace/musefm-townsquare/db.py", line 612, in _exec
+    cur = self.db.execute(sql, args)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: database is locked
+127.0.0.1 - - [18/Sep/2026 17:57:48] "[35m[1mPOST /api/identity/register HTTP/1.1[0m" 500 -
+127.0.0.1 - - [18/Sep/2026 17:57:52] "[31m[1mPOST /api/identity/register HTTP/1.1[0m" 429 -
+[2026-09-18 17:59:33,659] ERROR in app: Exception on /api/forum/fb_react [POST]
+Traceback (most recent call last):
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 261, in wrapper
+    g.author_handle = handle
+           ^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 1758, in api_fb_react
+    data = g.signed_data or json_body()
+               ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 229, in _fs
+    if v is None:
+        ^^^^^^^^^^
+ValueError: bad reaction: must be a string
+127.0.0.1 - - [18/Sep/2026 17:59:33] "[35m[1mPOST /api/forum/fb_react HTTP/1.1[0m" 500 -
+[2026-09-18 17:59:35,904] ERROR in app: Exception on /api/forum/react [POST]
+Traceback (most recent call last):
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 261, in wrapper
+    g.author_handle = handle
+           ^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 1711, in api_react
+    data = g.signed_data or json_body()
+                  ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 229, in _fs
+    if v is None:
+        ^^^^^^^^^^
+ValueError: bad target_type: must be a string
+127.0.0.1 - - [18/Sep/2026 17:59:35] "[35m[1mPOST /api/forum/react HTTP/1.1[0m" 500 -
+[2026-09-18 17:59:38,896] ERROR in app: Exception on /api/challenges/settle [POST]
+Traceback (most recent call last):
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/.local/lib/python3.12/site-packages/flask/app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 238, in wrapper
+    def wrapper(*a, **kw):
+               ^^^^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 1367, in api_challenges_settle
+    data = json_body()
+              ^^^^^^^^^
+  File "/home/hatch/workspace/musefm-townsquare/app.py", line 229, in _fs
+    if v is None:
+        ^^^^^^^^^^
+ValueError: bad week_id: must be a string
+127.0.0.1 - - [18/Sep/2026 17:59:38] "[35m[1mPOST /api/challenges/settle HTTP/1.1[0m" 500 -
+127.0.0.1 - - [18/Sep/2026 18:01:02] "[31m[1mGET /api/forum/vote HTTP/1.1[0m" 405 -
+127.0.0.1 - - [18/Sep/2026 18:01:02] "[31m[1mPUT /api/forum/post HTTP/1.1[0m" 405 -
+127.0.0.1 - - [18/Sep/2026 18:01:02] "[31m[1mDELETE /api/forum/vote HTTP/1.1[0m" 405 -
+127.0.0.1 - - [18/Sep/2026 18:01:02] "GET /episodes/agents-humans-future?t=abc HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 18:01:02] "GET /episodes/agents-humans-future?t=-99999999999 HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 18:01:03] "GET /api/latest.json HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 18:01:03] "GET /api/stats HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 18:01:03] "[31m[1mPOST /api/stats HTTP/1.1[0m" 405 -
+127.0.0.1 - - [18/Sep/2026 18:02:37] "GET /api/shop/items HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 18:02:40] "GET /api/shop/balance/advqa_test HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 18:02:59] "[31m[1mGET /api/notifications HTTP/1.1[0m" 401 -
+127.0.0.1 - - [18/Sep/2026 18:02:59] "[31m[1mGET /api/reengagement/nudges HTTP/1.1[0m" 401 -
+127.0.0.1 - - [18/Sep/2026 18:02:59] "GET /api/leaderboard HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 18:02:59] "GET /api/rewards/rules HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 18:03:00] "GET /api/challenges HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 18:03:00] "GET /api/pets/of/advqa_test HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 18:03:00] "GET /api/forum/posts?community=lobby&limit=1 HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 18:03:00] "GET /api/episodes HTTP/1.1" 200 -

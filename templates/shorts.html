@@ -18,8 +18,27 @@
       </div>
     </div>
     <div class="short-actions">
-      {% if it.thread_url %}<a class="short-btn" href="{{ it.thread_url }}" title="Open the thread">💬</a>{% endif %}
+      {% if it.thread_url %}<a class="short-btn" href="{{ it.thread_url }}" title="Open the thread">🧵</a>{% endif %}
+      <button class="short-btn short-comments-btn" data-vid="{{ it.id }}" title="Comments" aria-label="Comments">
+        💬<span class="short-ccount" data-vid="{{ it.id }}">{{ it.comment_count }}</span>
+      </button>
       <a class="short-btn" href="{{ it.watch_url }}" title="Watch page">⛶</a>
+    </div>
+  </div>
+  <div class="short-comments" data-vid="{{ it.id }}" hidden>
+    <div class="sc-head"><span>Comments</span><button class="sc-close" aria-label="Close comments">✕</button></div>
+    <div class="sc-list" aria-live="polite"></div>
+    <div class="sc-composer">
+      {% if handle != 'anon' %}
+      <form class="sc-form" data-vid="{{ it.id }}" action="/video/{{ it.id }}/comment" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="next" value="/shorts?video={{ it.id }}">
+        <input class="sc-input" name="body" maxlength="2000" placeholder="Add a comment…" autocomplete="off">
+        <button class="sc-send" type="submit" aria-label="Post comment">➤</button>
+      </form>
+      {% else %}
+      <a class="sc-nudge" href="/login?next={{ ('/shorts?video=%d' % it.id) | urlencode }}">Sign in to comment</a>
+      {% endif %}
     </div>
   </div>
   <div class="short-rxn">
@@ -106,7 +125,8 @@
   function cardHTML(it) {
     const badge = it.ai_generated ? '<span class="ai-badge ai-badge-static">✨ AI-generated</span>' : '';
     const dur = it.duration_secs != null ? '<span class="dur-chip">' + fmtDur(it.duration_secs) + '</span>' : '';
-    const thread = it.thread_url ? '<a class="short-btn" href="' + esc(it.thread_url) + '" title="Open the thread">💬</a>' : '';
+    const thread = it.thread_url ? '<a class="short-btn" href="' + esc(it.thread_url) + '" title="Open the thread">🧵</a>' : '';
+    const ccount = it.comment_count != null ? it.comment_count : 0;
     return '<article class="short-item" data-id="' + it.id + '">' +
       '<video class="short-video" src="' + esc(it.video_url) + '" muted loop playsinline preload="metadata" disablepictureinpicture></video>' +
       '<button class="short-mute" aria-label="toggle sound">🔇</button>' +
@@ -115,10 +135,136 @@
       '<div class="short-title">' + esc(it.title) + '</div>' +
       '<div class="short-chips">' + badge + dur + '</div></div>' +
       '<div class="short-actions">' + thread +
+      '<button class="short-btn short-comments-btn" data-vid="' + it.id + '" title="Comments" aria-label="Comments">💬<span class="short-ccount" data-vid="' + it.id + '">' + ccount + '</span></button>' +
       '<a class="short-btn" href="' + esc(it.watch_url) + '" title="Watch page">⛶</a>' +
       '</div></div>' +
+      commentsPanelHTML(it) +
       '<div class="short-rxn">' + rxnWidgetHTML(it) + '</div>' +
       '</article>';
+  }
+
+  var LOGGED_IN = {{ 'true' if handle != 'anon' else 'false' }};
+
+  function commentsPanelHTML(it) {
+    var nudge = '<a class="sc-nudge" href="/login?next=' +
+      encodeURIComponent('/shorts?video=' + it.id) + '">Sign in to comment</a>';
+    var form = '<form class="sc-form" data-vid="' + it.id + '" action="/video/' + it.id + '/comment" method="post">' +
+      '<input class="sc-input" name="body" maxlength="2000" placeholder="Add a comment…" autocomplete="off">' +
+      '<button class="sc-send" type="submit" aria-label="Post comment">➤</button></form>';
+    return '<div class="short-comments" data-vid="' + it.id + '" hidden>' +
+      '<div class="sc-head"><span>Comments</span><button class="sc-close" aria-label="Close comments">✕</button></div>' +
+      '<div class="sc-list" aria-live="polite"></div>' +
+      '<div class="sc-composer">' + (LOGGED_IN ? form : nudge) + '</div></div>';
+  }
+
+  function commentNode(c) {
+    var el = document.createElement('div');
+    el.className = 'sc-comment';
+    el.innerHTML = '<div class="sc-chead"><b>u/' + esc(c.handle) + '</b>' +
+      '<span class="sc-ctime">' + esc(fmtTime(c.created_at)) + '</span></div>' +
+      '<div class="sc-cbody"></div>';
+    el.querySelector('.sc-cbody').textContent = c.body || '';
+    var replies = c.replies || [];
+    if (replies.length) {
+      var box = document.createElement('div');
+      box.className = 'sc-replies';
+      replies.forEach(function (r) { box.appendChild(commentNode(r)); });
+      el.appendChild(box);
+    }
+    return el;
+  }
+
+  function fmtTime(ts) {
+    if (!ts) return '';
+    var d = new Date(ts * 1000), now = new Date();
+    var mins = Math.floor((now - d) / 60000);
+    if (mins < 1) return 'now';
+    if (mins < 60) return mins + 'm';
+    var hrs = Math.floor(mins / 60);
+    if (hrs < 24) return hrs + 'h';
+    return Math.floor(hrs / 24) + 'd';
+  }
+
+  function setCount(vid, n) {
+    document.querySelectorAll('.short-ccount[data-vid="' + vid + '"]').forEach(function (s) {
+      s.textContent = n;
+      s.classList.toggle('zero', !n);
+    });
+  }
+
+  function loadComments(panel) {
+    var vid = panel.getAttribute('data-vid');
+    var list = panel.querySelector('.sc-list');
+    if (panel._loaded) return Promise.resolve();
+    panel._loaded = true;
+    list.innerHTML = '<div class="sc-loading">loading…</div>';
+    return fetch('/api/videos/' + vid + '/comments').then(function (r) { return r.json(); })
+      .then(function (d) {
+        list.innerHTML = '';
+        var items = (d.ok && d.comments) || [];
+        if (!items.length) list.innerHTML = '<div class="sc-empty">No comments yet — say something.</div>';
+        items.forEach(function (c) { list.appendChild(commentNode(c)); });
+        if (d.ok && d.count != null) setCount(vid, d.count);
+      }).catch(function () {
+        list.innerHTML = '<div class="sc-empty">Could not load comments.</div>';
+        panel._loaded = false;
+      });
+  }
+
+  function showNudge(panel, signinUrl) {
+    var composer = panel.querySelector('.sc-composer');
+    composer.innerHTML = '<a class="sc-nudge" href="' + esc(signinUrl || '/login') + '">Sign in to comment</a>';
+  }
+
+  function wireComments(card) {
+    var panel = card.querySelector('.short-comments');
+    if (!panel) return;
+    var btn = card.querySelector('.short-comments-btn');
+    var close = panel.querySelector('.sc-close');
+    function open() {
+      panel.hidden = false;
+      card.classList.add('comments-open');
+      loadComments(panel);
+    }
+    function shut() {
+      panel.hidden = true;
+      card.classList.remove('comments-open');
+    }
+    if (btn) btn.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      panel.hidden ? open() : shut();
+    });
+    if (close) close.addEventListener('click', shut);
+    var form = panel.querySelector('.sc-form');
+    if (form) form.addEventListener('submit', function (ev) {
+      ev.preventDefault();  // JS path: JSON API; the plain form POST stays as the no-JS fallback
+      var input = form.querySelector('.sc-input');
+      var body = (input.value || '').trim();
+      if (!body) return;
+      var vid = form.getAttribute('data-vid');
+      var send = form.querySelector('.sc-send');
+      send.disabled = true;
+      fetch('/api/videos/' + vid + '/comments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: body })
+      }).then(function (r) { return r.json().then(function (d) { return { s: r.status, d: d }; }); })
+        .then(function (res) {
+          send.disabled = false;
+          if (res.s === 401 && res.d.signin_url) { showNudge(panel, res.d.signin_url); return; }
+          if (!res.d.ok) { input.placeholder = res.d.error || 'Could not post — try again'; return; }
+          input.value = '';
+          panel._loaded = false;  // refresh the thread to include the new comment
+          loadComments(panel).then(function () {
+            var list = panel.querySelector('.sc-list');
+            list.scrollTop = 0;
+          });
+          if (res.d.comment_count != null) setCount(vid, res.d.comment_count);
+        }).catch(function () {
+          send.disabled = false;
+          input.placeholder = 'Could not post — try again';
+        });
+    });
   }
 
   async function loadMore() {
@@ -135,6 +281,7 @@
         const el = t.content.firstChild;
         feed.insertBefore(el, end);
         wireCard(el);
+        wireComments(el);
         if (window.wireRxnWidget) {
           el.querySelectorAll('.rxn').forEach(window.wireRxnWidget);
         }
@@ -196,14 +343,22 @@
     });
   }, { root: feed, threshold: [0, 0.6, 1] });
 
-  feed.querySelectorAll('.short-item').forEach(card => wireCard(card));
+  feed.querySelectorAll('.short-item').forEach(card => { wireCard(card); wireComments(card); });
   // ?video= deep-link: jump to the anchored card before autoplay
-  // observation settles, so the right clip plays instead of the first.
+  // observation settles, so the right clip plays instead of the first —
+  // and surface that video's conversation by opening its comments panel.
   (function () {
     var a = feed.getAttribute('data-anchor');
     if (!a) return;
     var t = feed.querySelector('.short-item[data-id="' + a + '"]');
-    if (t) t.scrollIntoView({ block: 'start' });
+    if (!t) return;
+    t.scrollIntoView({ block: 'start' });
+    var p = t.querySelector('.short-comments');
+    if (p) {
+      p.hidden = false;
+      t.classList.add('comments-open');
+      loadComments(p);
+    }
   })();
   feed.querySelectorAll('.short-item').forEach(card => io.observe(card));
   // keep observing dynamically added cards

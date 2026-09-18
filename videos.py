@@ -196,6 +196,16 @@ CREATE TABLE IF NOT EXISTS video_uploads (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_video_uploads_fm ON video_uploads(fm_id, created_at DESC);
+CREATE TABLE IF NOT EXISTS video_comments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  video_id INTEGER NOT NULL REFERENCES video_uploads(id) ON DELETE CASCADE,
+  parent_id INTEGER REFERENCES video_comments(id) ON DELETE CASCADE,
+  handle TEXT NOT NULL,
+  body TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_video_comments_video
+  ON video_comments(video_id, created_at);
 """
 
 
@@ -216,6 +226,8 @@ def ensure_video_schema(db):
     _ensure_col(db, "video_uploads", "duration_secs", "duration_secs INTEGER")
     _ensure_col(db, "video_uploads", "title", "title TEXT")
     _ensure_col(db, "video_uploads", "description", "description TEXT")
+    _ensure_col(db, "video_uploads", "comment_count",
+                "comment_count INTEGER NOT NULL DEFAULT 0")
     _ensure_col(db, "posts", "video_url", "video_url TEXT NOT NULL DEFAULT ''")
     _ensure_col(db, "posts", "video_ai", "video_ai INTEGER NOT NULL DEFAULT 0")
     _ensure_col(db, "comments", "video_url", "video_url TEXT NOT NULL DEFAULT ''")
@@ -297,6 +309,7 @@ def delete_video_upload(db, uid, upload_dir):
                  " AND target_id=?", (uid,))
     except Exception:
         pass
+    db._exec("DELETE FROM video_comments WHERE video_id=?", (uid,))
     db._exec("DELETE FROM video_uploads WHERE id=?", (uid,))
     stored = u.get("stored_path") or ""
     if stored:

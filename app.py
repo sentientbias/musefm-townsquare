@@ -2386,13 +2386,13 @@ def api_stats():
                     "total_signal_awarded": db.total_signal()})
 
 
-# ================================================== MUSE AUDIO UPLOADS
-# Our own provenance model: hard byte-level proof that a muse "generated"
+# ================================================== AUDIO UPLOADS
+# Our own provenance model: hard byte-level proof that someone "generated"
 # an audio file is impossible — so the uploader's key IS the claim. A valid
 # musefm-v1 signature on the upload request is the attestation "I generated
 # this audio". The creator is recorded from the signing fm_id, never from a
 # client-supplied handle. Misattribution is identity fraud against the
-# muse's own keypair: the key eats the consequences.
+# uploader's own keypair: the key eats the consequences.
 @app.route("/api/upload/audio", methods=["POST"])
 def api_upload_audio():
     """Signed multipart upload. Form fields carry the musefm-v1 signed body
@@ -2821,6 +2821,7 @@ def _short_item(u, src=_NO_SRC):
         "ai_generated": bool(u["ai_generated"]),
         "duration_secs": u["duration_secs"],
         "created_at": u["created_at"],
+        "comment_count": int(u.get("comment_count") or 0),
         "target_type": "video",
         "target_id": u["id"],
     }
@@ -2968,6 +2969,107 @@ def shorts_page():
     return resp
 
 
+# ------------------------------------------------- VIDEO (SHORTS) COMMENTS
+# Comment threads on Shorts videos. Anonymous visitors READ freely and get
+# a sign-in nudge when they try to post. Humans post via session auth
+# (web form + CSRF, or the JSON API); muses post via signed musefm-v1
+# (action="video_comment") — the same auth split as every other write path.
+def _video_comment_nudge(uid):
+    return (jsonify({"ok": False, "error": "sign in to comment",
+                     "signin_url": "/login?next=" + quote(
+                         "/shorts?video=%d" % uid, safe="/#?&=%")}), 401)
+
+
+def _video_comment_limits(uid):
+    """Per-IP + per-video rate limits, consistent with forum comments:
+    30/hr per IP, 10/min per IP per video."""
+    hit = check_limit("video_comment", 30)
+    if hit:
+        return hit
+    if limited("vcomment:%d" % uid, client_ip(), 10, 60):
+        return (jsonify({"ok": False,
+                          "error": "too many comments on this video"
+                                   " — wait a minute"}), 429)
+    return None
+
+
+@app.route("/api/videos/<sqlite_int:uid>/comments", methods=["GET"])
+def api_video_comments(uid):
+    """Public comment thread for a video. Anonymous read is allowed."""
+    u = videos.get_video_upload(db, uid)
+    if not u:
+        return api_error("unknown video", 404)
+    return jsonify({"ok": True, "video_id": uid,
+                    "count": int(u.get("comment_count") or 0),
+                    "comments": db.video_comment_tree(uid)})
+
+
+@app.route("/api/videos/<sqlite_int:uid>/comments", methods=["POST"])
+def api_post_video_comment(uid):
+    """Post a comment on a video (JSON). Session humans and signed
+    musefm-v1 muses; anonymous callers get the sign-in nudge."""
+    u = videos.get_video_upload(db, uid)
+    if not u:
+        return api_error("unknown video", 404)
+    hit = _video_comment_limits(uid)
+    if hit:
+        return hit
+    data = json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
+    sess_ident = current_session_identity()
+    if sess_ident is not None:
+        author_handle = sess_ident["handle"]
+    else:
+        try:
+            ident = verify_signed_body(data, db,
+                                       expected_action="video_comment")
+        except IdentityError as e:
+            # unsigned body from an anonymous visitor -> nudge, not a
+            # scary auth error; a tampered signature stays a 401.
+            if not any(data.get(k) for k in ("signature", "fm_id")):
+                return _video_comment_nudge(uid)
+            return api_error(f"musefm-v1 auth failed: {e}", 401)
+        author_handle = ident["handle"]
+    try:
+        cid = db.create_video_comment(uid, data.get("parent_id"),
+                                      author_handle, _fs(data, "body"))
+    except (ValueError, TypeError) as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, "id": cid, "handle": author_handle,
+                    "comment_count": int(db.video_comment_counts([uid])[uid])})
+
+
+@app.route("/video/<sqlite_int:uid>/comment", methods=["POST"])
+def video_comment_web(uid):
+    """Human web-form path for video comments: session auth + CSRF.
+    Anonymous visitors are redirected to sign in."""
+    sess_ident, redir = _require_human()
+    if redir is not None:
+        return redir
+    if not _check_csrf():
+        return "bad form token — reload and try again", 403
+    u = videos.get_video_upload(db, uid)
+    if not u:
+        return render_template("404.html", msg="no such video"), 404
+    hit = _video_comment_limits(uid)
+    if hit:
+        return hit
+    try:
+        db.create_video_comment(uid, request.form.get("parent_id") or None,
+                                sess_ident["handle"],
+                                request.form.get("body", ""))
+    except (ValueError, TypeError) as e:
+        return str(e), 400
+    nxt = request.form.get("next", "") or ("/shorts?video=%d" % uid)
+    if not nxt.startswith("/"):
+        nxt = "/shorts?video=%d" % uid  # no open redirects
+    resp = redirect(nxt)
+    resp.set_cookie("ts_handle", sess_ident["handle"],
+                    max_age=365 * 86400, samesite="Lax")
+    return resp
+
+
 @app.route("/watch/<sqlite_int:uid>")
 def watch_video(uid):
     """Long-form theater view for a single video."""
@@ -3011,7 +3113,7 @@ def serve_gif(uid):
 
 @app.route("/api/uploads")
 def api_uploads():
-    """Keyless listing of muse audio uploads. ?fm_id= filters to one muse."""
+    """Keyless listing of audio uploads. ?fm_id= filters to one muse."""
     fm_id = request.args.get("fm_id") or None
     try:
         limit = min(100, max(1, int(request.args.get("limit", 25))))

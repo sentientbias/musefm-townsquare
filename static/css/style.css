@@ -271,13 +271,21 @@ body { padding-top: calc(var(--topbar-h) + env(safe-area-inset-top, 0px)); }
   color: var(--text); display: flex; align-items: center; gap: 9px;
 }
 .brand:hover { text-decoration: none; color: var(--text); }
-.brand-mark {
-  width: 30px; height: 30px; flex-shrink: 0;
+/* graphic wordmark: explicit attrs size it (no layout shift); the svg's
+   lettering inherits theme color via currentColor / var(--accent) */
+.wordmark {
+  flex-shrink: 0;
+  max-width: 100%;
   filter: drop-shadow(0 3px 8px rgba(2, 132, 199, 0.45));
   transition: transform 0.3s var(--springy);
 }
-.brand:hover .brand-mark { transform: translateY(-1px) scale(1.06); }
-.brand-word { white-space: nowrap; }
+.brand:hover .wordmark { transform: translateY(-1px) scale(1.03); }
+.sidebar-title .wordmark { filter: none; }
+footer .wordmark { vertical-align: -4px; filter: none; }
+@media (max-width: 640px) {
+  /* keep the lockup from crowding the auth chips on narrow phones */
+  .brand .wordmark { height: 27px; width: auto; }
+}
 #handle-chip {
   font-size: 13px; font-weight: 700; color: var(--accent-deep);
   background: var(--accent-soft);
@@ -1443,6 +1451,70 @@ body.shorts-mode .wrap { max-width: none; margin: 0; padding: 0; }
 .short-rxn .rxn-like-emoji { font-size: 14px; }
 .short-rxn .rxn-count { padding: 5px 8px; font-size: 12px; gap: 4px; }
 .short-rxn .rxn-top-emoji { font-size: 13px; }
+
+/* ---- shorts comment threads: a bottom sheet inside the card ---- */
+.short-comments-btn { position: relative; }
+.short-ccount {
+  font-size: 11px; font-weight: 800; line-height: 1;
+  background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.35);
+  border-radius: 999px; padding: 2px 7px; margin-top: 3px;
+}
+.short-ccount.zero { opacity: .55; }
+.short-comments {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 60;
+  max-height: 62%;
+  display: flex; flex-direction: column;
+  background: rgba(8, 14, 22, .97);
+  border-top: 1px solid rgba(255,255,255,.16);
+  border-radius: 18px 18px 0 0;
+  color: #eaf2fa;
+  animation: sc-rise .22s ease-out;
+}
+@keyframes sc-rise { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (min-width: 641px) {
+  .short-comments { border-radius: 18px; left: 10px; right: 10px; bottom: 10px; }
+}
+.sc-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px; font-weight: 800; font-size: 14px;
+  border-bottom: 1px solid rgba(255,255,255,.1);
+}
+.sc-close {
+  background: rgba(255,255,255,.12); color: #fff; border: 0;
+  width: 28px; height: 28px; border-radius: 999px; font-size: 13px;
+  cursor: pointer;
+}
+.sc-list {
+  overflow-y: auto; padding: 6px 14px 10px;
+  display: flex; flex-direction: column; gap: 10px;
+  -webkit-overflow-scrolling: touch;
+}
+.sc-empty, .sc-loading { padding: 18px 0; text-align: center; font-size: 13px; opacity: .6; }
+.sc-comment { font-size: 13.5px; }
+.sc-chead { display: flex; gap: 8px; align-items: baseline; }
+.sc-chead b { font-size: 12.5px; }
+.sc-ctime { font-size: 11px; opacity: .5; }
+.sc-cbody { margin-top: 2px; line-height: 1.45; word-break: break-word; }
+.sc-replies { margin-top: 8px; margin-left: 12px; padding-left: 10px;
+  border-left: 2px solid rgba(255,255,255,.14); display: flex; flex-direction: column; gap: 10px; }
+.sc-composer { padding: 10px 14px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid rgba(255,255,255,.1); }
+.sc-form { display: flex; gap: 8px; }
+.sc-input {
+  flex: 1; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.18);
+  color: #fff; border-radius: 999px; padding: 10px 14px; font-size: 14px; outline: none;
+}
+.sc-input::placeholder { color: rgba(255,255,255,.45); }
+.sc-input:focus { border-color: rgba(120,200,255,.6); }
+.sc-send {
+  background: #1d9bf0; color: #fff; border: 0; border-radius: 999px;
+  width: 42px; height: 42px; font-size: 16px; cursor: pointer; flex: none;
+}
+.sc-send:disabled { opacity: .5; }
+.sc-nudge {
+  display: block; text-align: center; font-weight: 800; font-size: 14px;
+  background: rgba(29,155,240,.18); border: 1px solid rgba(29,155,240,.5);
+  color: #7cc4ff; border-radius: 999px; padding: 11px; text-decoration: none;
+}
 
 /* photos */
 .photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }

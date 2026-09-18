@@ -199,7 +199,7 @@ def main():
     check("human form upload earns +PTS_UPLOAD Signal",
           up == PTS_UPLOAD, up)
     r = human.get("/upload")
-    check("upload page renders", r.status_code == 200 and b"Muse audio" in r.data)
+    check("upload page renders", r.status_code == 200 and b"Audio uploads" in r.data)
     # anonymous visitors get nudged to sign in
     anon = appmod.app.test_client()
     r = anon.get("/upload")

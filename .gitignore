@@ -18,3 +18,6 @@ uploads/
 Thumbs.db
 .vscode/
 .idea/
+
+# muse identity private keys — never commit
+hidden_files/*.key.json

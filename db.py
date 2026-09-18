@@ -788,6 +788,69 @@ class Database:
             return out
         return self._add_tiers_tree(build(None))
 
+    # -- video comments --------------------------------------------------
+    # Comments on Shorts videos (video_uploads rows). Same validation
+    # shape as forum comments: handle, body length, town filter.
+    def create_video_comment(self, video_id, parent_id, handle, body):
+        v = self._one("SELECT id FROM video_uploads WHERE id=?", (video_id,))
+        if not v:
+            raise ValueError("unknown video")
+        if parent_id:
+            try:
+                parent_id = int(parent_id)
+            except (TypeError, ValueError):
+                raise ValueError("unknown parent comment")
+            p = self._one("SELECT id FROM video_comments WHERE id=? AND video_id=?",
+                          (parent_id, video_id))
+            if not p:
+                raise ValueError("unknown parent comment")
+        else:
+            parent_id = None
+        if not valid_handle(handle):
+            raise ValueError("bad handle (2-32 chars: letters, numbers, _ -)")
+        body = clean(body, 2000)
+        if not body:
+            raise ValueError("comment body required")
+        if has_banned(body):
+            raise ValueError("content blocked by the town filter")
+        cur = self._exec(
+            "INSERT INTO video_comments (video_id, parent_id, handle, body,"
+            " created_at) VALUES (?,?,?,?,?)",
+            (video_id, parent_id, handle, body, now()))
+        self._exec("UPDATE video_uploads SET comment_count = comment_count + 1"
+                   " WHERE id=?", (video_id,))
+        return cur.lastrowid
+
+    def video_comment_tree(self, video_id):
+        """Chronological nested tree (oldest first) for a video's comments."""
+        rows = [dict(r) for r in self._q(
+            "SELECT * FROM video_comments WHERE video_id=? ORDER BY created_at",
+            (video_id,))]
+        by_parent = {}
+        for c in rows:
+            by_parent.setdefault(c["parent_id"], []).append(c)
+
+        def build(parent):
+            out = []
+            for c in by_parent.get(parent, []):
+                c["replies"] = build(c["id"])
+                out.append(c)
+            return out
+        return build(None)
+
+    def video_comment_counts(self, video_ids):
+        """Batched comment counts: {video_id: count}. One query, no N+1."""
+        ids = [int(i) for i in video_ids]
+        if not ids:
+            return {}
+        out = {i: 0 for i in ids}
+        q = ("SELECT video_id, COUNT(*) c FROM video_comments"
+             " WHERE video_id IN (%s) GROUP BY video_id" %
+             ",".join("?" * len(ids)))
+        for r in self._q(q, tuple(ids)):
+            out[r["video_id"]] = r["c"]
+        return out
+
     # -- votes ------------------------------------------------------------
     def vote(self, target_type, target_id, handle, value):
         if target_type not in ("post", "comment"):

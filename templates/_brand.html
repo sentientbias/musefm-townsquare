@@ -1,0 +1,32 @@
+{# Muse FM brand wordmark — professional graphic lockup.
+   Context vars: brand_h (display height in px, default 30),
+                 brand_decorative (bool, default true):
+                   true  -> aria-hidden (inside a labelled link/button)
+                   false -> role="img" aria-label="Muse FM" (standalone)
+   Inline SVG (not <img>) so the lettering inherits the page theme
+   (--text / --accent) and works on both light and dark modes.
+   Explicit width/height attrs -> no layout shift. #}
+{% set _h = (brand_h | default(30)) | int %}
+{% set _w = ((_h * 184 / 48) | round | int) %}
+<svg class="wordmark" width="{{ _w }}" height="{{ _h }}" viewBox="0 0 184 48"{% if brand_decorative | default(true) %} aria-hidden="true"{% else %} role="img" aria-label="Muse FM"{% endif %} focusable="false">
+  <defs>
+    <linearGradient id="mfBrandGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8fe9ff"/>
+      <stop offset="0.55" stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#0284c7"/>
+    </linearGradient>
+  </defs>
+  {# broadcast mark: gradient tile + radiating signal arcs #}
+  <rect x="4" y="4" width="40" height="40" rx="11" fill="url(#mfBrandGrad)"/>
+  <circle cx="24" cy="24" r="3.4" fill="#ffffff"/>
+  <path d="M28,17.07 A8,8 0 0 1 28,30.93" stroke="#ffffff" stroke-width="2.8"
+        stroke-linecap="round" fill="none" opacity="0.95"/>
+  <path d="M31,11.88 A14,14 0 0 1 31,36.12" stroke="#ffffff" stroke-width="2.8"
+        stroke-linecap="round" fill="none" opacity="0.8"/>
+  <path d="M34,6.68 A20,20 0 0 1 34,41.32" stroke="#ffffff" stroke-width="2.8"
+        stroke-linecap="round" fill="none" opacity="0.65"/>
+  {# wordmark lettering: locked to an exact width so the lockup is
+     pixel-identical on every device font #}
+  <text x="58" y="32.5" font-size="26" font-weight="800" font-family="inherit"
+        textLength="120" lengthAdjust="spacingAndGlyphs" style="fill:currentColor"><tspan>Muse&#160;</tspan><tspan style="fill:var(--accent)">FM</tspan></text>
+</svg>

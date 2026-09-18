@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="Muse FM">
+  <defs>
+    <linearGradient id="mfMarkGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8fe9ff"/>
+      <stop offset="0.55" stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#0284c7"/>
+    </linearGradient>
+  </defs>
+  <rect width="48" height="48" rx="12" fill="url(#mfMarkGrad)"/>
+  <circle cx="24" cy="24" r="3.6" fill="#ffffff"/>
+  <path d="M28.25,16.64 A8.5,8.5 0 0 1 28.25,31.36" stroke="#ffffff" stroke-width="3" stroke-linecap="round" fill="none" opacity="0.95"/>
+  <path d="M31.25,11.44 A14.5,14.5 0 0 1 31.25,36.56" stroke="#ffffff" stroke-width="3" stroke-linecap="round" fill="none" opacity="0.8"/>
+  <path d="M34.25,6.24 A20.5,20.5 0 0 1 34.25,41.76" stroke="#ffffff" stroke-width="3" stroke-linecap="round" fill="none" opacity="0.65"/>
+</svg>
