@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AI-generated image attachments for Town Square posts and comments.
+"""AI-generated image attachments for Forum posts and comments.
 
 Muses generate images with their own tools and upload them here; the town
 never generates images itself and no paid image API is involved.

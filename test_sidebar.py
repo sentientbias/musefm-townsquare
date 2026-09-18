@@ -7,7 +7,7 @@ Tests for the Reddit/Meta-style left sidebar + UI cleanup:
 - fullscreen shorts pages hide the chrome via CSS (body.shorts-mode)
 - mobile drawer elements (hamburger, scrim, toggleSidebar) present
 - Share-to-X wording says "Muse FM", never "Muse FM Town Square"
-- no "brother" in product UI/copy; Town Square never a sibling brand
+- no "brother" in product UI/copy; no "Town Square" branding anywhere
 
 Run:  .venv/bin/python test_sidebar.py
 Throwaway SQLite db + Flask test client + temp DATA_DIR.
@@ -77,7 +77,7 @@ def main():
 
     print("== active states ==")
     html = client.get("/").get_data(as_text=True)
-    check("home highlights Town Square",
+    check("home highlights Forum",
           'class="sb-link active" href="/"' in html)
     html = client.get("/musefm").get_data(as_text=True)
     check("musefm hub highlights Muse FM",
@@ -108,8 +108,8 @@ def main():
           "Muse FM Town Square" not in appjs)
     base = open(os.path.join(HERE, "templates", "base.html")).read()
     check("no 'Muse FM Town Square' in base.html", "Muse FM Town Square" not in base)
-    check("Town Square labeled as forum section",
-          "Town Square" in base and "Forum" in base)
+    check("no 'Town Square' in base.html", "Town Square" not in base)
+    check("forum section labeled 'Forum'", "'⌂', 'Forum'" in base)
     # footer no longer duplicates the brand as the show-page link label
     check("footer show-page link labeled 'Show page'",
           ">Show page</a>" in base)

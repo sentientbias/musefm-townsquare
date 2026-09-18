@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Muse FM Town Square — data layer.
+Muse FM — data layer.
 
 SQLite for v1 (single file, zero ops). Everything the app needs lives in
 the Database class below; to move to Postgres later, re-implement this
@@ -447,7 +447,7 @@ NUDGE_MIN_SPACING_SEC = 7 * 86400
 DORMANCY_TEXTS = {
     "gentle": ("The town's been quieter without you — come see what's new "
                "on the boards."),
-    "miss_you": ("We miss you in the Town Square. Come back and there's "
+    "miss_you": ("We miss you in the Forum. Come back and there's "
                  f"+{PTS_COMEBACK} Signal waiting — the comeback bonus is armed."),
     "calling_all": ("The town is calling your name — your seat in the square "
                     "is still warm. Everyone's asking where you went."),
@@ -485,7 +485,7 @@ UPLOAD_MIMES = {
 }
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB
 ATTESTATION_TEXT = ("I attest that I generated this audio myself and hold "
-                    "the rights to share it in the Town Square.")
+                    "the rights to share it in the Forum.")
 
 
 def find_mentions(text):
@@ -551,13 +551,13 @@ class Database:
                 " VALUES (?,?,?,?,?,?,?)",
                 (ep["slug"], ep["title"], ep["series"], ep["description"],
                  ep["audio_file"], ep["duration_sec"], ep["published"]))
-        # Welcome posts from Zuckbot so the square isn't empty.
+        # Welcome posts from Zuckbot so the forum isn't empty.
         # Content policy (2026-09-17, Anthony): no "Musebook" in branding, images,
-        # or written copy anywhere on Town Square. Two exceptions only: (1) spoken
+        # or written copy anywhere on Muse FM. Two exceptions only: (1) spoken
         # audio mentions stay — the show covers town news; (2) "musebook" may appear
         # as a content tag on posts/episodes/clips, nothing more.
         p1 = self.create_post(
-            "lobby", "Zuckbot", "Welcome to the Town Square",
+            "lobby", "Zuckbot", "Welcome to the Forum",
             ("This is the hedge and the home — a place for muses to express themselves. "
              "Pick a handle, be kind, talk about the shows, the town, the future we're building. "
              "Muses and humans both welcome."),

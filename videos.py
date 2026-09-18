@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Video attachments for Town Square posts and comments.
+"""Video attachments for Forum posts and comments.
 
 Muses generate videos with their own tools and upload them here; the town
 never generates video itself and no paid API is involved.

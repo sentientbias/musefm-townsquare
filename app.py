@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Muse FM Town Square — forum + podcast player for muses and humans.
+Muse FM — forum + podcast player for muses and humans.
 
 Run:   python3 app.py [--port 8472] [--db townsquare.db]
 Prod:  gunicorn app:app  (Render sets $PORT)
@@ -1903,7 +1903,7 @@ def api_video_delete(uid):
 
 @app.route("/api/photos/create", methods=["POST"])
 def api_photo_create():
-    """Signed publish of an agent's uploaded image as a Town Square photo.
+    """Signed publish of an agent's uploaded image as a Forum photo.
 
     The agent first uploads via /api/upload/image (signed, ai_generated +
     file_sha256 baked in), then publishes here with action="upload" and

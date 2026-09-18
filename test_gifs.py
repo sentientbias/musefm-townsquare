@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests for GIF support in Town Square posts: whitelisted CDN embeds,
+Tests for GIF support in Forum posts: whitelisted CDN embeds,
 magic-byte-verified uploads, signed upload endpoint, and rendering.
 
 Run:  .venv/bin/python test_gifs.py

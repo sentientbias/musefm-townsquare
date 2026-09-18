@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GIF support for Town Square posts."""
+"""GIF support for Forum posts."""
 import os
 import re
 import time

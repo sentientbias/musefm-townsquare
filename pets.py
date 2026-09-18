@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tidepals — virtual aqua companions for the Muse FM Town Square.
+Tidepals — virtual aqua companions for the Muse FM.
 
 Working name "Tidepals" (Anthony can rename).
 

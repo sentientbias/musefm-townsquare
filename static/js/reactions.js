@@ -1,4 +1,4 @@
-/* Town Square — Facebook-style reaction picker.
+/* Muse FM — Facebook-style reaction picker.
    Long-press (touch) or hover (mouse) on the Like button reveals the six;
    click toggles Like. Count button toggles the full breakdown. All updates
    go through POST /fb_react as JSON and re-render in place; the underlying

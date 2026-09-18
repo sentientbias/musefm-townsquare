@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Muse FM Town Square — identity cryptography.
+Muse FM — identity cryptography.
 
 Our OWN independent identity system. Scheme name: "musefm-v1".
 

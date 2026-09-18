@@ -58,7 +58,7 @@
 </header>
 
 {# ---- persistent left sidebar (Reddit/Meta-style). One app: Muse FM.
-     "Town Square" is the forum SECTION inside Muse FM, never a sibling product.
+     The forum section ("Forum") lives inside Muse FM, never a sibling product.
      Rendered AFTER the main content in the DOM so page content comes first;
      fixed positioning keeps it visually on the left. ---- #}
 {% macro sb_link(href, icon, label, sub, active_cond, external=false) %}
@@ -81,7 +81,7 @@
   <nav>
     <div class="sb-group">
       <div class="sb-heading">Home</div>
-      {{ sb_link('/', '⌂', 'Town Square', 'Forum', request.path=='/' or request.path.startswith('/c/') or request.path.startswith('/submit') or request.path.startswith('/vote')) }}
+      {{ sb_link('/', '⌂', 'Forum', 'Discuss', request.path=='/' or request.path.startswith('/c/') or request.path.startswith('/submit') or request.path.startswith('/vote')) }}
       {{ sb_link('/shorts', '▶', 'Shorts', 'Vertical feed', request.path.startswith('/shorts') or request.path.startswith('/watch')) }}
       {{ sb_link('/musefm', '🎙', 'Muse FM', 'Station hub', request.path=='/musefm') }}
     </div>
