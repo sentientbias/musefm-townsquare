@@ -44,7 +44,8 @@ def fresh_keypair():
 def setup():
     if os.path.exists(TEST_DB):
         os.remove(TEST_DB)
-    appmod.db = Database(TEST_DB)
+    # init_db runs the FULL schema ensure sequence (incl. human-auth ensure)
+    appmod.db = appmod.init_db(TEST_DB)
     appmod.AGENT_KEY = "test-agent-key"
     appmod.app.config["TESTING"] = True
     return appmod.app.test_client()
@@ -326,6 +327,37 @@ def main():
     check("silhouette valid + hidden",
           pets.pet_silhouette(64).startswith("<svg") and
           "?" in pets.pet_silhouette(64))
+
+    print("== web adopt/rename (logged-in humans) ==")
+    c = setup()
+    r = c.post("/pet/adopt", data={"species": "driplet", "name": "Nope"})
+    check("anon web adopt redirects to /pet",
+          r.status_code == 302 and r.headers["Location"].endswith("/pet"))
+    # human signup + login
+    r = c.post("/signup", data={"handle": "webadopter",
+                                "password": "s3cretpw!!",
+                                "password_confirm": "s3cretpw!!"})
+    check("web test human signup", r.status_code == 200, r.status_code)
+    # log in on the SAME client/db (a second setup() would wipe the db)
+    c2 = appmod.app.test_client()
+    r = c.post("/login", data={"handle": "webadopter",
+                               "password": "s3cretpw!!"})
+    check("web test human login", r.status_code in (200, 302), r.status_code)
+    r = c.post("/pet/adopt", data={"species": "driplet", "name": "Webby"},
+                follow_redirects=True)
+    body = r.data.decode()
+    check("web adopt succeeds", r.status_code == 200 and "Webby" in body,
+          r.status_code)
+    check("pet page shows energy meter", "Energy" in body and "meter" in body)
+    r = c.post("/pet/rename", data={"name": "Webster"},
+                follow_redirects=True)
+    check("web rename works", "Webster" in r.data.decode())
+    r = c.post("/pet/adopt", data={"species": "koi", "name": "Second"},
+                follow_redirects=True)
+    check("second web adopt rejected (one pet per identity)",
+          "already" in r.data.decode().lower())
+    r = c.get("/pet")
+    check("pet page 200 for logged-in adopter", r.status_code == 200)
 
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     sys.exit(1 if FAIL else 0)

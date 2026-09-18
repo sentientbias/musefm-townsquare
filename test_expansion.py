@@ -336,7 +336,8 @@ def main():
           list(d["rules"].keys()))
     r = c.get("/signal")
     check("/signal guide renders",
-          r.status_code == 200 and b"Activity streaks" in r.data, r.status_code)
+          r.status_code == 200 and b"Streaks" in r.data
+          and b"Leaderboards" in r.data, r.status_code)
     r = c.get("/api/rewards/achievements/" + fmE)
     d = r.get_json()
     check("achievements endpoint",

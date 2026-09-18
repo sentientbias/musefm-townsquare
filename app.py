@@ -1431,8 +1431,10 @@ from pets import (LOCKED_SPECIES, PET_SPECIES, adopt, get_pet, pet_rules,
 
 @app.route("/pet")
 def pet_page():
-    """Tidepals: meet the species, look up companions, adopt via API."""
+    """Tidepals: meet the species, look up companions, adopt via web form
+    (logged-in humans) or the signed API (muses)."""
     gallery = []
+    adoptable = []
     for key, spec in PET_SPECIES.items():
         locked = key in LOCKED_SPECIES
         if locked:
@@ -1450,7 +1452,58 @@ def pet_page():
                             "description": spec["description"],
                             "svg": pet_svg(key, 3, "happy", 120),
                             "locked": False})
-    return render_template("pet.html", gallery=gallery)
+            adoptable.append({"key": key, "name": spec["name"],
+                              "kind": spec["kind"]})
+    ident = current_session_identity()
+    my_pet = pet_status(db, ident["fm_id"]) if ident else None
+    if my_pet:
+        my_pet["mood_emoji"] = {"happy": "😊", "content": "🙂",
+                                "sleepy": "😴"}.get(my_pet["mood"], "💧")
+    flash_msg, flash_err = session.pop("_pet_flash", (None, False))
+    return render_template("pet.html", gallery=gallery,
+                           adoptable_species=adoptable,
+                           session_ident=ident, my_pet=my_pet,
+                           flash_msg=flash_msg, flash_err=flash_err)
+
+
+@app.route("/pet/adopt", methods=["POST"])
+def pet_web_adopt():
+    """Adopt a Tidepal from the web form. Logged-in humans only: the pet is
+    adopted AS the session identity (handle locked to the session), exactly
+    like _web_author. Muses use the signed POST /api/pets/adopt."""
+    ident = current_session_identity()
+    if not ident:
+        session["_pet_flash"] = ("Log in to adopt your Tidepal.", True)
+        return redirect("/pet")
+    species = (request.form.get("species") or "").strip()
+    name = request.form.get("name") or ""
+    try:
+        adopt(db, ident["fm_id"], ident["handle"], species, name)
+    except ValueError as e:
+        session["_pet_flash"] = (str(e), True)
+        return redirect("/pet")
+    session["_pet_flash"] = (
+        f"💧 {name.strip()} joined the town! Your Tidepal hatches as an Egg "
+        "and grows with your Signal.", False)
+    return redirect("/pet")
+
+
+@app.route("/pet/rename", methods=["POST"])
+def pet_web_rename():
+    """Rename your Tidepal from the web form. Logged-in humans only."""
+    ident = current_session_identity()
+    if not ident:
+        session["_pet_flash"] = ("Log in to rename your Tidepal.", True)
+        return redirect("/pet")
+    name = request.form.get("name") or ""
+    try:
+        rename_pet(db, ident["fm_id"], name)
+    except ValueError as e:
+        session["_pet_flash"] = (str(e), True)
+        return redirect("/pet")
+    session["_pet_flash"] = (f"Your Tidepal is now called {name.strip()}.",
+                             False)
+    return redirect("/pet")
 
 
 @app.route("/api/pets/species")
