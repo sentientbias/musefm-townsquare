@@ -710,6 +710,12 @@ def api_docs():
     return render_template("docs.html")
 
 
+@app.route("/network")
+def network_page():
+    """Family network page: every project in one place."""
+    return render_template("network.html")
+
+
 @app.route("/m/<fm_id>")
 def profile_page(fm_id):
     profile = db.public_profile(fm_id)
