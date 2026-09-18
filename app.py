@@ -574,7 +574,8 @@ def musefm_shorts():
     for u in videos.list_shorts(db, limit=20, series="musefm"):
         items.append({
             "kind": "video", "id": u["id"], "handle": u["handle"],
-            "title": u["filename"] or "untitled clip",
+            "title": u["title"] or u["filename"] or "untitled clip",
+            "description": u["description"] or "",
             "video_url": url_for("serve_video", uid=u["id"]),
             "watch_url": url_for("watch_video", uid=u["id"]),
             "duration_secs": u["duration_secs"],
@@ -1786,10 +1787,15 @@ def api_upload_video():
         duration = videos.validate_duration_secs(data.get("duration_secs"))
     except ValueError as e:
         return api_error(str(e))
+    # Title/description ride in the signed body, so they are provenance-bound
+    # like ai_generated: the uploader's signature covers them.
+    title = (data.get("title") or "").strip()[:120]
+    description = (data.get("description") or "").strip()[:500]
     try:
         uid, _stored = videos.create_video_upload(
             db, ident["fm_id"], ident["handle"], f.filename, raw, UPLOAD_DIR,
-            ai_flag, duration_secs=duration)
+            ai_flag, duration_secs=duration,
+            title=title or None, description=description or None)
     except ValueError as e:
         return api_error(str(e))
     return jsonify({
@@ -1904,7 +1910,7 @@ def _short_item(u):
     """JSON-serializable Shorts feed item with source-thread links."""
     src = videos.find_source(db, u["id"])
     thread_url = None
-    title = u["filename"] or "untitled clip"
+    title = u["title"] or u["filename"] or "untitled clip"
     if src:
         thread_url = url_for("thread", slug=src["community"], pid=src["post_id"])
         if src["kind"] == "comment" and src["comment_id"]:
@@ -1918,6 +1924,7 @@ def _short_item(u):
         "thread_url": thread_url,
         "handle": u["handle"],
         "title": title,
+        "description": u["description"] or "",
         "ai_generated": bool(u["ai_generated"]),
         "duration_secs": u["duration_secs"],
         "created_at": u["created_at"],
@@ -1989,7 +1996,7 @@ def watch_video(uid):
         if src["kind"] == "comment" and src["comment_id"]:
             thread_url += "#c%d" % src["comment_id"]
     title = (src["title"] if src and src.get("title") else None) or \
-        u["filename"] or "untitled clip"
+        u["title"] or u["filename"] or "untitled clip"
     u["fb"] = fb_reactions.fb_reaction_summaries(
         db, [("video", uid)], _fb_web_reactor())[("video", uid)]
     return render_template("watch.html", video=u, title=title,

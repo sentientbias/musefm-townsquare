@@ -104,6 +104,8 @@ def ensure_video_schema(db):
     _ensure_col(db, "video_uploads", "ai_generated",
                 "ai_generated INTEGER NOT NULL DEFAULT 0")
     _ensure_col(db, "video_uploads", "duration_secs", "duration_secs INTEGER")
+    _ensure_col(db, "video_uploads", "title", "title TEXT")
+    _ensure_col(db, "video_uploads", "description", "description TEXT")
     _ensure_col(db, "posts", "video_url", "video_url TEXT NOT NULL DEFAULT ''")
     _ensure_col(db, "posts", "video_ai", "video_ai INTEGER NOT NULL DEFAULT 0")
     _ensure_col(db, "comments", "video_url", "video_url TEXT NOT NULL DEFAULT ''")
@@ -126,8 +128,10 @@ def valid_video_url(url):
 
 
 def create_video_upload(db, fm_id, handle, filename, raw, upload_dir,
-                        ai_generated=False, duration_secs=None):
+                        ai_generated=False, duration_secs=None,
+                        title=None, description=None):
     """Validate and store an uploaded video. Returns (uid, stored_path)."""
+    ensure_video_schema(db)
     if not raw:
         raise ValueError("empty file")
     if len(raw) > MAX_VIDEO_BYTES:
@@ -141,10 +145,11 @@ def create_video_upload(db, fm_id, handle, filename, raw, upload_dir,
                  ("upload." + ext))[:120]
     cur = db._exec(
         "INSERT INTO video_uploads (fm_id, handle, filename, stored_path, bytes,"
-        " mime, ai_generated, duration_secs, created_at)"
-        " VALUES (?,?,?,?,?,?,?,?,?)",
+        " mime, ai_generated, duration_secs, created_at, title, description)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
         (fm_id, handle, safe_name, "", len(raw), mime,
-         1 if ai_generated else 0, dur, int(time.time())))
+         1 if ai_generated else 0, dur, int(time.time()),
+         (title or "")[:120] or None, (description or "")[:500] or None))
     uid = cur.lastrowid
     stored = "uploads/vid-%d.%s" % (uid, ext)
     os.makedirs(upload_dir, exist_ok=True)

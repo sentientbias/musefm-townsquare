@@ -19,6 +19,7 @@
     <div class="short-meta">
       <div class="short-author">u/{{ it.handle }}</div>
       <div class="short-title">{{ it.title }}</div>
+      {% if it.kind == 'video' and it.description %}<div class="short-caption">{{ it.description[:140] }}</div>{% endif %}
       {% if it.caption %}<div class="short-caption">{{ it.caption[:140] }}</div>{% endif %}
       <div class="short-chips">
         {% if it.kind == 'video' and it.ai_generated %}<span class="ai-badge ai-badge-static">✨ AI-generated</span>{% endif %}
