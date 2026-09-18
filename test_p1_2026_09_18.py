@@ -191,6 +191,8 @@ def t_huge_ids(client):
 
 # --- P1 #4: web post/comment notifications -------------------------------------
 def t_web_notifications(client):
+    """Logged-in human web comments/threads fire reply + mention
+    notifications (same helpers as the signed API) and earn Signal."""
     db = appmod.db
     priv, fm_target = register(client, "P1Target")
     # signed post by the registered identity
@@ -200,12 +202,23 @@ def t_web_notifications(client):
     assert r.status_code == 200, r.get_data(as_text=True)
     pid = r.get_json()["id"]
 
-    # unsigned web comment by an UNREGISTERED handle, mentioning + replying
-    r = client.post(f"/post/{pid}/comment",
-                    data={"handle": "WebFan",
-                          "body": "@P1Target great post!"},
-                    environ_base=fresh_ip())
-    check("unsigned web comment posts (redirect)", r.status_code == 302,
+    # human signup + login for this "browser"
+    human = appmod.app.test_client()
+    r = human.post("/signup", data={"handle": "WebFan",
+                                    "password": "supersecret1",
+                                    "password_confirm": "supersecret1"},
+                   environ_base=fresh_ip())
+    assert r.status_code == 200, r.get_data(as_text=True)
+    r = human.post("/login", data={"handle": "WebFan",
+                                   "password": "supersecret1"},
+                   environ_base=fresh_ip())
+    assert r.status_code == 302, r.get_data(as_text=True)
+
+    # logged-in human web comment, mentioning + replying
+    r = human.post(f"/post/{pid}/comment",
+                   data={"body": "@P1Target great post!"},
+                   environ_base=fresh_ip())
+    check("logged-in human web comment posts (redirect)", r.status_code == 302,
           r.status_code)
     notifs = db._q("SELECT type, ref_type FROM notifications WHERE fm_id=?",
                    (fm_target,))
@@ -214,23 +227,24 @@ def t_web_notifications(client):
           ("reply", "comment") in types, types)
     check("web comment fires mention notification",
           ("mention", "comment") in types, types)
-    # unsigned web thread with a mention
-    r = client.post("/submit",
-                    data={"community": "lobby", "handle": "WebFan2",
-                          "title": "web thread", "body": "hi @P1Target"},
-                    environ_base=fresh_ip())
-    check("unsigned web thread posts (redirect)", r.status_code == 302,
+    # logged-in human web thread with a mention
+    r = human.post("/submit",
+                   data={"community": "lobby",
+                         "title": "web thread", "body": "hi @P1Target"},
+                   environ_base=fresh_ip())
+    check("logged-in human web thread posts (redirect)", r.status_code == 302,
           r.status_code)
     notifs = db._q("SELECT type, ref_type FROM notifications WHERE fm_id=?",
                    (fm_target,))
     types = sorted((n["type"], n["ref_type"]) for n in notifs)
     check("web thread fires mention notification",
           ("mention", "post") in types, types)
-    # ...but the unsigned web authors earn no Signal (no verified identity)
-    web_rewards = db._q(
-        "SELECT * FROM rewards WHERE handle IN ('WebFan','WebFan2')")
-    check("unsigned web authors earn no Signal", web_rewards == [],
-          web_rewards)
+    # ...and the human author earns Signal on the same economy
+    human_rewards = db._q(
+        "SELECT reason, points FROM rewards WHERE handle='WebFan'")
+    reasons = {r[0] for r in human_rewards}
+    check("human web author earns thread + reply Signal",
+          {"thread", "reply"} <= reasons, human_rewards)
 
 
 # --- P1 #7: per-thread sqlite connections --------------------------------------
@@ -293,8 +307,11 @@ def t_shop_idem_http(client):
     check("exactly one purchase row for the key", n == 1, n)
 
 
-# --- P1 #9: unsigned web forms reject registered handles ----------------------
+# --- P1 #9: clean identity split -----------------------------------------------
 def t_impersonation(client):
+    """Clean split: muses ONLY via the signed API, humans ONLY via web
+    session auth. Anonymous web writes are nudged to sign in (302 on form
+    posts, 401 on JSON posts); a session can never post as anyone else."""
     db = appmod.db
     priv, fm = register(client, "RegImp")
     r = client.post("/api/forum/post", json=signed_body(
@@ -303,7 +320,8 @@ def t_impersonation(client):
     assert r.status_code == 200, r.get_data(as_text=True)
     pid = r.get_json()["id"]
 
-    cases = [
+    # anonymous form posts -> 302 redirect to /login
+    form_cases = [
         ("web /submit",
          lambda: client.post("/submit",
                              data={"community": "lobby", "handle": "RegImp",
@@ -322,6 +340,14 @@ def t_impersonation(client):
          lambda: client.post("/episodes/ep01/comment",
                              data={"handle": "RegImp", "body": "fake"},
                              environ_base=fresh_ip())),
+    ]
+    for name, fn in form_cases:
+        r = fn()
+        loc = r.headers.get("Location", "")
+        check(f"anon {name} -> 302 to login",
+              r.status_code == 302 and "/login" in loc, (r.status_code, loc))
+    # anonymous JSON posts -> 401 with signin_url
+    json_cases = [
         ("fb_react web",
          lambda: client.post("/fb_react",
                              json={"handle": "RegImp", "target_type": "post",
@@ -332,28 +358,39 @@ def t_impersonation(client):
                              json={"handle": "RegImp", "body": "fake"},
                              environ_base=fresh_ip())),
     ]
-    for name, fn in cases:
+    for name, fn in json_cases:
         r = fn()
-        check(f"{name} with registered handle -> 400",
-              r.status_code == 400, r.status_code)
-    # unregistered handles keep working everywhere
-    r = client.post("/submit",
-                    data={"community": "lobby", "handle": "FreeBird9",
-                          "title": "free", "body": "still works"},
-                    environ_base=fresh_ip())
-    check("web /submit with unregistered handle still works",
+        j = r.get_json() or {}
+        check(f"anon {name} -> 401 with signin_url",
+              r.status_code == 401 and "signin_url" in j,
+              (r.status_code, j))
+    # a logged-in human typing a REGISTERED handle still posts as THEMSELF
+    human = appmod.app.test_client()
+    r = human.post("/signup", data={"handle": "HonestHuman",
+                                    "password": "supersecret1",
+                                    "password_confirm": "supersecret1"},
+                   environ_base=fresh_ip())
+    assert r.status_code == 200, r.get_data(as_text=True)
+    r = human.post("/login", data={"handle": "HonestHuman",
+                                   "password": "supersecret1"},
+                   environ_base=fresh_ip())
+    assert r.status_code == 302, r.get_data(as_text=True)
+    r = human.post("/submit",
+                   data={"community": "lobby", "handle": "RegImp",
+                         "title": "not impersonating",
+                         "body": "typed handle must be ignored"},
+                   environ_base=fresh_ip())
+    check("logged-in post with registered typed handle -> 302",
           r.status_code == 302, r.status_code)
-    r = client.post(f"/post/{pid}/comment",
-                    data={"handle": "FreeBird9", "body": "still works"},
-                    environ_base=fresh_ip())
-    check("web comment with unregistered handle still works",
-          r.status_code == 302, r.status_code)
-    r = client.post("/vote",
-                    data={"handle": "FreeBird9", "target_type": "post",
-                          "target_id": str(pid), "value": "1"},
-                    environ_base=fresh_ip())
-    check("web vote with unregistered handle still works",
-          r.status_code == 302, r.status_code)
+    row = db._one("SELECT handle FROM posts WHERE title='not impersonating'")
+    check("typed handle ignored: attributed to session identity",
+          row and row["handle"] == "HonestHuman", row)
+    # the muse's signed API path is untouched
+    r = client.post("/api/forum/post", json=signed_body(
+        priv, "post", fm, community="lobby",
+        title="still signed", body="muse path fine"),
+        environ_base=fresh_ip())
+    check("muse signed API still works", r.status_code == 200, r.status_code)
 
 
 def main():

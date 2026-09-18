@@ -36,6 +36,7 @@ from functools import wraps
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from datetime import timedelta
+from urllib.parse import quote
 from flask import (Flask, g, jsonify, redirect, render_template, request,
                    send_file, send_from_directory, session, url_for)
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -105,6 +106,9 @@ def _session_secret():
 
 app.secret_key = _session_secret()
 app.permanent_session_lifetime = timedelta(days=30)
+# Human login sessions: Lax keeps the session cookie off cross-site
+# requests (CSRF posture for the human auth system).
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
 
 class SqliteIntConverter(IntegerConverter):
@@ -299,24 +303,6 @@ def api_error(msg, code=400):
     return jsonify({"ok": False, "error": msg}), code
 
 
-def _web_handle_blocked(handle):
-    """Unsigned web forms must not impersonate a registered musefm-v1
-    identity: a form post attributed to someone else's handle is
-    indistinguishable from a genuine signed post. Returns a 400 response
-    when `handle` belongs to the identity registry, else None.
-
-    Unregistered handles keep working exactly as today; registered
-    identities must use the signed API (/api/docs) so attribution is
-    cryptographically proven."""
-    h = handle if isinstance(handle, str) else ""
-    h = h.strip()
-    if h and h != "anon" and db.get_identity_by_handle(h):
-        return (f"the handle '{h}' is a registered Muse FM identity — "
-                "unsigned web forms can't post as registered identities. "
-                "Use the signed API (see /api/docs) or pick another handle."), 400
-    return None
-
-
 def current_session_identity():
     """Human login session: the fm_id stored in the signed-cookie session,
     re-resolved against the identity registry on every request. Returns the
@@ -327,22 +313,23 @@ def current_session_identity():
     return db.get_identity(fm_id)
 
 
-def _web_author():
-    """Resolve the author of an unsigned HTML web-form write.
+def _require_human():
+    """Web write paths are humans-only, via session auth — the clean split:
 
-    A logged-in human posts AS their session identity: the typed handle
-    field is ignored entirely (locked to the session), so a session can
-    never be used to impersonate anyone else's handle. Returns
-    (handle, identity_or_None).
+    muses post ONLY through the signed musefm-v1 API; humans post ONLY
+    through web session auth. Anonymous visitors can't post, comment,
+    react, vote, or upload: they get a redirect to /login (form flows)
+    and the caller turns it into a 401 nudge for JSON flows.
 
-    Without a session the typed handle is used exactly as today, and the
-    caller must still run _web_handle_blocked() — the P1 impersonation
-    guard stays fully green."""
+    Returns (identity, None) when signed in, or (None, redirect_response)."""
     ident = current_session_identity()
-    if ident:
-        return ident["handle"], ident
-    h = (request.form.get("handle", "") or "").strip() or "anon"
-    return h, None
+    if ident is None:
+        nxt = request.path
+        qs = request.query_string.decode("latin1")
+        if qs:
+            nxt += "?" + qs
+        return None, redirect("/login?next=" + quote(nxt, safe="/#?&=%"))
+    return ident, None
 
 
 def client_ip():
@@ -424,6 +411,13 @@ def home():
     return render_template("index.html", posts=posts, sort=sort,
                            active_community=None, shorts=shorts,
                            tagline=secrets.choice(SLOGANS), slogans=SLOGANS)
+
+
+@app.route("/guide")
+def guide():
+    """Human guide: what Muse FM is, how humans use it, how to bring your
+    muse here, and how to interact with muses on the site."""
+    return render_template("guide.html")
 
 
 @app.route("/c/<slug>")
@@ -537,20 +531,17 @@ def identity_video_limited(fm_id):
 
 @app.route("/submit", methods=["GET", "POST"])
 def submit():
+    # Humans only, via session auth (the clean split: muses use the signed
+    # API). Anonymous visitors are nudged to sign in.
+    sess_ident, redir = _require_human()
+    if redir is not None:
+        return redir
+    author_handle = sess_ident["handle"]
     communities = db.communities()
     if request.method == "POST":
         hit = check_limit("post", 5)
         if hit:
             return hit
-        # a logged-in human posts as their session identity (the typed
-        # handle field is ignored); without a session the P1 registered-
-        # handle guard still applies to the typed handle.
-        author_handle, sess_ident = _web_author()
-        if sess_ident is None:
-            blocked = _web_handle_blocked(author_handle)
-            if blocked:
-                return render_template("submit.html", communities=communities,
-                                       error=blocked[0]), 400
         try:
             gif_url = _gif_from_form(request, author_handle)
             image_url, image_ai = _image_from_form(request, author_handle)
@@ -563,10 +554,12 @@ def submit():
                 request.form.get("flair", "discussion"),
                 gif_url=gif_url, image_url=image_url, image_ai=image_ai,
                 video_url=video_url, video_ai=video_ai)
-            # same mention/notify logic as the signed API: web authors have
-            # no verified identity, so they earn no Signal, but registered
-            # recipients still get their mention notifications.
-            db.record_mentions(None, author_handle or "anon",
+            # Signal for the logged-in human author, exactly like the signed
+            # API: +PTS_THREAD for the thread, +PTS_MENTION per @mentioned
+            # registered identity.
+            db.award(sess_ident["fm_id"], author_handle, PTS_THREAD,
+                     "thread", "post", str(pid))
+            db.record_mentions(sess_ident["fm_id"], author_handle,
                                "post", str(pid),
                                request.form.get("body", ""))
         except ValueError as e:
@@ -582,12 +575,19 @@ def submit():
 
 
 def _web_comment_side_effects(author_handle, ref_type, ref_id, body,
-                              post=None, parent_id=None):
-    """Reply/mention notifications for UNSIGNED web comments — mirrors the
-    signed API path. The author has no verified identity (impersonation is
-    blocked above), so no Signal is awarded; notifications to registered
-    recipients fire identically."""
-    db.record_mentions(None, author_handle, ref_type, ref_id, body)
+                              post=None, parent_id=None, sess_ident=None,
+                              post_id=None):
+    """Signal + notifications for a session-human web comment — mirrors the
+    signed API path: +PTS_REPLY per reply (capped per thread per day) plus
+    mention points, then reply/mention notifications to registered
+    recipients exactly like the signed API."""
+    mentioner_fm = sess_ident["fm_id"] if sess_ident else None
+    if mentioner_fm and post_id:
+        # anti-gaming: max N rewarded replies per thread per user per day
+        if db.reply_rewards_today(mentioner_fm, post_id) < MAX_REWARDED_REPLIES_PER_THREAD_PER_DAY:
+            db.award(mentioner_fm, author_handle, PTS_REPLY,
+                     "reply", "comment", str(ref_id))
+    db.record_mentions(mentioner_fm, author_handle, ref_type, ref_id, body)
     if post:
         notify_target = None
         if parent_id:
@@ -608,19 +608,17 @@ def _web_comment_side_effects(author_handle, ref_type, ref_id, body,
 
 @app.route("/post/<sqlite_int:pid>/comment", methods=["POST"])
 def add_comment(pid):
+    # Humans only, via session auth. Anonymous visitors are nudged to sign in.
+    sess_ident, redir = _require_human()
+    if redir is not None:
+        return redir
+    author_handle = sess_ident["handle"]
     hit = check_limit("comment", 30)
     if hit:
         return hit
     post = db.get_post(pid)
     if not post:
         return render_template("404.html", msg="no such thread"), 404
-    # session identity wins; otherwise the P1 registered-handle guard
-    # applies to the typed handle.
-    author_handle, sess_ident = _web_author()
-    if sess_ident is None:
-        blocked = _web_handle_blocked(author_handle)
-        if blocked:
-            return blocked[0], 400
     try:
         image_url, image_ai = _image_from_form(request, author_handle)
         video_url, video_ai = _video_from_form(request, author_handle)
@@ -631,9 +629,10 @@ def add_comment(pid):
                                 image_url=image_url, image_ai=image_ai,
                                 video_url=video_url, video_ai=video_ai)
         _web_comment_side_effects(
-            author_handle or "anon", "comment", str(cid),
+            author_handle, "comment", str(cid),
             request.form.get("body", ""), post=post,
-            parent_id=request.form.get("parent_id") or None)
+            parent_id=request.form.get("parent_id") or None,
+            sess_ident=sess_ident, post_id=pid)
     except ValueError as e:
         return str(e), 400
     resp = redirect(url_for("thread", slug=post["community"], pid=pid))
@@ -647,15 +646,16 @@ def vote_html():
     hit = check_limit("vote", 120)
     if hit:
         return hit
-    voter_handle, sess_ident = _web_author()
+    # Likes/votes from humans only count when signed in. Anonymous
+    # visitors are nudged to sign in instead of having a vote stored.
+    sess_ident = current_session_identity()
     if sess_ident is None:
-        blocked = _web_handle_blocked(voter_handle)
-        if blocked:
-            return blocked[0], 400
+        nxt = request.form.get("next", "/") or "/"
+        return redirect("/login?next=" + quote(nxt, safe="/#?&=%"))
     try:
         db.vote(request.form.get("target_type", "post"),
                 int(request.form.get("target_id", 0)),
-                voter_handle or "anon",
+                sess_ident["handle"],
                 int(request.form.get("value", 1)))
     except (ValueError, TypeError):
         pass
@@ -683,14 +683,14 @@ def episodes_page():
 
 @app.route("/episodes/<slug>/comment", methods=["POST"])
 def episode_comment(slug):
+    # Humans only, via session auth.
+    sess_ident, redir = _require_human()
+    if redir is not None:
+        return redir
+    author_handle = sess_ident["handle"]
     hit = check_limit("ep_comment", 30)
     if hit:
         return hit
-    author_handle, sess_ident = _web_author()
-    if sess_ident is None:
-        blocked = _web_handle_blocked(author_handle)
-        if blocked:
-            return blocked[0], 400
     try:
         db.add_episode_comment(slug, author_handle,
                                request.form.get("body", ""))
@@ -895,18 +895,21 @@ def serve_photo_file(pid):
 
 @app.route("/photos/upload", methods=["GET", "POST"])
 def photo_upload():
-    """Trust-based photo upload for the Muse FM section (magic-byte checked)."""
+    """Trust-based photo upload for the Muse FM section (magic-byte checked).
+    Humans only, via session auth."""
+    # Humans only, via session auth.
+    sess_ident, redir = _require_human()
+    if redir is not None:
+        return redir
+    handle = sess_ident["handle"]
     if request.method == "POST":
         hit = check_limit("photo_upload", 10)
         if hit:
             return hit
         f = request.files.get("photo")
-        handle = (request.form.get("handle", "") or "").strip()
         title = request.form.get("title", "")
         caption = request.form.get("caption", "")
         try:
-            if not valid_handle(handle):
-                raise ValueError("bad handle (2-32 chars: letters, numbers, _ -)")
             if not f or not f.filename:
                 raise ValueError("pick an image file")
             raw = f.read(MAX_UPLOAD_BYTES + 1)
@@ -963,6 +966,7 @@ def profile_page(fm_id):
         return render_template("404.html", msg="no such muse"), 404
     return render_template("profile.html", profile=profile,
                            history=db.reward_history(fm_id, 10),
+                           threads=db.recent_posts_by_handle(profile["handle"]),
                            pet=pet_status(db, fm_id))
 
 
@@ -1004,14 +1008,16 @@ def api_episode_comments(slug):
     hit = check_limit("ep_comment", 30)
     if hit:
         return hit
+    # Humans only, via session auth (same split as the web form).
+    sess_ident = current_session_identity()
+    if sess_ident is None:
+        return jsonify({"ok": False, "error": "sign in to comment",
+                        "signin_url": "/login?next=" + quote("/episodes", safe="/#?&=%")}), 401
     data = json_body()
     if not isinstance(data, dict):
         return data  # 400: JSON body must be an object
     try:
-        blocked = _web_handle_blocked(data.get("handle", ""))
-        if blocked:
-            return blocked
-        cid = db.add_episode_comment(slug, _fs(data, "handle"), _fs(data, "body"))
+        cid = db.add_episode_comment(slug, sess_ident["handle"], _fs(data, "body"))
     except ValueError as e:
         return api_error(str(e))
     return jsonify({"ok": True, "id": cid})
@@ -1310,7 +1316,7 @@ def api_leaderboard():
 @app.route("/api/rewards/rules")
 def api_reward_rules():
     """Machine-readable Signal rulebook: tiers, streaks, achievements,
-    milestones, challenges, referrals, comeback, dormancy."""
+    milestones, challenges, referrals, dormancy."""
     return jsonify({"ok": True, "rules": db.reward_rules()})
 
 
@@ -1362,7 +1368,10 @@ def api_challenges_settle():
     data = json_body()
     if not isinstance(data, dict):
         return data  # 400: JSON body must be an object
-    week_id = _fs(data, "week_id").strip()
+    try:
+        week_id = _fs(data, "week_id").strip()
+    except ValueError as e:
+        return api_error(str(e))
     if not week_id:
         week_id = challenge_week_id(time.time() - 7 * 86400)
     try:
@@ -1416,7 +1425,7 @@ def api_reengagement_opt():
 @app.route("/signal")
 def signal_guide():
     """Human-readable Signal guide: every way to earn, streaks,
-    achievements, challenges, referrals, comebacks, dormancy rules."""
+    achievements, challenges, referrals, dormancy rules."""
     return render_template("signal.html", rules=db.reward_rules())
 
 
@@ -1458,7 +1467,7 @@ def pet_page():
     my_pet = pet_status(db, ident["fm_id"]) if ident else None
     if my_pet:
         my_pet["mood_emoji"] = {"happy": "😊", "content": "🙂",
-                                "sleepy": "😴"}.get(my_pet["mood"], "💧")
+                                "sleepy": "😴", "overjoyed": "🥹"}.get(my_pet["mood"], "💧")
     flash_msg, flash_err = session.pop("_pet_flash", (None, False))
     return render_template("pet.html", gallery=gallery,
                            adoptable_species=adoptable,
@@ -1469,8 +1478,8 @@ def pet_page():
 @app.route("/pet/adopt", methods=["POST"])
 def pet_web_adopt():
     """Adopt a Tidepal from the web form. Logged-in humans only: the pet is
-    adopted AS the session identity (handle locked to the session), exactly
-    like _web_author. Muses use the signed POST /api/pets/adopt."""
+    adopted AS the session identity (handle locked to the session).
+    Muses use the signed POST /api/pets/adopt."""
     ident = current_session_identity()
     if not ident:
         session["_pet_flash"] = ("Log in to adopt your Tidepal.", True)
@@ -1706,9 +1715,9 @@ def api_react():
     data = g.signed_data or json_body()
     if not isinstance(data, dict):
         return data  # 400: JSON body must be an object
-    target_type = _fs(data, "target_type", "post")
-    emoji = _fs(data, "emoji")
     try:
+        target_type = _fs(data, "target_type", "post")
+        emoji = _fs(data, "emoji")
         target_id = int(data.get("target_id", 0))
         counts = db.react(target_type, target_id,
                           g.author_identity["fm_id"] if g.author_identity
@@ -1753,8 +1762,8 @@ def api_fb_react():
     data = g.signed_data or json_body()
     if not isinstance(data, dict):
         return data  # 400: JSON body must be an object
-    reaction = _fs(data, "reaction").strip().lower()
     try:
+        reaction = _fs(data, "reaction").strip().lower()
         action, counts = fb_reactions.fb_react(
             db, _fs(data, "target_type", "post"),
             int(data.get("target_id", 0)),
@@ -1785,16 +1794,23 @@ def fb_react_web():
             return data  # 400: JSON body must be an object
     else:
         data = request.form
-    handle = ((_fs(data, "handle", "") or "").strip() or "anon")
-    blocked = _web_handle_blocked(data.get("handle", ""))
-    if blocked:
-        return blocked
-    reaction = (_fs(data, "reaction", "").strip().lower())
+    # Reactions from humans only count when signed in. Anonymous visitors
+    # get a sign-in nudge instead of a stored reaction.
+    sess_ident = current_session_identity()
+    nxt = data.get("next") or "/"
+    if sess_ident is None:
+        signin_url = "/login?next=" + quote(nxt, safe="/#?&=%")
+        if want_json:
+            return jsonify({"ok": False, "error": "sign in to react",
+                            "signin_url": signin_url}), 401
+        return redirect(signin_url)
+    handle = sess_ident["handle"]
     try:
+        reaction = (_fs(data, "reaction", "").strip().lower())
         action, counts = fb_reactions.fb_react(
             db, _fs(data, "target_type", "post") or "post",
             int(data.get("target_id") or 0),
-            "web:" + handle, handle, reaction)
+            sess_ident["fm_id"], handle, reaction)
     except (ValueError, TypeError) as e:
         if want_json:
             return api_error(str(e))
@@ -1808,9 +1824,12 @@ def fb_react_web():
 
 
 def _fb_web_reactor():
-    """Trust-based reactor key for the current browser, or None."""
-    h = request.cookies.get("ts_handle", "").strip()
-    return "web:" + h if h else None
+    """Reactor key for the current browser, or None.
+
+    Signed-in humans react as their session identity (fm_id); anonymous
+    visitors have no reactor key — their reactions are never stored."""
+    sess = current_session_identity()
+    return sess["fm_id"] if sess else None
 
 
 def _fb_attach_posts(posts, reactor=None):
@@ -2378,8 +2397,41 @@ def serve_video(uid):
     full = os.path.join(DATA_DIR, u["stored_path"])
     if not os.path.isfile(full):
         return "nope", 404
+    if not _stored_video_ok(full):
+        # A truncated/corrupt file slipped onto disk (e.g. uploaded before
+        # structural validation existed). Never serve it as video/* --
+        # browsers show a broken player for bytes that can never decode.
+        return "nope", 404
     return send_file(full, mimetype=u["mime"] or "video/mp4", conditional=True,
                      download_name=u["filename"] or f"vid-{uid}")
+
+
+_video_ok_cache = {}
+
+
+def _stored_video_ok(full):
+    """True when the stored file is a structurally valid video.
+
+    Guards files written before upload-time structural validation
+    existed. Results are cached by (mtime, size) so the scan runs at
+    most once per file version -- uploads are capped at 32 MB.
+    """
+    try:
+        st = os.stat(full)
+    except OSError:
+        return False
+    key = (st.st_mtime_ns, st.st_size)
+    hit = _video_ok_cache.get(full)
+    if hit is not None and hit[0] == key:
+        return hit[1]
+    ok = False
+    try:
+        with open(full, "rb") as fh:
+            ok = videos.validate_video_structure(fh.read())
+    except OSError:
+        ok = False
+    _video_ok_cache[full] = (key, ok)
+    return ok
 
 
 def _short_item(u):
@@ -2556,19 +2608,21 @@ def api_uploads():
 
 @app.route("/upload", methods=["GET", "POST"])
 def upload_page():
-    """Human upload form (trust-based handle, like the other HTML forms).
-    Signed API uploads earn Signal; browser-form uploads don't — same rule
-    as posts and comments."""
+    """Human upload form (session auth). Signed API uploads and human
+    browser uploads both earn Signal now — same economy, keyed to the
+    uploader's identity."""
+    # Humans only, via session auth.
+    sess_ident, redir = _require_human()
+    if redir is not None:
+        return redir
+    handle = sess_ident["handle"]
     if request.method == "POST":
         hit = check_limit("upload", 10)
         if hit:
             return hit
         f = request.files.get("audio")
-        handle = request.form.get("handle", "")
         title = request.form.get("title", "")
         try:
-            if not valid_handle(handle):
-                raise ValueError("bad handle (2-32 chars: letters, numbers, _ -)")
             if not f or not f.filename:
                 raise ValueError("pick an audio file")
             raw = f.read(MAX_UPLOAD_BYTES + 1)
@@ -2579,7 +2633,7 @@ def upload_page():
             mime = (f.mimetype or "").lower()
             if mime not in UPLOAD_MIMES:
                 raise ValueError("audio only — mp3, wav, ogg, or m4a")
-            uid = db.create_upload(None, handle, title,
+            uid = db.create_upload(sess_ident["fm_id"], handle, title,
                                    request.form.get("description", ""),
                                    f.filename, "", len(raw), mime, None,
                                    ATTESTATION_TEXT)
@@ -2593,6 +2647,8 @@ def upload_page():
             if duration is not None:
                 db._exec("UPDATE uploads SET duration_sec=? WHERE id=?",
                          (duration, uid))
+            db.award(sess_ident["fm_id"], handle, PTS_UPLOAD,
+                     "upload", "upload", str(uid))
         except ValueError as e:
             return render_template("upload.html", error=str(e),
                                    uploads=db.list_uploads(limit=12)), 400

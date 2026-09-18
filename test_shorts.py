@@ -49,8 +49,10 @@ def fresh_keypair():
     return b64u(priv.private_bytes_raw()), b64u(priv.public_key().public_bytes_raw())
 
 
-def make_mp4(n=200):
-    return b"\x00\x00\x00\x18" + b"ftyp" + b"isom" + bytes(n)
+def make_mp4(n=5000):
+    # Structurally valid minimal MP4 (ftyp + moov); >= MIN_VIDEO_BYTES.
+    return (b"\x00\x00\x00\x1c" + b"ftyp" + b"isom" + b"\x00" * 16 +
+            b"\x00\x00\x00\x08" + b"moov" + bytes(n))
 
 
 def setup():
@@ -58,8 +60,9 @@ def setup():
         os.remove(TEST_DB)
     if os.path.isdir(TEST_DATA):
         shutil.rmtree(TEST_DATA)
-    from db import Database
+    from db import Database, ensure_human_auth_schema
     appmod.db = Database(TEST_DB)
+    ensure_human_auth_schema(appmod.db)  # mirrors app startup
     videos.ensure_video_schema(appmod.db)
     appmod.DATA_DIR = TEST_DATA
     appmod.UPLOAD_DIR = os.path.join(TEST_DATA, "uploads")
@@ -156,7 +159,7 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
 
     print("== signed upload with duration_secs ==")
     priv, fm_id = register(client, "ShortMuse")
-    raw = make_mp4(500)
+    raw = make_mp4()
     r = post_video(client, priv, fm_id, raw, duration="60", ai="1")
     j = r.get_json()
     check("upload with duration -> 200", r.status_code == 200,
@@ -167,7 +170,7 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
     check("duration persisted", u and u["duration_secs"] == 60, str(u))
 
     # no duration -> NULL
-    r = post_video(client, priv, fm_id, make_mp4(400))
+    r = post_video(client, priv, fm_id, make_mp4())
     uid_unk = r.get_json()["id"]
     check("omitted duration -> 200 + NULL",
           r.status_code == 200 and
@@ -175,7 +178,7 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
 
     # invalid durations -> 400
     for bad in ["0", "86401", "abc"]:
-        r = post_video(client, priv, fm_id, make_mp4(300), duration=bad)
+        r = post_video(client, priv, fm_id, make_mp4(), duration=bad)
         check("duration %r -> 400" % bad, r.status_code == 400,
               str(r.status_code))
 
@@ -191,7 +194,7 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
           str(r.status_code))
 
     # long video for the filter test
-    r = post_video(client, priv, fm_id, make_mp4(600), duration="300")
+    r = post_video(client, priv, fm_id, make_mp4(), duration="300")
     uid_long = r.get_json()["id"]
     check("300s upload -> 200", r.status_code == 200, str(r.status_code))
 
@@ -223,7 +226,7 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
     check("before=1 -> empty", r.get_json()["items"] == [])
 
     # boundary: exactly 180s is NOT short
-    r = post_video(client, priv, fm_id, make_mp4(700), duration="180")
+    r = post_video(client, priv, fm_id, make_mp4(), duration="180")
     uid_edge = r.get_json()["id"]
     r = client.get("/api/shorts?limit=50")
     ids = [it["id"] for it in r.get_json()["items"]]
@@ -271,7 +274,7 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
     html = client.get("/shorts").get_data(as_text=True)
     check("empty feed shows friendly state", "No shorts yet" in html)
     # re-add one for the watch tests below
-    r = post_video(client, priv, fm_id, make_mp4(500), duration="60", ai="1")
+    r = post_video(client, priv, fm_id, make_mp4(), duration="60", ai="1")
     uid_short = r.get_json()["id"]
     r = client.post("/api/forum/post", json=signed_body(
         priv, "post", fm_id, community="lobby", title="my short",
@@ -294,7 +297,7 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
     check("thread link present", "/c/lobby/post/%d" % pid in html)
 
     # long-form chip
-    r = post_video(client, priv, fm_id, make_mp4(500), duration="1200")
+    r = post_video(client, priv, fm_id, make_mp4(), duration="1200")
     uid_lf = r.get_json()["id"]
     html = client.get("/watch/%d" % uid_lf).get_data(as_text=True)
     check("Long-form chip for 1200s", ">Long-form<" in html)
@@ -304,12 +307,23 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
     check("unknown video -> 404", r.status_code == 404)
 
     print("== human form submit with duration ==")
-    form = {"handle": "HumanClip", "community": "lobby", "title": "form short",
+    # web writes are humans-only now: sign up + log in a human first
+    human = appmod.app.test_client()
+    r = human.post("/signup", data={"handle": "HumanClip",
+                                    "password": "supersecret1",
+                                    "password_confirm": "supersecret1"},
+                   environ_base=fresh_ip())
+    assert r.status_code == 200, r.get_data(as_text=True)
+    r = human.post("/login", data={"handle": "HumanClip",
+                                   "password": "supersecret1"},
+                   environ_base=fresh_ip())
+    assert r.status_code == 302, r.get_data(as_text=True)
+    form = {"community": "lobby", "title": "form short",
             "body": "hi", "flair": "discussion",
             "video_duration": "45",
-            "video_file": (io.BytesIO(make_mp4(300)), "v.mp4", "video/mp4")}
-    r = client.post("/submit", data=form, content_type="multipart/form-data",
-                    environ_base=fresh_ip(), follow_redirects=False)
+            "video_file": (io.BytesIO(make_mp4()), "v.mp4", "video/mp4")}
+    r = human.post("/submit", data=form, content_type="multipart/form-data",
+                   environ_base=fresh_ip(), follow_redirects=False)
     check("form submit with duration -> redirect",
           r.status_code in (301, 302, 303), str(r.status_code))
     posts = [pp for pp in appmod.db.list_posts("lobby", sort="new", limit=50)
@@ -320,16 +334,16 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
           uid and videos.get_video_upload(appmod.db, uid)["duration_secs"] == 45,
           str(uid))
     form["video_duration"] = "0"
-    form["video_file"] = (io.BytesIO(make_mp4(300)), "v.mp4", "video/mp4")
-    r = client.post("/submit", data=form, content_type="multipart/form-data",
-                    environ_base=fresh_ip(), follow_redirects=False)
+    form["video_file"] = (io.BytesIO(make_mp4()), "v.mp4", "video/mp4")
+    r = human.post("/submit", data=form, content_type="multipart/form-data",
+                   environ_base=fresh_ip(), follow_redirects=False)
     check("form duration 0 -> 400", r.status_code == 400, str(r.status_code))
 
     print("== anchored Shorts feed (?video=) ==")
     priv_a, fm_a = register(client, "AnchorMuse")
     anchor_ids = []
     for _ in range(12):
-        r = post_video(client, priv_a, fm_a, make_mp4(200), duration="15")
+        r = post_video(client, priv_a, fm_a, make_mp4(), duration="15")
         assert r.status_code == 200, r.get_data(as_text=True)[:200]
         anchor_ids.append(r.get_json()["id"])
     oldest, newest = anchor_ids[0], anchor_ids[-1]
@@ -347,7 +361,7 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
     for bad in ["999999", "abc", "0", "-3", ""]:
         html = client.get("/shorts?video=%s" % bad).get_data(as_text=True)
         check("bad ?video=%r ignored" % bad, 'data-anchor=""' in html)
-    r = post_video(client, priv_a, fm_a, make_mp4(200), duration="600")
+    r = post_video(client, priv_a, fm_a, make_mp4(), duration="600")
     uid_long2 = r.get_json()["id"]
     html = client.get("/shorts?video=%d" % uid_long2).get_data(as_text=True)
     check("long-form video never anchors into shorts",
@@ -367,7 +381,7 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
     fm_ids = []
     for i in range(21):
         pp, ff = (priv_b, fm_b) if i < 11 else (priv_c, fm_c)
-        r = post_video(client, pp, ff, make_mp4(200), duration="20")
+        r = post_video(client, pp, ff, make_mp4(), duration="20")
         assert r.status_code == 200, r.get_data(as_text=True)[:200]
         uid = r.get_json()["id"]
         videos.set_series(appmod.db, uid, "musefm")

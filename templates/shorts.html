@@ -73,10 +73,6 @@
   }
   var RXN_EMOJI = {like:'👍',love:'❤️',haha:'😂',wow:'😮',sad:'😢',angry:'😡'};
   var RXN_ORDER = ['like','love','haha','wow','sad','angry'];
-  function rxnHandle() {
-    var m = document.cookie.match(/(?:^|;)\s*ts_handle=([^;]+)/);
-    return m ? decodeURIComponent(m[1]).trim() : 'anon';
-  }
   function rxnWidgetHTML(it) {
     var fb = it.fb || {counts:{}, total:0, mine:null, top:[]};
     var mine = fb.mine || '';
@@ -99,7 +95,6 @@
       '<input type="hidden" name="target_type" value="' + esc(it.target_type) + '">' +
       '<input type="hidden" name="target_id" value="' + it.target_id + '">' +
       '<input type="hidden" name="reaction" value="like">' +
-      '<input type="hidden" name="handle" value="' + esc(rxnHandle()) + '">' +
       '<button type="submit" class="rxn-like' + (mine ? ' active' : '') + '" title="Like — long-press or hover for more reactions">' +
       '<span class="rxn-like-emoji">' + likeEmoji + '</span><span class="rxn-like-label">' + likeLabel + '</span></button></form>' +
       '<button type="button" class="rxn-count' + (fb.total ? '' : ' rxn-count-empty') + '" aria-label="' + fb.total + ' reactions">' +

@@ -61,8 +61,7 @@ def setup():
         os.remove(TEST_DB)
     if os.path.isdir(TEST_DATA):
         shutil.rmtree(TEST_DATA)
-    from db import Database
-    appmod.db = Database(TEST_DB)
+    appmod.db = appmod.init_db(TEST_DB)   # full schema incl. human-auth columns
     gifs.ensure_gif_schema(appmod.db)
     appmod.DATA_DIR = TEST_DATA
     appmod.UPLOAD_DIR = os.path.join(TEST_DATA, "uploads")
@@ -86,6 +85,19 @@ def fresh_ip():
     """Rate limits are per-IP; each post in the test gets its own bucket."""
     _ip_counter[0] += 1
     return {"REMOTE_ADDR": "10.9.0.%d" % _ip_counter[0]}
+
+
+def login_human(handle="GifHuman", password="supersecret1"):
+    """Sign up + log in a human on a fresh test client. Returns the client."""
+    me = appmod.app.test_client()
+    r = me.post("/signup", data={"handle": handle, "password": password,
+                                 "password_confirm": password},
+                environ_base=fresh_ip())
+    assert r.status_code == 200, r.get_data(as_text=True)
+    r = me.post("/login", data={"handle": handle, "password": password},
+                environ_base=fresh_ip())
+    assert r.status_code == 302, r.get_data(as_text=True)
+    return me
 
 
 def main():
@@ -224,27 +236,31 @@ def main():
     check("api post with bad gif_url -> 400", r.status_code == 400,
           str(r.status_code))
 
-    print("== trust-based /submit with gif_url ==")
-    r = client.post("/submit", data={
-        "community": "lobby", "handle": "HumanFan", "title": "human gif",
+    print("== human /submit with gif_url ==")
+    human = login_human("HumanFan")
+    r = human.post("/submit", data={
+        "community": "lobby", "title": "human gif",
         "body": "from the form", "flair": "discussion", "gif_url": good,
     }, environ_base=fresh_ip())
     check("form post with gif_url redirects", r.status_code == 302,
           str(r.status_code))
-    r = client.post("/submit", data={
-        "community": "lobby", "handle": "HumanFan", "title": "bad gif",
+    row = appmod.db._one("SELECT handle FROM posts WHERE title='human gif'")
+    check("form post attributed to the human",
+          row and row["handle"] == "HumanFan", row)
+    r = human.post("/submit", data={
+        "community": "lobby", "title": "bad gif",
         "body": "x", "flair": "discussion",
         "gif_url": "https://evil.example.com/x.gif",
     }, environ_base=fresh_ip())
     check("form post with bad gif_url -> 400", r.status_code == 400,
           str(r.status_code))
 
-    print("== trust-based /submit with gif file upload ==")
-    data = {"community": "lobby", "handle": "HumanFan", "title": "uploaded gif",
+    print("== human /submit with gif file upload ==")
+    data = {"community": "lobby", "title": "uploaded gif",
             "body": "fresh bytes", "flair": "discussion"}
     data["gif_file"] = (io.BytesIO(make_gif(300)), "dance.gif", "image/gif")
-    r = client.post("/submit", data=data, content_type="multipart/form-data",
-                    environ_base=fresh_ip())
+    r = human.post("/submit", data=data, content_type="multipart/form-data",
+                   environ_base=fresh_ip())
     check("form gif file upload -> redirect", r.status_code == 302,
           f"{r.status_code} {r.get_data(as_text=True)[:200]}")
     loc = r.headers.get("Location", "")

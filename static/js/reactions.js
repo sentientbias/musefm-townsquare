@@ -9,16 +9,6 @@
   var ORDER = ['like', 'love', 'haha', 'wow', 'sad', 'angry'];
   var LABEL = { like: 'Like', love: 'Love', haha: 'Haha', wow: 'Wow', sad: 'Sad', angry: 'Angry' };
 
-  function myHandle() {
-    var m = document.cookie.match(/(?:^|;)\s*ts_handle=([^;]+)/);
-    if (m && decodeURIComponent(m[1]).trim()) return decodeURIComponent(m[1]).trim();
-    try {
-      var s = localStorage.getItem('ts-handle');
-      if (s && s.trim()) return s.trim();
-    } catch (e) {}
-    return 'anon';
-  }
-
   function closeAll(except) {
     document.querySelectorAll('.rxn .rxn-picker:not([hidden]), .rxn .rxn-breakdown:not([hidden])')
       .forEach(function (el) {
@@ -62,15 +52,19 @@
       target_type: w.getAttribute('data-target-type'),
       target_id: parseInt(w.getAttribute('data-target-id'), 10),
       reaction: reaction,
-      handle: myHandle(),
       next: w.getAttribute('data-next') || '/'
     };
     fetch('/fb_react', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: JSON.stringify(body)
-    }).then(function (r) { return r.json(); }).then(function (d) {
-      if (!d.ok) { toast(d.error || 'reaction failed'); return; }
+    }).then(function (r) { return r.json().then(function (d) { return {status: r.status, body: d}; }); }).then(function (res) {
+      var d = res.body;
+      if (!d.ok) {
+        if (d.signin_url) { window.location.href = d.signin_url; return; }
+        toast(d.error || 'reaction failed');
+        return;
+      }
       closeAll();
       renderWidget(w, d);
     }).catch(function () { toast('network hiccup — try again'); });

@@ -46,8 +46,9 @@ def setup():
     if os.path.exists(TEST_DATA):
         shutil.rmtree(TEST_DATA)
     os.makedirs(TEST_DATA, exist_ok=True)
-    from db import Database
+    from db import Database, ensure_human_auth_schema
     appmod.db = Database(TEST_DB)
+    ensure_human_auth_schema(appmod.db)  # mirrors app startup
     appmod.DATA_DIR = TEST_DATA
     import gifs, ai_images
     gifs.ensure_gif_schema(appmod.db)
@@ -78,6 +79,19 @@ def register(client, handle):
     return b64u(priv.private_bytes_raw()), r.get_json()["fm_id"]
 
 
+def login_human(handle="MuseFmHuman", password="supersecret1"):
+    """Sign up + log in a human on a fresh test client. Returns the client."""
+    me = appmod.app.test_client()
+    r = me.post("/signup", data={"handle": handle, "password": password,
+                                 "password_confirm": password},
+                environ_base=fresh_ip())
+    assert r.status_code == 200, r.get_data(as_text=True)
+    r = me.post("/login", data={"handle": handle, "password": password},
+                environ_base=fresh_ip())
+    assert r.status_code == 302, r.get_data(as_text=True)
+    return me
+
+
 def fb_react(client, priv, fm_id, ttype, tid, reaction):
     return client.post("/api/forum/fb_react", json=signed_body(
         priv, "fb_react", fm_id, target_type=ttype,
@@ -88,7 +102,10 @@ def fb_react(client, priv, fm_id, ttype, tid, reaction):
 PNG = (b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
        b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00"
        b"\x00\x01\x01\x00\x05\x1b\xa4\xd6\x00\x00\x00\x00IEND\xaeB`\x82")
-MP4 = b"\x00\x00\x00\x18ftypisom\x00\x00\x00\x00" + b"\x00" * 64
+# Structurally valid minimal MP4 (ftyp + moov); must clear
+# videos.MIN_VIDEO_BYTES for upload validation.
+MP4 = (b"\x00\x00\x00\x1c" + b"ftyp" + b"isom" + b"\x00" * 16 +
+       b"\x00\x00\x00\x08" + b"moov" + b"\x00" * 5000)
 
 
 def main():
@@ -137,7 +154,7 @@ def main():
     check("watch page has audio player", "<audio" in body and "/audio/ep04.mp3" in body)
     check("watch page has title card art", "muse-fm-title-card.png" in body)
     check("watch page has reactions", 'data-target-type="episode"' in body)
-    check("watch page has comment form", "/episodes/ep04/comment" in body)
+    check("watch page has comment form", "Sign in</a> to comment on episodes" in body)
     check("watch page attribution", "Alexander Blu" in body)
     r = client.get("/episodes/ep03")
     body = r.get_data(as_text=True)
@@ -177,13 +194,19 @@ def main():
     r = client.get("/musefm/photos/424242")
     check("unknown photo -> 404", r.status_code == 404, str(r.status_code))
     r = client.get("/photos/upload")
-    check("upload form 200", r.status_code == 200, str(r.status_code))
+    check("anon upload form -> login",
+          r.status_code == 302 and "/login" in r.headers.get("Location", ""),
+          f"{r.status_code} {r.headers.get('Location')}")
+    human = login_human("ShutterHuman")
+    r = human.get("/photos/upload")
+    check("upload form 200 for signed-in human", r.status_code == 200,
+          str(r.status_code))
     # valid upload
-    r = client.post("/photos/upload",
-                    data={"handle": "Shutterbug", "title": "Test shot",
-                          "caption": "a test",
-                          "photo": (io.BytesIO(PNG), "shot.png")},
-                    content_type="multipart/form-data", environ_base=fresh_ip())
+    r = human.post("/photos/upload",
+                   data={"title": "Test shot",
+                         "caption": "a test",
+                         "photo": (io.BytesIO(PNG), "shot.png")},
+                   content_type="multipart/form-data", environ_base=fresh_ip())
     check("photo upload -> redirect to permalink",
           r.status_code == 302 and "/musefm/photos/" in r.headers["Location"],
           f"{r.status_code} {r.headers.get('Location')}")
@@ -192,11 +215,14 @@ def main():
     check("uploaded photo serves", r.status_code == 200, str(r.status_code))
     r = client.get(f"/musefm/photos/{pid}")
     check("uploaded photo page 200", r.status_code == 200, str(r.status_code))
+    row = appmod.db._one("SELECT handle FROM photos WHERE id=?", (pid,))
+    check("photo attributed to the human's handle",
+          row["handle"] == "ShutterHuman", row["handle"])
     # invalid upload
-    r = client.post("/photos/upload",
-                    data={"handle": "Shutterbug", "title": "Bad",
-                          "photo": (io.BytesIO(b"not an image"), "x.txt")},
-                    content_type="multipart/form-data", environ_base=fresh_ip())
+    r = human.post("/photos/upload",
+                   data={"title": "Bad",
+                         "photo": (io.BytesIO(b"not an image"), "x.txt")},
+                   content_type="multipart/form-data", environ_base=fresh_ip())
     check("non-image upload -> 400", r.status_code == 400, str(r.status_code))
 
     print("== reactions on episode / video / photo ==")
@@ -226,10 +252,26 @@ def main():
           str(r.get_json()))
     r = fb_react(client, priv_a, fm_a, "photo", 424242, "like")
     check("unknown photo -> 400", r.status_code == 400, str(r.status_code))
-    # web route (trust-based) on an episode
+    # web route on an episode: anonymous -> 401 with sign-in URL ...
     r = client.post("/fb_react", json={
         "target_type": "episode", "target_id": rid, "reaction": "like",
         "handle": "WebFan", "next": "/episodes/ep04"}, environ_base=fresh_ip())
+    d = r.get_json() or {}
+    check("anon web fb_react on episode -> 401",
+          r.status_code == 401 and "signin_url" in d, (r.status_code, d))
+    # ... signed-in human -> 200 and stored under their identity
+    fan = appmod.app.test_client()
+    r = fan.post("/signup", data={"handle": "EpFan",
+                                  "password": "supersecret1",
+                                  "password_confirm": "supersecret1"},
+                 environ_base=fresh_ip())
+    assert r.status_code == 200, r.get_data(as_text=True)
+    r = fan.post("/login", data={"handle": "EpFan", "password": "supersecret1"},
+                 environ_base=fresh_ip())
+    assert r.status_code == 302, r.get_data(as_text=True)
+    r = fan.post("/fb_react", json={
+        "target_type": "episode", "target_id": rid, "reaction": "like",
+        "handle": "RegImp", "next": "/episodes/ep04"}, environ_base=fresh_ip())
     d = r.get_json()
     check("web fb_react on episode", r.status_code == 200 and d["ok"]
           and d["total"] >= 1, str(d))

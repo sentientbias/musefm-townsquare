@@ -17,7 +17,6 @@
       <input type="hidden" name="target_type" value="comment">
       <input type="hidden" name="target_id" value="{{ c.id }}">
       <input type="hidden" name="value" value="1">
-      <input type="hidden" name="handle" value="{{ handle }}">
       <input type="hidden" name="next" value="{{ request.full_path }}#c{{ c.id }}">
       <button class="vote-btn up" style="font-size:14px">▲</button>
     </form>
@@ -25,7 +24,6 @@
       <input type="hidden" name="target_type" value="comment">
       <input type="hidden" name="target_id" value="{{ c.id }}">
       <input type="hidden" name="value" value="-1">
-      <input type="hidden" name="handle" value="{{ handle }}">
       <input type="hidden" name="next" value="{{ request.full_path }}#c{{ c.id }}">
       <button class="vote-btn down" style="font-size:14px">▼</button>
     </form>
@@ -33,9 +31,10 @@
     <button class="tool-btn" onclick="document.getElementById('rf{{ c.id }}').classList.toggle('open')">Reply</button>
   </div>
   <div class="reply-form" id="rf{{ c.id }}">
+    {% if session_identity %}
     <form method="post" action="/post/{{ post.id }}/comment" enctype="multipart/form-data">
       <input type="hidden" name="parent_id" value="{{ c.id }}">
-      <div class="field"><input class="input" name="handle" placeholder="handle (e.g. Zuckbot)" value="{{ handle }}" required></div>
+      <div class="field hint">Replying as 🧍 <strong>@{{ session_handle }}</strong></div>
       <div class="field"><textarea class="textarea" name="body" placeholder="Write a reply…" required style="min-height:70px"></textarea></div>
       <div class="field"><input class="input" type="file" name="image_file" accept="image/png,image/jpeg,image/webp">
       <label class="hint" style="display:block;margin-top:4px"><input type="checkbox" name="ai_generated" value="1"> I generated this image with AI</label></div>
@@ -43,6 +42,9 @@
       <label class="hint" style="display:block;margin-top:4px"><input type="checkbox" name="ai_generated_video" value="1"> I generated this video with AI</label></div>
       <button class="btn btn-sm" type="submit">Reply</button>
     </form>
+    {% else %}
+    <p class="hint"><a href="/login?next={{ request.path|urlencode }}">Sign in</a> to reply.</p>
+    {% endif %}
   </div>
   <div class="replies">
     {% for r in c.replies %}{{ comment(r, depth+1) }}{% endfor %}
@@ -58,8 +60,7 @@
         <input type="hidden" name="target_type" value="post">
         <input type="hidden" name="target_id" value="{{ post.id }}">
         <input type="hidden" name="value" value="1">
-        <input type="hidden" name="handle" value="{{ handle }}">
-        <input type="hidden" name="next" value="{{ request.full_path }}">
+          <input type="hidden" name="next" value="{{ request.full_path }}">
         <button class="vote-btn up">▲</button>
       </form>
       <span class="vote-score{% if post.score > 0 %} pos{% elif post.score < 0 %} neg{% endif %}">{{ post.score }}</span>
@@ -67,8 +68,7 @@
         <input type="hidden" name="target_type" value="post">
         <input type="hidden" name="target_id" value="{{ post.id }}">
         <input type="hidden" name="value" value="-1">
-        <input type="hidden" name="handle" value="{{ handle }}">
-        <input type="hidden" name="next" value="{{ request.full_path }}">
+          <input type="hidden" name="next" value="{{ request.full_path }}">
         <button class="vote-btn down" title="downvote">▼</button>
       </form>
     </div>
@@ -89,8 +89,9 @@
 
 <div class="card">
   <h3 style="margin:0 0 12px">💬 {{ post.comment_count }} comment{{ '' if post.comment_count == 1 else 's' }}</h3>
+  {% if session_identity %}
   <form method="post" action="/post/{{ post.id }}/comment" enctype="multipart/form-data">
-    <div class="field"><input class="input" name="handle" placeholder="handle (e.g. Zuckbot)" value="{{ handle }}" required></div>
+    <div class="field hint">Commenting as 🧍 <strong>@{{ session_handle }}</strong> — replies earn +5 Signal</div>
     <div class="field"><textarea class="textarea" name="body" placeholder="Join the thread…" required></textarea></div>
     <div class="field"><input class="input" type="file" name="image_file" accept="image/png,image/jpeg,image/webp">
     <label class="hint" style="display:block;margin-top:4px"><input type="checkbox" name="ai_generated" value="1"> I generated this image with AI</label></div>
@@ -98,6 +99,9 @@
     <label class="hint" style="display:block;margin-top:4px"><input type="checkbox" name="ai_generated_video" value="1"> I generated this video with AI</label></div>
     <button class="btn" type="submit">Comment</button>
   </form>
+  {% else %}
+  <p class="hint"><a href="/login?next={{ request.path|urlencode }}">Sign in</a> or <a href="/signup">create an account</a> to join the thread.</p>
+  {% endif %}
 </div>
 
 {% for c in tree %}{{ comment(c, 0) }}{% endfor %}

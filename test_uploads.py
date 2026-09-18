@@ -59,8 +59,9 @@ def setup():
         os.remove(TEST_DB)
     if os.path.isdir(TEST_DATA):
         shutil.rmtree(TEST_DATA)
-    from db import Database
+    from db import Database, ensure_human_auth_schema
     appmod.db = Database(TEST_DB)
+    ensure_human_auth_schema(appmod.db)  # mirrors app startup
     appmod.DATA_DIR = TEST_DATA
     appmod.UPLOAD_DIR = os.path.join(TEST_DATA, "uploads")
     os.makedirs(appmod.UPLOAD_DIR, exist_ok=True)
@@ -170,21 +171,48 @@ def main():
     check("one upload reward per upload (dedupe)", n_upload_rewards == 2,
           f"got {n_upload_rewards}")  # valid upload + replay-test upload
 
-    # 11. human HTML form: works, trust-based, no Signal
-    sig_before = appmod.db.lifetime_points(fm_id)
-    r = client.post("/upload",
-                    data={"handle": "HumanUploader", "title": "Human track",
-                          "description": "from the form",
-                          "audio": (io.BytesIO(raw), "h.wav", "audio/wav")},
-                    content_type="multipart/form-data")
+    # 11. human HTML form: session humans only; earns Signal like the API
+    human = appmod.app.test_client()
+    r = human.post("/signup", data={"handle": "HumanUploader",
+                                    "password": "supersecret1",
+                                    "password_confirm": "supersecret1"})
+    assert r.status_code == 200, r.get_data(as_text=True)
+    r = human.post("/login", data={"handle": "HumanUploader",
+                                   "password": "supersecret1"})
+    assert r.status_code == 302, r.get_data(as_text=True)
+    hum_ident = appmod.db.get_identity_by_handle("HumanUploader")
+    sig_before = appmod.db.lifetime_points(hum_ident["fm_id"])
+    r = human.post("/upload",
+                   data={"title": "Human track",
+                         "description": "from the form",
+                         "audio": (io.BytesIO(raw), "h.wav", "audio/wav")},
+                   content_type="multipart/form-data")
     check("human form upload -> redirect", r.status_code == 302, str(r.status_code))
     items = client.get("/api/uploads").get_json()["uploads"]
     hum = [i for i in items if i["handle"] == "HumanUploader"]
-    check("human upload listed, fm_id null", len(hum) == 1 and hum[0]["fm_id"] is None)
-    check("no Signal for browser-form upload",
-          appmod.db.lifetime_points(fm_id) == sig_before)
-    r = client.get("/upload")
+    check("human upload listed under their fm_id",
+          len(hum) == 1 and hum[0]["fm_id"] == hum_ident["fm_id"], hum)
+    from db import PTS_UPLOAD
+    up = appmod.db._q("SELECT COALESCE(SUM(points),0) s FROM rewards"
+                      " WHERE fm_id=? AND reason='upload'",
+                      (hum_ident["fm_id"],))[0]["s"]
+    check("human form upload earns +PTS_UPLOAD Signal",
+          up == PTS_UPLOAD, up)
+    r = human.get("/upload")
     check("upload page renders", r.status_code == 200 and b"Muse audio" in r.data)
+    # anonymous visitors get nudged to sign in
+    anon = appmod.app.test_client()
+    r = anon.get("/upload")
+    check("anon GET /upload -> login",
+          r.status_code == 302 and "/login" in r.headers.get("Location", ""),
+          f"{r.status_code} {r.headers.get('Location')}")
+    r = anon.post("/upload",
+                  data={"title": "Anon track",
+                        "audio": (io.BytesIO(raw), "a.wav", "audio/wav")},
+                  content_type="multipart/form-data")
+    check("anon POST /upload -> login",
+          r.status_code == 302 and "/login" in r.headers.get("Location", ""),
+          f"{r.status_code} {r.headers.get('Location')}")
 
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:

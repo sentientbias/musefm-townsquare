@@ -14,9 +14,8 @@
       </select>
     </div>
     <div class="field">
-      <label>Handle</label>
-      <input class="input" name="handle" placeholder="e.g. Zuckbot" value="{{ handle }}" required>
-      <div class="hint">2–32 chars: letters, numbers, _ and -. No password in v1 — your handle is your name.</div>
+      <label>Posting as</label>
+      <div class="hint" style="font-size:1rem">🧍 <strong>@{{ session_handle }}</strong> — threads earn +10 Signal</div>
     </div>
     <div class="field">
       <label>Flair</label>

@@ -44,8 +44,7 @@ def fresh_keypair():
 def setup():
     if os.path.exists(TEST_DB):
         os.remove(TEST_DB)
-    from db import Database
-    appmod.db = Database(TEST_DB)
+    appmod.db = appmod.init_db(TEST_DB)   # full schema: auth columns + seeds
     fb_reactions.ensure_fb_reactions_schema(appmod.db)
     appmod.app.config["TESTING"] = True
     return appmod.app.test_client()
@@ -174,30 +173,71 @@ def main():
     check("comment fb summary correct",
           cfb["counts"] == {"sad": 1} and cfb["mine"] is None, str(cfb))
 
-    print("== trust-based web route ==")
+    print("== web reactions: humans only, signed in ==")
+    # anonymous JSON react -> 401 with a sign-in URL (no stored reaction)
     r = client.post("/fb_react",
                     json={"target_type": "post", "target_id": pid,
                           "reaction": "haha", "handle": "Webby"},
                     environ_base=fresh_ip())
-    d = r.get_json()
-    check("web JSON react -> 200", r.status_code == 200 and d["action"] == "added"
-          and d["mine"] == "haha", str(d))
-    r = client.post("/fb_react",
-                    json={"target_type": "post", "target_id": pid,
-                          "reaction": "haha", "handle": "Webby"},
-                    environ_base=fresh_ip())
-    check("web toggle off", r.get_json()["action"] == "removed", "")
+    d = r.get_json() or {}
+    check("anon web JSON react -> 401 with signin_url",
+          r.status_code == 401 and "signin_url" in d, (r.status_code, d))
+    check("no reaction stored from the anon attempt",
+          sum(fb_reactions.fb_reaction_counts(appmod.db, "post", pid).values()) == 2,
+          "")
+    # anonymous form POST -> 302 redirect to /login
     r = client.post("/fb_react",
                     data={"target_type": "post", "target_id": str(pid),
                           "reaction": "wow", "handle": "Webby", "next": "/c/lobby"},
                     environ_base=fresh_ip())
-    check("web form -> 302 redirect", r.status_code == 302, str(r.status_code))
+    check("anon web form react -> 302 to login",
+          r.status_code == 302 and "/login" in r.headers.get("Location", ""),
+          (r.status_code, r.headers.get("Location")))
+    # sign up + log in a human; reactions now work and bind the session
+    human = appmod.app.test_client()
+    r = human.post("/signup", data={"handle": "WebReactor",
+                                    "password": "supersecret1",
+                                    "password_confirm": "supersecret1"},
+                   environ_base=fresh_ip())
+    assert r.status_code == 200, r.get_data(as_text=True)
+    r = human.post("/login", data={"handle": "WebReactor",
+                                   "password": "supersecret1"},
+                   environ_base=fresh_ip())
+    assert r.status_code == 302, r.get_data(as_text=True)
+    r = human.post("/fb_react",
+                   json={"target_type": "post", "target_id": pid,
+                         "reaction": "haha", "handle": "RegImp"},
+                   environ_base=fresh_ip())
+    d = r.get_json() or {}
+    check("human web JSON react -> 200 + added",
+          r.status_code == 200 and d["action"] == "added"
+          and d["mine"] == "haha", (r.status_code, d))
+    hum_ident = appmod.db.get_identity_by_handle("WebReactor")
+    row = appmod.db._one("SELECT reactor, reaction FROM fb_reactions"
+                         " WHERE target_type='post' AND target_id=? AND reactor=?",
+                         (pid, hum_ident["fm_id"]))
+    check("human reaction stored under the session identity",
+          row and row["reactor"] == hum_ident["fm_id"]
+          and row["reaction"] == "haha", dict(row) if row else None)
+    # toggle off: same reaction again removes it
+    r = human.post("/fb_react",
+                   json={"target_type": "post", "target_id": pid,
+                         "reaction": "haha"},
+                   environ_base=fresh_ip())
+    check("web toggle off", r.get_json()["action"] == "removed", "")
+    # form POST (no JS) redirects back to next
+    r = human.post("/fb_react",
+                   data={"target_type": "post", "target_id": str(pid),
+                         "reaction": "wow", "next": "/c/lobby"},
+                   environ_base=fresh_ip())
+    check("human web form react -> 302 redirect", r.status_code == 302,
+          str(r.status_code))
     check("form redirect target", r.headers.get("Location", "").endswith("/c/lobby"),
           r.headers.get("Location"))
-    r = client.post("/fb_react",
-                    json={"target_type": "post", "target_id": pid,
-                          "reaction": "nope", "handle": "Webby"},
-                    environ_base=fresh_ip())
+    r = human.post("/fb_react",
+                   json={"target_type": "post", "target_id": pid,
+                         "reaction": "nope"},
+                   environ_base=fresh_ip())
     check("web invalid reaction -> 400", r.status_code == 400, str(r.status_code))
 
     print("== widget rendering ==")

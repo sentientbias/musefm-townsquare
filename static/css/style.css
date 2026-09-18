@@ -156,6 +156,41 @@ body { padding-top: calc(var(--topbar-h) + env(safe-area-inset-top, 0px)); }
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 8px 24px rgba(20, 120, 190, 0.10);
 }
 .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.auth-link {
+  color: var(--text); text-decoration: none; font-size: 14px; font-weight: 600;
+  padding: 8px 12px; border-radius: 999px; border: 1px solid transparent;
+  background: none; cursor: pointer; white-space: nowrap;
+}
+.auth-link:hover { border-color: var(--glass-border); background: var(--glass); }
+.auth-cta {
+  background: linear-gradient(135deg, var(--accent, #38bdf8), var(--accent-strong, #0284c7));
+  color: #fff; border: none;
+}
+.auth-cta:hover { background: linear-gradient(135deg, var(--accent, #38bdf8), var(--accent-strong, #0284c7)); filter: brightness(1.08); }
+.auth-chip {
+  color: var(--text); text-decoration: none; font-size: 14px; font-weight: 700;
+  padding: 8px 12px; border-radius: 999px; border: 1px solid var(--glass-border);
+  background: var(--glass); white-space: nowrap; max-width: 180px; overflow: hidden;
+  text-overflow: ellipsis;
+}
+.logout-inline { display: inline; margin: 0; }
+@media (max-width: 520px) {
+  .auth-link, .auth-chip { font-size: 13px; padding: 7px 10px; }
+  .auth-chip { max-width: 110px; }
+}
+/* "New here?" banner (homepage, anonymous visitors only) */
+.newhere-banner {
+  margin: 14px auto; max-width: 720px; padding: 14px 18px; border-radius: 16px;
+  border: 1px solid var(--glass-border); background: var(--glass);
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  box-shadow: 0 4px 16px rgba(20,120,190,0.10);
+}
+.newhere-ctas { display: flex; gap: 8px; flex-shrink: 0; align-items: center; }
+@media (max-width: 520px) {
+  .newhere-banner { flex-direction: column; align-items: stretch; text-align: left; }
+  .newhere-ctas { justify-content: stretch; }
+  .newhere-ctas .btn, .newhere-ctas .auth-link { flex: 1; text-align: center; }
+}
 .hamburger {
   display: none;
   border: 1px solid var(--glass-border);

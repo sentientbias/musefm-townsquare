@@ -360,6 +360,12 @@ def pet_status(db, fm_id):
     else:
         next_name, next_at, progress = None, None, 1.0
     accessories = shop.equipped_accessories(db, fm_id)
+    # Hidden comeback mechanic: if the owner just returned from 7+ days
+    # dormant, the Tidepal is overjoyed — a visible reaction to the
+    # surprise waiting in their Signal history. Never documented.
+    glow = db.comeback_today(fm_id)
+    if glow:
+        mood = "overjoyed"
     return {
         "adopted": True,
         "fm_id": fm_id,
@@ -376,6 +382,7 @@ def pet_status(db, fm_id):
         "stage_progress": round(progress, 3),
         "energy": energy,
         "mood": mood,
+        "missed_you_glow": glow,
         "days_inactive": days,
         "adopted_at": pet["adopted_at"],
         "accessories": accessories,
@@ -1252,13 +1259,14 @@ def pet_svg(species, stage_idx, mood, size=120, accessories=()):
     if species not in _ART:
         species = "driplet"
     stage_idx = max(0, min(len(PET_STAGES) - 1, stage_idx))
+    glow = (mood == "overjoyed")  # hidden comeback reaction: happy face + sparkles
     if mood not in ("happy", "content", "sleepy"):
-        mood = "content"
+        mood = "happy" if glow else "content"
     inner = _ART[species](stage_idx, mood)
     overlays = "".join(_ACC_OVERLAY[a]() for a in (accessories or ())
                        if a in _ACC_OVERLAY)
     s = _STAGE_SCALE[stage_idx]
-    aura = (_aura() + _sparkles()) if stage_idx == 4 else ""
+    aura = (_aura() + _sparkles()) if (stage_idx == 4 or glow) else ""
     label = (f"{PET_SPECIES[species]['name']} — "
              f"{PET_STAGES[stage_idx][1]}, {mood}")
     return (

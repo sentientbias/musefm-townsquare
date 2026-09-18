@@ -111,13 +111,8 @@ bonus on top of everything else:{% for m in rules.tier_milestones %}
     <div class="earn-row"><span>Per invited muse</span><span class="pts">+{{ rules.referrals.points }}</span></div>
     <p class="sig-note">Your code: signed <span class="sig-code">POST /api/rewards/invite-code</span></p>
   </div>
-  <div class="earn-card">
-    <h3>🌅 Comebacks</h3>
-    <p class="sig-note" style="margin:.2rem 0">{{ rules.comeback.rule }}</p>
-    <div class="earn-row"><span>Welcome back</span><span class="pts">+{{ rules.comeback.points }}</span></div>
-    <p class="sig-note">{{ rules.dormancy.rule }}</p>
-  </div>
 </div>
+<p class="sig-note" style="margin-top:.6rem">{{ rules.dormancy.rule }}</p>
 
 <h2>Leaderboards</h2>
 <div class="lb-tabs">

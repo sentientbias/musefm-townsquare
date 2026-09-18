@@ -6,6 +6,10 @@ never generates video itself and no paid API is involved.
 
 Safety model mirrors ai_images.py:
 - magic-byte validation (MP4 / WebM only), never trust extensions
+- structural validation: the container's media index (moov box / Segment
+  element) must be present, so truncated uploads (ftyp header + zeros from
+  a dropped connection) are rejected at upload instead of stored as
+  permanently broken files
 - same-origin /video/<uid> URLs only for embeds (no hotlinking, no trackers)
 - ai_generated is a self-declared, SIGNED field: the uploader's musefm-v1
   signature covers it, so it cannot be altered in transit. Mislabeled
@@ -21,6 +25,16 @@ import time
 # max-size videos fill it; the 20/hour per-identity cap plus moderation keep
 # real usage far below that), generous enough for short clips.
 MAX_VIDEO_BYTES = 32 * 1024 * 1024
+
+# Minimum plausible bytes for a real playable file. Truncated uploads
+# (e.g. an ftyp header followed by zeros) are smaller than this and --
+# critically -- are missing the container's media index, so they can never
+# play. Reject them at upload instead of serving a broken file.
+MIN_VIDEO_BYTES = 4096
+
+# How many leading bytes to scan for the media index. moov (MP4) / Segment
+# (WebM) normally sit near the front; uploads are capped at 32 MB anyway.
+_STRUCT_SCAN_BYTES = 8 * 1024 * 1024
 
 # Shorts cutoff: videos under 3 minutes live in the vertical feed.
 # Unknown duration (NULL) counts as a short — most uploads are clips, and
@@ -117,6 +131,56 @@ def is_video_bytes(raw):
     return detect_video(raw) is not None
 
 
+def _mp4_has_moov(buf):
+    """True when the buffer's top-level MP4 boxes include a 'moov' box.
+
+    Walks the box structure (size + type) instead of substring-searching,
+    so a stray 'moov' inside media data can't fake a pass. Handles
+    64-bit largesize boxes; bails out (False) on malformed lengths.
+    """
+    off, n = 0, len(buf)
+    while off + 8 <= n:
+        size = int.from_bytes(buf[off:off + 4], "big")
+        typ = buf[off + 4:off + 8]
+        if typ == b"moov":
+            return True
+        hdr = 8
+        if size == 1:  # 64-bit largesize
+            if off + 16 > n:
+                return False
+            size = int.from_bytes(buf[off + 8:off + 16], "big")
+            hdr = 16
+        elif size == 0:  # box extends to end of buffer: no moov seen
+            return False
+        if size < hdr:
+            return False
+        off += size
+    return False
+
+
+def validate_video_structure(raw):
+    """True when the bytes look like a structurally complete video file.
+
+    detect_video() only checks magic bytes, which a truncated upload
+    (ftyp header + zeros -- exactly what a dropped connection leaves on
+    disk) passes. This requires the container's media index too:
+    a 'moov' box for MP4, a Segment element for WebM, plus a minimum
+    size. Still no transcoding and no codec opinions -- H.264, VP9,
+    AV1 etc. all pass as long as the container is intact.
+    """
+    if not isinstance(raw, (bytes, bytearray)) or len(raw) < MIN_VIDEO_BYTES:
+        return False
+    detected = detect_video(raw)
+    if not detected:
+        return False
+    ext, _ = detected
+    buf = bytes(raw[:_STRUCT_SCAN_BYTES])
+    if ext == "mp4":
+        return _mp4_has_moov(buf)
+    # WebM: EBML Segment element id 0x18538067 must be present.
+    return b"\x18\x53\x80\x67" in buf
+
+
 VIDEO_SCHEMA = """
 CREATE TABLE IF NOT EXISTS video_uploads (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -185,6 +249,11 @@ def create_video_upload(db, fm_id, handle, filename, raw, upload_dir,
     if not detected:
         raise ValueError("not a video -- MP4 or WebM required")
     ext, mime = detected
+    if not validate_video_structure(raw):
+        # Truncated/corrupt uploads (e.g. an ftyp header followed by zeros
+        # from a dropped connection) pass magic-byte checks but can never
+        # play. Reject now instead of storing a broken file.
+        raise ValueError("corrupt or truncated video file -- please re-upload")
     dur = validate_duration_secs(duration_secs)
     safe_name = (os.path.basename(filename or ("upload." + ext)) or
                  ("upload." + ext))[:120]

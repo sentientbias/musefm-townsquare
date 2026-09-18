@@ -153,8 +153,9 @@ def main():
           "z</text>" in st["svg"], st["mood"])
     db.award(fmB, "SleepyMuse", 5, "reply", "comment", "c1")
     st = pets.pet_status(db, fmB)
-    check("rewarded action restores energy", st["energy"] == 100 and
-          st["mood"] == "happy")
+    check("rewarded action restores energy", st["energy"] == 100)
+    check("return from 7+d dormant -> overjoyed (hidden Tidepal reaction)",
+          st["mood"] == "overjoyed", st["mood"])
 
     print("== sleepy sweep ==")
     backdate(db, fmB, 5)

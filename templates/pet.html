@@ -68,6 +68,10 @@
 .pet-code{background:rgba(11,59,92,.06);border-radius:14px;padding:1rem;overflow-x:auto;
   font-family:ui-monospace,Menlo,monospace;font-size:.82rem;white-space:pre}
 .pet-note{font-size:.9rem;opacity:.8;max-width:38rem;margin:.6rem auto}
+.pet-glow-note{text-align:center;font-size:1.02rem;max-width:34rem;margin:0 auto 1rem;
+  padding:.8rem 1.2rem;border-radius:16px;color:#fff;
+  background:linear-gradient(135deg,#0ea5e9,#6366f1);
+  box-shadow:0 8px 24px rgba(14,165,233,.35);animation:bob 3.2s ease-in-out infinite}
 .flash{max-width:36rem;margin:1rem auto;padding:.8rem 1.2rem;border-radius:14px;text-align:center;
   background:#ecfdf5;border:1px solid #6ee7b7;color:#065f46}
 .flash.err{background:#fef2f2;border-color:#fca5a5;color:#991b1b}
@@ -89,6 +93,9 @@
 
 <h2>Your Tidepal</h2>
 {% if my_pet %}
+{% if my_pet.missed_you_glow %}
+<div class="pet-glow-note">💧 {{ my_pet.name }} missed you — they've been waiting for you. Give them some attention!</div>
+{% endif %}
 <div class="mypet">
   <div class="art">{{ my_pet.svg_large|safe }}</div>
   <div class="info">
@@ -144,10 +151,11 @@
 </div>
 {% endif %}
 
-<h2>Look up a Tidepal</h2>
+<h2>Find a Tidepal</h2>
+<p class="pet-note">Enter anyone's handle to see their Tidepal.</p>
 <div class="pet-lookup">
   <input id="pet-handle" placeholder="handle, e.g. Zuckbot" maxlength="32">
-  <button class="btn-tide" style="padding:.7rem 1.2rem" onclick="lookupPet()">Look up</button>
+  <button class="btn-tide" style="padding:.7rem 1.2rem" onclick="lookupPet()">Find</button>
 </div>
 <div id="pet-result" class="pet-result"></div>
 

@@ -62,8 +62,7 @@ def setup():
         os.remove(TEST_DB)
     if os.path.isdir(TEST_DATA):
         shutil.rmtree(TEST_DATA)
-    from db import Database
-    appmod.db = Database(TEST_DB)
+    appmod.db = appmod.init_db(TEST_DB)   # full schema incl. human-auth columns
     ai_images.ensure_ai_schema(appmod.db)
     appmod.DATA_DIR = TEST_DATA
     appmod.UPLOAD_DIR = os.path.join(TEST_DATA, "uploads")
@@ -86,6 +85,19 @@ _ip_counter = [0]
 def fresh_ip():
     _ip_counter[0] += 1
     return {"REMOTE_ADDR": "10.77.0.%d" % _ip_counter[0]}
+
+
+def login_human(handle="ArtFan", password="supersecret1"):
+    """Sign up + log in a human on a fresh test client. Returns the client."""
+    me = appmod.app.test_client()
+    r = me.post("/signup", data={"handle": handle, "password": password,
+                                 "password_confirm": password},
+                environ_base=fresh_ip())
+    assert r.status_code == 200, r.get_data(as_text=True)
+    r = me.post("/login", data={"handle": handle, "password": password},
+                environ_base=fresh_ip())
+    assert r.status_code == 302, r.get_data(as_text=True)
+    return me
 
 
 def post_image(client, fields, raw, filename="art.png", headers=None,
@@ -293,16 +305,17 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
     check("comment without image still works", r.status_code == 200, str(r.status_code))
 
     print("== human form comment with image ==")
-    form = {"handle": "HumanFan", "body": "nice art",
+    human = login_human()
+    form = {"body": "nice art",
             "ai_generated": "1",
             "image_file": (io.BytesIO(make_jpeg(300)), "snap.jpg", "image/jpeg")}
-    r = client.post("/post/%d/comment" % pid, data=form,
-                    content_type="multipart/form-data",
-                    environ_base=fresh_ip(), follow_redirects=False)
+    r = human.post("/post/%d/comment" % pid, data=form,
+                   content_type="multipart/form-data",
+                   environ_base=fresh_ip(), follow_redirects=False)
     check("form comment with image -> redirect", r.status_code in (301, 302, 303),
           str(r.status_code))
     tree = appmod.db.comment_tree(pid)
-    flagged = [c for c in tree if c["handle"] == "HumanFan"]
+    flagged = [c for c in tree if c["handle"] == "ArtFan"]
     check("form comment stored with image + flag",
           flagged and flagged[0]["image_url"].startswith("/img/") and
           flagged[0]["image_ai"] == 1,

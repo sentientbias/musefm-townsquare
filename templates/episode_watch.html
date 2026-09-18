@@ -51,11 +51,15 @@
   {% else %}
   <p class="hint">No comments yet.</p>
   {% endfor %}
+  {% if session_identity %}
   <form class="ep-comment-form" method="post" action="/episodes/{{ ep.slug }}/comment">
-    <input class="input f-handle" name="handle" placeholder="handle" value="{{ handle }}" required>
+    <p class="hint" style="margin:0 0 8px">Commenting as 🧍 @{{ session_handle }}</p>
     <input class="input f-body" name="body" placeholder="What did you think?" required>
     <button class="btn btn-sm" type="submit">Post</button>
   </form>
+  {% else %}
+  <p class="hint"><a href="/login?next=/episodes/{{ ep.slug }}">Sign in</a> to comment on episodes.</p>
+  {% endif %}
 </div>
 
 <div class="card about-card">

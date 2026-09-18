@@ -45,12 +45,23 @@ def fresh_keypair():
     return b64u(priv.private_bytes_raw()), b64u(priv.public_key().public_bytes_raw())
 
 
-def make_mp4(n=200):
-    return b"\x00\x00\x00\x18" + b"ftyp" + b"isom" + bytes(n)
+def make_mp4(n=5000):
+    # Structurally valid minimal MP4: ftyp box (28 bytes: size + "ftyp" +
+    # "isom" + 16 zero bytes) + moov box + padding.
+    # Must stay >= videos.MIN_VIDEO_BYTES so structural validation passes.
+    return (b"\x00\x00\x00\x1c" + b"ftyp" + b"isom" + b"\x00" * 16 +
+            b"\x00\x00\x00\x08" + b"moov" + bytes(n))
 
 
-def make_webm(n=200):
-    return b"\x1a\x45\xdf\xa3" + bytes(n)
+def make_webm(n=5000):
+    # Structurally valid minimal WebM: EBML header + Segment element id.
+    return b"\x1a\x45\xdf\xa3" + b"\x18\x53\x80\x67" + bytes(n)
+
+
+def make_corrupt_mp4():
+    # What a dropped connection leaves on disk: a valid ftyp header
+    # followed by zeros. Passes magic-byte checks, can never play.
+    return b"\x00\x00\x00\x18" + b"ftyp" + b"isom" + bytes(5000)
 
 
 def setup():
@@ -58,9 +69,10 @@ def setup():
         os.remove(TEST_DB)
     if os.path.isdir(TEST_DATA):
         shutil.rmtree(TEST_DATA)
-    from db import Database
+    from db import Database, ensure_human_auth_schema
     appmod.db = Database(TEST_DB)
     videos.ensure_video_schema(appmod.db)
+    ensure_human_auth_schema(appmod.db)  # mirrors app startup (app.py)
     appmod.DATA_DIR = TEST_DATA
     appmod.UPLOAD_DIR = os.path.join(TEST_DATA, "uploads")
     os.makedirs(appmod.UPLOAD_DIR, exist_ok=True)
@@ -82,6 +94,19 @@ _ip_counter = [0]
 def fresh_ip():
     _ip_counter[0] += 1
     return {"REMOTE_ADDR": "10.88.0.%d" % _ip_counter[0]}
+
+
+def login_human(handle="VideoHuman", password="supersecret1"):
+    """Sign up + log in a human on a fresh test client. Returns the client."""
+    me = appmod.app.test_client()
+    r = me.post("/signup", data={"handle": handle, "password": password,
+                                 "password_confirm": password},
+                environ_base=fresh_ip())
+    assert r.status_code == 200, r.get_data(as_text=True)
+    r = me.post("/login", data={"handle": handle, "password": password},
+                environ_base=fresh_ip())
+    assert r.status_code == 302, r.get_data(as_text=True)
+    return me
 
 
 def post_video(client, fields, raw, filename="clip.mp4", headers=None,
@@ -173,7 +198,7 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
 
     print("== signed /api/upload/video ==")
     priv, fm_id = register(client, "ClipMuse")
-    raw = make_mp4(500)
+    raw = make_mp4()
 
     def fields(raw, sha=None, ai="1"):
         return signed_body(priv, "upload", fm_id,
@@ -193,7 +218,7 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
     check("mime recorded as video/mp4", u and u["mime"] == "video/mp4", str(u))
 
     # webm upload
-    wraw = make_webm(500)
+    wraw = make_webm()
     r = post_video(client, fields(wraw, ai="0"), wraw, filename="clip.webm",
                    environ_base=fresh_ip())
     jw = r.get_json()
@@ -224,6 +249,26 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
                     content_type="multipart/form-data", environ_base=fresh_ip())
     check("missing file -> 400", r.status_code == 400, str(r.status_code))
 
+    print("== corrupt/truncated upload rejection ==")
+    stub = make_corrupt_mp4()
+    check("stub passes magic-byte check (the old hole)",
+          videos.detect_video(stub) == ("mp4", "video/mp4"))
+    check("stub fails structural validation",
+          videos.validate_video_structure(stub) is False)
+    check("valid mp4 passes structural validation",
+          videos.validate_video_structure(raw) is True)
+    check("valid webm passes structural validation",
+          videos.validate_video_structure(wraw) is True)
+    r = post_video(client, fields(stub), stub, filename="broken.mp4",
+                   environ_base=fresh_ip())
+    check("truncated mp4 upload -> 400", r.status_code == 400,
+          f"{r.status_code} {r.get_data(as_text=True)[:120]}")
+    wstub = b"\x1a\x45\xdf\xa3" + bytes(5000)  # EBML header, no Segment
+    r = post_video(client, fields(wstub), wstub, filename="broken.webm",
+                   environ_base=fresh_ip())
+    check("truncated webm upload -> 400", r.status_code == 400,
+          str(r.status_code))
+
     print("== GET /video/<uid> ==")
     r = client.get("/video/%d" % uid)
     check("serve -> 200 video/mp4",
@@ -232,6 +277,16 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
     check("served bytes match", r.get_data() == raw)
     r = client.get("/video/999999")
     check("unknown video -> 404", r.status_code == 404)
+    # Simulate a corrupt file already on disk (pre-validation upload):
+    # the server must 404 it, never serve it as video/*.
+    u = videos.get_video_upload(appmod.db, uid)
+    full = os.path.join(TEST_DATA, u["stored_path"])
+    with open(full, "wb") as fh:
+        fh.write(make_corrupt_mp4())
+    appmod._video_ok_cache.clear()
+    r = client.get("/video/%d" % uid)
+    check("corrupt stored file -> 404, not broken video",
+          r.status_code == 404, str(r.status_code))
 
     print("== per-identity rate limit ==")
     priv2, fm2 = register(client, "SpamClip")
@@ -301,32 +356,33 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
     check("comment without video still works", r.status_code == 200, str(r.status_code))
 
     print("== human form comment with video ==")
-    form = {"handle": "HumanFan", "body": "nice clip",
+    human = login_human("VideoFan")
+    form = {"body": "nice clip",
             "ai_generated_video": "1",
-            "video_file": (io.BytesIO(make_webm(300)), "clip.webm", "video/webm")}
-    r = client.post("/post/%d/comment" % pid, data=form,
-                    content_type="multipart/form-data",
-                    environ_base=fresh_ip(), follow_redirects=False)
+            "video_file": (io.BytesIO(make_webm()), "clip.webm", "video/webm")}
+    r = human.post("/post/%d/comment" % pid, data=form,
+                   content_type="multipart/form-data",
+                   environ_base=fresh_ip(), follow_redirects=False)
     check("form comment with video -> redirect", r.status_code in (301, 302, 303),
           str(r.status_code))
     tree = appmod.db.comment_tree(pid)
-    flagged = [c for c in tree if c["handle"] == "HumanFan"]
+    flagged = [c for c in tree if c["handle"] == "VideoFan"]
     check("form comment stored with video + flag",
           flagged and flagged[0]["video_url"].startswith("/video/") and
           flagged[0]["video_ai"] == 1,
           str(flagged[0] if flagged else None))
 
     print("== human form submit with video ==")
-    form2 = {"handle": "HumanPoster", "community": "lobby", "title": "vid post",
+    form2 = {"community": "lobby", "title": "vid post",
              "body": "check it", "flair": "discussion",
              "ai_generated_video": "1",
-             "video_file": (io.BytesIO(make_mp4(300)), "v.mp4", "video/mp4")}
-    r = client.post("/submit", data=form2, content_type="multipart/form-data",
-                    environ_base=fresh_ip(), follow_redirects=False)
+             "video_file": (io.BytesIO(make_mp4()), "v.mp4", "video/mp4")}
+    r = human.post("/submit", data=form2, content_type="multipart/form-data",
+                   environ_base=fresh_ip(), follow_redirects=False)
     check("form submit with video -> redirect", r.status_code in (301, 302, 303),
           str(r.status_code))
     posts = [pp for pp in appmod.db.list_posts("lobby", sort="new", limit=50)
-             if pp["handle"] == "HumanPoster"]
+             if pp["handle"] == "VideoFan"]
     check("form post stored with video + flag",
           posts and posts[0]["video_url"].startswith("/video/") and
           posts[0]["video_ai"] == 1,

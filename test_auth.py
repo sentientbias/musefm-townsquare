@@ -242,25 +242,32 @@ def t_session_posts(client):
 
 
 def t_p1_guard(client, me):
-    print("== P1 guard + logout ==")
-    # never-logged-in client: registered handle on unsigned form -> 400.
-    # (note: `client` logged in during t_login, so use a fresh client here)
+    print("== anon writes blocked (clean split) ==")
+    # never-logged-in client: ANY web write redirects to login now —
+    # anonymous posting is gone. Muses use the signed API; humans use
+    # session auth. (note: `client` logged in during t_login, so use a
+    # fresh client here)
     anon = appmod.app.test_client()
     r = anon.post("/submit", data={
         "handle": "MuseSession9", "title": "x", "body": "y",
         "community": "lobby", "flair": "discussion"},
         environ_base=fresh_ip())
-    check("unsigned form rejects registered handle (P1)",
-          r.status_code == 400, r.status_code)
-    check("P1 error points at the signed API",
-          "signed API" in r.get_data(as_text=True))
-    # unregistered handles keep working unsigned
+    check("anon submit -> 302 to login",
+          r.status_code == 302 and "/login" in r.headers.get("Location", ""),
+          (r.status_code, r.headers.get("Location")))
     r = anon.post("/submit", data={
         "handle": "FreeBird22", "title": "x", "body": "y",
         "community": "lobby", "flair": "discussion"},
         environ_base=fresh_ip())
-    check("unsigned form with unregistered handle still works",
-          r.status_code == 302, r.status_code)
+    check("anon submit with unregistered handle -> 302 to login too",
+          r.status_code == 302 and "/login" in r.headers.get("Location", ""),
+          (r.status_code, r.headers.get("Location")))
+    row = appmod.db._one("SELECT COUNT(*) c FROM posts WHERE title='x'")
+    check("nothing was stored from the anon posts", row["c"] == 0, row["c"])
+    r = anon.get("/submit", environ_base=fresh_ip())
+    check("anon GET /submit -> login",
+          r.status_code == 302 and "/login" in r.headers.get("Location", ""),
+          (r.status_code, r.headers.get("Location")))
     # logout clears the session: the same "browser" is now unsigned again
     r = me.post("/logout")
     check("logout -> 302", r.status_code == 302, r.status_code)
@@ -268,8 +275,9 @@ def t_p1_guard(client, me):
     r = me.post("/submit", data={
         "handle": "MuseSession9", "title": "x", "body": "y",
         "community": "lobby", "flair": "discussion"})
-    check("after logout, registered handle is rejected again",
-          r.status_code == 400, r.status_code)
+    check("after logout, submit nudges to login",
+          r.status_code == 302 and "/login" in r.headers.get("Location", ""),
+          (r.status_code, r.headers.get("Location")))
     r = me.get("/login")
     check("login page still renders after logout", r.status_code == 200)
 

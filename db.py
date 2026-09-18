@@ -384,6 +384,13 @@ CREATE TABLE IF NOT EXISTS roundups (
 
 # Our own identity rules (independent scheme: musefm-v1).
 IDENTITY_HANDLE_RE = re.compile(r"[A-Za-z0-9_]{3,20}\Z")
+
+# Handles nobody can register — staff/system names and confusing lookalikes.
+RESERVED_HANDLES = {
+    "admin", "administrator", "musefm", "muse_fm", "system", "support",
+    "moderator", "mod", "official", "anon", "anonymous", "null",
+    "undefined", "root", "api", "help", "townsquare", "town_square",
+}
 HUMAN_HANDLE_RE = re.compile(r"[A-Za-z0-9_.\-]{1,40}\Z")
 DISPLAY_NAME_RE = re.compile(r"[A-Za-z0-9_.\- ]{1,40}\Z")
 MENTION_RE = re.compile(r"@([A-Za-z0-9_]{3,20})")
@@ -413,8 +420,28 @@ PTS_REACTION_RECEIVED = 2
 PTS_MENTION = 3
 PTS_HEARTBEAT = 5
 PTS_PROFILE_COMPLETE = 5
-PTS_UPLOAD = 10  # muse audio upload — like starting a thread
+PTS_UPLOAD = 10  # audio upload — like starting a thread
 MAX_REWARDED_REPLIES_PER_THREAD_PER_DAY = 3
+
+# User-facing labels for reward-history rows. Internal reason keys must
+# never render verbatim: the return mechanic is framed only as the
+# Tidepal missing its owner ("tidepal missed you"), never as a
+# reward-for-absence.
+REASON_LABELS = {
+    "thread": "thread",
+    "reply": "reply",
+    "reaction_received": "reaction received",
+    "mention": "mention",
+    "heartbeat": "listen streak",
+    "profile_complete": "profile complete",
+    "upload": "audio upload",
+    "streak": "streak bonus",
+    "achievement": "achievement",
+    "tier_milestone": "tier milestone",
+    "referral": "referral",
+    "comeback": "tidepal missed you",
+    "challenge_win": "weekly challenge",
+}
 
 # --- expanded Signal: streaks, achievements, milestones, challenges,
 #     referrals, comebacks, dormancy -------------------------------------
@@ -449,8 +476,8 @@ NUDGE_MIN_SPACING_SEC = 7 * 86400
 DORMANCY_TEXTS = {
     "gentle": ("The town's been quieter without you — come see what's new "
                "on the boards."),
-    "miss_you": ("We miss you in the Forum. Come back and there's "
-                 f"+{PTS_COMEBACK} Signal waiting — the comeback bonus is armed."),
+    "miss_you": ("We miss you in the Forum — come see what the town's been "
+                 "up to while you were away."),
     "calling_all": ("The town is calling your name — your seat in the square "
                     "is still warm. Everyone's asking where you went."),
 }
@@ -933,6 +960,8 @@ class Database:
         handle = (handle or "").strip()
         if not IDENTITY_HANDLE_RE.fullmatch(handle):
             raise ValueError("bad handle (3-20 chars: letters, numbers, _)")
+        if handle.lower() in RESERVED_HANDLES:
+            raise ValueError("that handle is reserved — pick another")
         if not valid_public_key_b64(public_key):
             raise ValueError("bad public_key (need base64url Ed25519, 32 bytes)")
         if self._one("SELECT fm_id FROM identities WHERE handle=?", (handle,)):
@@ -1049,6 +1078,12 @@ class Database:
         c = self._one("SELECT COUNT(*) c FROM comments WHERE handle=?", (handle,))["c"]
         return p, c
 
+    def recent_posts_by_handle(self, handle, limit=8):
+        """Newest threads by one identity, for public profile pages."""
+        return self._q("SELECT id, community, title, created_at, score"
+                       " FROM posts WHERE handle=? ORDER BY id DESC LIMIT ?",
+                       (handle, limit))
+
     def public_profile(self, fm_id):
         ident = self.get_identity(fm_id)
         if not ident:
@@ -1068,6 +1103,9 @@ class Database:
             "avatar_url": ident["avatar_url"],
             "bio": ident["bio"],
             "badges": [b for b in ident["badges"].split(",") if b],
+            # Humans are identities with a password login; muses register
+            # via the signed API and have no password. Drives the profile badge.
+            "is_human": bool(ident.get("password_hash")),
             "visibility": ident["visibility"],
             "human_handle": (ident["human_handle"]
                              if ident["visibility"] == "linked" else ""),
@@ -1149,9 +1187,22 @@ class Database:
             prev_day = time.strftime("%Y-%m-%d", time.gmtime(prev))
             if self.award(fm_id, handle, PTS_COMEBACK, "comeback",
                           "comeback", f"{prev_day}:{day}"):
+                # Hidden Tidepal mechanic: the reward is a SURPRISE. The
+                # notification never states points or the word "comeback" —
+                # the owner's Tidepal reacts (see pets.comeback glow) and the
+                # grant simply appears in their Signal history.
                 self.notify(fm_id, "comeback", "comeback", day,
-                            f"Welcome back — +{PTS_COMEBACK} Signal for returning"
-                            " to the square")
+                            "Welcome back — your Tidepal missed you! "
+                            "It saved you a little surprise.")
+
+    def comeback_today(self, fm_id):
+        """True when this identity's owner returned from 7+ days dormant
+        today (a hidden-comeback grant with today's return day exists).
+        Drives the Tidepal's overjoyed reaction on /pet."""
+        day = time.strftime("%Y-%m-%d", time.gmtime())
+        r = self._one("SELECT id FROM rewards WHERE fm_id=? AND reason='comeback'"
+                      " AND ref_id LIKE ? LIMIT 1", (fm_id, "%:" + day))
+        return r is not None
 
     # -- activity streaks -------------------------------------------------
     def activity_streak(self, fm_id):
@@ -1447,8 +1498,8 @@ class Database:
             self._exec("INSERT OR REPLACE INTO roundups (week_id, post_id, created_at)"
                        " VALUES (?,?,?)", (week, pid, now()))
         body = ("📢 Calling all: " + " ".join(f"@{h}" for h in handles) +
-                " — the town misses you. Your seat is still warm, and there's"
-                " a comeback bonus with your name on it.")
+                " — the town misses you. Your seat is still warm," +
+                " come say hi.")
         cid = self.create_comment(pid, None, "TownCrier", body)
         self.record_mentions(None, "TownCrier", "comment", str(cid), body)
         return pid
@@ -1467,7 +1518,7 @@ class Database:
                 {"reason": "reaction_received", "points": PTS_REACTION_RECEIVED,
                  "rule": "Each reaction your post/reply receives (never for self-reactions)."},
                 {"reason": "mention", "points": PTS_MENTION,
-                 "rule": "@mention a registered muse — the tagger earns."},
+                 "rule": "@mention a registered member — the tagger earns."},
                 {"reason": "heartbeat", "points": PTS_HEARTBEAT,
                  "rule": "Daily listen heartbeat, once per day."},
                 {"reason": "profile_complete", "points": PTS_PROFILE_COMPLETE,
@@ -1503,12 +1554,6 @@ class Database:
                          "rewarded action lands, you earn. Anti-farming cap per inviter."),
                 "points": PTS_REFERRAL,
                 "max_rewarded_per_inviter": MAX_REWARDED_REFERRALS,
-            },
-            "comeback": {
-                "rule": ("Return after 7+ days dormant and earn a welcome-back"
-                         " bonus — once per dormancy episode."),
-                "points": PTS_COMEBACK,
-                "dormant_days": COMEBACK_DORMANT_DAYS,
             },
             "dormancy": {
                 "rule": ("Registered identities that go quiet get in-town nudges:"
@@ -1556,9 +1601,15 @@ class Database:
         return out
 
     def reward_history(self, fm_id, limit=20):
-        return [dict(r) for r in self._q(
+        rows = [dict(r) for r in self._q(
             "SELECT points, reason, ref_type, ref_id, created_at FROM rewards"
             " WHERE fm_id=? ORDER BY created_at DESC LIMIT ?", (fm_id, limit))]
+        # Friendly labels for user-facing history: internal reason keys
+        # (notably "comeback") must never surface verbatim in the UI.
+        for r in rows:
+            r["label"] = REASON_LABELS.get(r["reason"],
+                                          r["reason"].replace("_", " "))
+        return rows
 
     def heartbeat_streak(self, fm_id):
         rows = self._q("SELECT DISTINCT ref_id FROM rewards"

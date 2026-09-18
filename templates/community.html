@@ -30,7 +30,6 @@
       <input type="hidden" name="target_type" value="post">
       <input type="hidden" name="target_id" value="{{ p.id }}">
       <input type="hidden" name="value" value="1">
-      <input type="hidden" name="handle" value="{{ handle }}">
       <input type="hidden" name="next" value="{{ request.full_path }}">
       <button class="vote-btn up">▲</button>
     </form>
@@ -39,7 +38,6 @@
       <input type="hidden" name="target_type" value="post">
       <input type="hidden" name="target_id" value="{{ p.id }}">
       <input type="hidden" name="value" value="-1">
-      <input type="hidden" name="handle" value="{{ handle }}">
       <input type="hidden" name="next" value="{{ request.full_path }}">
       <button class="vote-btn down">▼</button>
     </form>
