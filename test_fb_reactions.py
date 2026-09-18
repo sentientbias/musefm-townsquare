@@ -64,13 +64,13 @@ _ip_counter = [0]
 
 def fresh_ip():
     _ip_counter[0] += 1
-    return {"X-Forwarded-For": "10.99.0.%d" % _ip_counter[0]}
+    return {"REMOTE_ADDR": "10.99.0.%d" % _ip_counter[0]}
 
 
 def fb_react(client, priv, fm_id, target_type, target_id, reaction):
     return client.post("/api/forum/fb_react", json=signed_body(
         priv, "fb_react", fm_id, target_type=target_type,
-        target_id=target_id, reaction=reaction), headers=fresh_ip())
+        target_id=target_id, reaction=reaction), environ_base=fresh_ip())
 
 
 def rewards_for(fm_id):
@@ -93,12 +93,12 @@ def main():
 
     r = client.post("/api/forum/post", json=signed_body(
         priv_a, "post", fm_a, community="lobby", title="react me",
-        body="hello town", flair="discussion"), headers=fresh_ip())
+        body="hello town", flair="discussion"), environ_base=fresh_ip())
     assert r.status_code == 200, r.get_data(as_text=True)
     pid = r.get_json()["id"]
     r = client.post("/api/forum/comment", json=signed_body(
         priv_b, "comment", fm_b, post_id=pid, body="first!"),
-        headers=fresh_ip())
+        environ_base=fresh_ip())
     cid = r.get_json()["id"]
 
     print("== signed add / switch / remove ==")
@@ -141,16 +141,16 @@ def main():
     print("== auth ==")
     r = client.post("/api/forum/fb_react",
                     json={"target_type": "post", "target_id": pid, "reaction": "like"},
-                    headers=fresh_ip())
+                    environ_base=fresh_ip())
     check("unsigned -> 401", r.status_code == 401, str(r.status_code))
     body = signed_body(priv_a, "fb_react", fm_a, target_type="post",
                        target_id=pid, reaction="like")
     body["reaction"] = "angry"  # tamper after signing
-    r = client.post("/api/forum/fb_react", json=body, headers=fresh_ip())
+    r = client.post("/api/forum/fb_react", json=body, environ_base=fresh_ip())
     check("tampered body -> 401", r.status_code == 401, str(r.status_code))
     body2 = signed_body(priv_a, "post", fm_a, target_type="post",
                         target_id=pid, reaction="like")  # wrong action
-    r = client.post("/api/forum/fb_react", json=body2, headers=fresh_ip())
+    r = client.post("/api/forum/fb_react", json=body2, environ_base=fresh_ip())
     check("wrong signed action -> 401", r.status_code == 401, str(r.status_code))
 
     print("== no Signal for FB reactions ==")
@@ -178,26 +178,26 @@ def main():
     r = client.post("/fb_react",
                     json={"target_type": "post", "target_id": pid,
                           "reaction": "haha", "handle": "Webby"},
-                    headers=fresh_ip())
+                    environ_base=fresh_ip())
     d = r.get_json()
     check("web JSON react -> 200", r.status_code == 200 and d["action"] == "added"
           and d["mine"] == "haha", str(d))
     r = client.post("/fb_react",
                     json={"target_type": "post", "target_id": pid,
                           "reaction": "haha", "handle": "Webby"},
-                    headers=fresh_ip())
+                    environ_base=fresh_ip())
     check("web toggle off", r.get_json()["action"] == "removed", "")
     r = client.post("/fb_react",
                     data={"target_type": "post", "target_id": str(pid),
                           "reaction": "wow", "handle": "Webby", "next": "/c/lobby"},
-                    headers=fresh_ip())
+                    environ_base=fresh_ip())
     check("web form -> 302 redirect", r.status_code == 302, str(r.status_code))
     check("form redirect target", r.headers.get("Location", "").endswith("/c/lobby"),
           r.headers.get("Location"))
     r = client.post("/fb_react",
                     json={"target_type": "post", "target_id": pid,
                           "reaction": "nope", "handle": "Webby"},
-                    headers=fresh_ip())
+                    environ_base=fresh_ip())
     check("web invalid reaction -> 400", r.status_code == 400, str(r.status_code))
 
     print("== widget rendering ==")

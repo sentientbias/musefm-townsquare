@@ -85,7 +85,7 @@ _ip_counter = [0]
 def fresh_ip():
     """Rate limits are per-IP; each post in the test gets its own bucket."""
     _ip_counter[0] += 1
-    return {"X-Forwarded-For": "10.9.0.%d" % _ip_counter[0]}
+    return {"REMOTE_ADDR": "10.9.0.%d" % _ip_counter[0]}
 
 
 def main():
@@ -174,7 +174,7 @@ def main():
     r = client.post("/api/forum/post", json=signed_body(
         priv, "post", fm_id, community="lobby",
         title="my upload", body="fresh bytes", flair="discussion",
-        gif_url=j["gif_url"]), headers=fresh_ip())
+        gif_url=j["gif_url"]), environ_base=fresh_ip())
     d2 = r.get_json()
     check("uploaded gif_url round-trips into a post", r.status_code == 200,
           f"{r.status_code} {d2}")
@@ -211,7 +211,7 @@ def main():
     r = client.post("/api/forum/post", json=signed_body(
         priv, "post", fm_id, community="lobby",
         title="gif thread", body="check it", flair="discussion",
-        gif_url=good), headers=fresh_ip())
+        gif_url=good), environ_base=fresh_ip())
     d = r.get_json()
     check("api post with gif_url -> 200", r.status_code == 200, str(d))
     if r.status_code == 200:
@@ -220,7 +220,7 @@ def main():
     r = client.post("/api/forum/post", json=signed_body(
         priv, "post", fm_id, community="lobby",
         title="evil gif", body="x", flair="discussion",
-        gif_url="https://evil.example.com/x.gif"), headers=fresh_ip())
+        gif_url="https://evil.example.com/x.gif"), environ_base=fresh_ip())
     check("api post with bad gif_url -> 400", r.status_code == 400,
           str(r.status_code))
 
@@ -228,14 +228,14 @@ def main():
     r = client.post("/submit", data={
         "community": "lobby", "handle": "HumanFan", "title": "human gif",
         "body": "from the form", "flair": "discussion", "gif_url": good,
-    }, headers=fresh_ip())
+    }, environ_base=fresh_ip())
     check("form post with gif_url redirects", r.status_code == 302,
           str(r.status_code))
     r = client.post("/submit", data={
         "community": "lobby", "handle": "HumanFan", "title": "bad gif",
         "body": "x", "flair": "discussion",
         "gif_url": "https://evil.example.com/x.gif",
-    }, headers=fresh_ip())
+    }, environ_base=fresh_ip())
     check("form post with bad gif_url -> 400", r.status_code == 400,
           str(r.status_code))
 
@@ -244,7 +244,7 @@ def main():
             "body": "fresh bytes", "flair": "discussion"}
     data["gif_file"] = (io.BytesIO(make_gif(300)), "dance.gif", "image/gif")
     r = client.post("/submit", data=data, content_type="multipart/form-data",
-                    headers=fresh_ip())
+                    environ_base=fresh_ip())
     check("form gif file upload -> redirect", r.status_code == 302,
           f"{r.status_code} {r.get_data(as_text=True)[:200]}")
     loc = r.headers.get("Location", "")

@@ -85,15 +85,17 @@ _ip_counter = [0]
 
 def fresh_ip():
     _ip_counter[0] += 1
-    return {"X-Forwarded-For": "10.77.0.%d" % _ip_counter[0]}
+    return {"REMOTE_ADDR": "10.77.0.%d" % _ip_counter[0]}
 
 
-def post_image(client, fields, raw, filename="art.png", headers=None):
+def post_image(client, fields, raw, filename="art.png", headers=None,
+               environ_base=None):
     data = dict(fields)
     data["image"] = (io.BytesIO(raw), filename, "image/png")
     return client.post("/api/upload/image", data=data,
                        content_type="multipart/form-data",
-                       headers=headers or {})
+                       headers=headers or {},
+                       environ_base=environ_base or {})
 
 
 def main():
@@ -234,7 +236,7 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
         rr = post_image(client, signed_body(
             priv2, "upload", fm2,
             file_sha256=hashlib.sha256(raw).hexdigest(), ai_generated="0"),
-            raw, filename="x.png", headers=fresh_ip())
+            raw, filename="x.png", environ_base=fresh_ip())
         last = rr
         if rr.status_code == 200:
             ok += 1
@@ -245,7 +247,7 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
     r = client.post("/api/forum/post", json=signed_body(
         priv, "post", fm_id, community="lobby", title="muse art",
         body="made this", flair="discussion",
-        image_url="/img/%d" % uid, image_ai=True), headers=fresh_ip())
+        image_url="/img/%d" % uid, image_ai=True), environ_base=fresh_ip())
     d = r.get_json()
     check("api post with image_url -> 200", r.status_code == 200, str(d))
     pid = d["id"]
@@ -262,7 +264,7 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
     r = client.post("/api/forum/post", json=signed_body(
         priv, "post", fm_id, community="lobby", title="plain pic",
         body="no ai", flair="discussion",
-        image_url=j2["image_url"], image_ai=False), headers=fresh_ip())
+        image_url=j2["image_url"], image_ai=False), environ_base=fresh_ip())
     pid2 = r.get_json()["id"]
     html2 = client.get("/c/lobby/post/%d" % pid2).get_data(as_text=True)
     check("no badge when unflagged",
@@ -272,14 +274,14 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
     r = client.post("/api/forum/post", json=signed_body(
         priv, "post", fm_id, community="lobby", title="evil",
         body="x", flair="discussion",
-        image_url="https://evil.example.com/x.png"), headers=fresh_ip())
+        image_url="https://evil.example.com/x.png"), environ_base=fresh_ip())
     check("external image_url rejected by api post", r.status_code == 400,
           str(r.status_code))
 
     print("== image on comment + badge rendering ==")
     r = client.post("/api/forum/comment", json=signed_body(
         priv, "comment", fm_id, post_id=pid, body="my take",
-        image_url="/img/%d" % uid, image_ai=True), headers=fresh_ip())
+        image_url="/img/%d" % uid, image_ai=True), environ_base=fresh_ip())
     cd = r.get_json()
     check("api comment with image -> 200", r.status_code == 200, str(cd))
     html3 = client.get("/c/lobby/post/%d" % pid).get_data(as_text=True)
@@ -287,7 +289,7 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
           str(html3.count("AI-generated")))
     r = client.post("/api/forum/comment", json=signed_body(
         priv, "comment", fm_id, post_id=pid, body="plain reply"),
-        headers=fresh_ip())
+        environ_base=fresh_ip())
     check("comment without image still works", r.status_code == 200, str(r.status_code))
 
     print("== human form comment with image ==")
@@ -296,7 +298,7 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
             "image_file": (io.BytesIO(make_jpeg(300)), "snap.jpg", "image/jpeg")}
     r = client.post("/post/%d/comment" % pid, data=form,
                     content_type="multipart/form-data",
-                    headers=fresh_ip(), follow_redirects=False)
+                    environ_base=fresh_ip(), follow_redirects=False)
     check("form comment with image -> redirect", r.status_code in (301, 302, 303),
           str(r.status_code))
     tree = appmod.db.comment_tree(pid)

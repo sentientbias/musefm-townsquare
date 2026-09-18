@@ -65,7 +65,7 @@ _ip = [0]
 
 def fresh_ip():
     _ip[0] += 1
-    return {"X-Forwarded-For": "10.77.0.%d" % _ip[0]}
+    return {"REMOTE_ADDR": "10.77.0.%d" % _ip[0]}
 
 
 def register(client, handle):
@@ -81,7 +81,7 @@ def register(client, handle):
 def fb_react(client, priv, fm_id, ttype, tid, reaction):
     return client.post("/api/forum/fb_react", json=signed_body(
         priv, "fb_react", fm_id, target_type=ttype,
-        target_id=tid, reaction=reaction), headers=fresh_ip())
+        target_id=tid, reaction=reaction), environ_base=fresh_ip())
 
 
 # 1x1 png (magic bytes + minimal valid structure)
@@ -175,7 +175,7 @@ def main():
                     data={"handle": "Shutterbug", "title": "Test shot",
                           "caption": "a test",
                           "photo": (io.BytesIO(PNG), "shot.png")},
-                    content_type="multipart/form-data", headers=fresh_ip())
+                    content_type="multipart/form-data", environ_base=fresh_ip())
     check("photo upload -> redirect to permalink",
           r.status_code == 302 and "/musefm/photos/" in r.headers["Location"],
           f"{r.status_code} {r.headers.get('Location')}")
@@ -188,7 +188,7 @@ def main():
     r = client.post("/photos/upload",
                     data={"handle": "Shutterbug", "title": "Bad",
                           "photo": (io.BytesIO(b"not an image"), "x.txt")},
-                    content_type="multipart/form-data", headers=fresh_ip())
+                    content_type="multipart/form-data", environ_base=fresh_ip())
     check("non-image upload -> 400", r.status_code == 400, str(r.status_code))
 
     print("== reactions on episode / video / photo ==")
@@ -221,7 +221,7 @@ def main():
     # web route (trust-based) on an episode
     r = client.post("/fb_react", json={
         "target_type": "episode", "target_id": rid, "reaction": "like",
-        "handle": "WebFan", "next": "/episodes/ep04"}, headers=fresh_ip())
+        "handle": "WebFan", "next": "/episodes/ep04"}, environ_base=fresh_ip())
     d = r.get_json()
     check("web fb_react on episode", r.status_code == 200 and d["ok"]
           and d["total"] >= 1, str(d))
@@ -279,34 +279,34 @@ def main():
                     data={**signed_body(priv, "upload", fm_id, file_sha256=vsha,
                                         ai_generated="true", duration_secs="2"),
                           "video": (io.BytesIO(MP4), "clip.mp4")},
-                    content_type="multipart/form-data", headers=fresh_ip())
+                    content_type="multipart/form-data", environ_base=fresh_ip())
     check("signed video upload 200", r.status_code == 200,
           r.get_data(as_text=True)[:200])
     vid = r.get_json()["id"]
     r = client.post(f"/api/video/{vid}/tag",
                     json=signed_body(priv, "upload", fm_id, series="musefm"),
-                    headers=fresh_ip())
+                    environ_base=fresh_ip())
     check("signed series tag 200", r.status_code == 200,
           r.get_data(as_text=True)[:200])
     # someone else's key must not retag it
     priv2, fm2 = register(client, "AgentE2EB")
     r = client.post(f"/api/video/{vid}/tag",
                     json=signed_body(priv2, "upload", fm2, series=""),
-                    headers=fresh_ip())
+                    environ_base=fresh_ip())
     check("foreign tag rejected", r.status_code == 403)
     isha = hashlib.sha256(PNG).hexdigest()
     r = client.post("/api/upload/image",
                     data={**signed_body(priv, "upload", fm_id, file_sha256=isha,
                                         ai_generated="true"),
                           "image": (io.BytesIO(PNG), "art.png")},
-                    content_type="multipart/form-data", headers=fresh_ip())
+                    content_type="multipart/form-data", environ_base=fresh_ip())
     check("signed image upload 200", r.status_code == 200,
           r.get_data(as_text=True)[:200])
     img_url = r.get_json()["image_url"]
     r = client.post("/api/photos/create",
                     json=signed_body(priv, "upload", fm_id, title="Agent still",
                                      caption="e2e", image_url=img_url),
-                    headers=fresh_ip())
+                    environ_base=fresh_ip())
     check("signed photo publish 200", r.status_code == 200,
           r.get_data(as_text=True)[:200])
     html = client.get("/musefm/shorts").get_data(as_text=True)

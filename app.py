@@ -37,6 +37,8 @@ from functools import wraps
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from flask import (Flask, g, jsonify, redirect, render_template, request,
                    send_file, send_from_directory, url_for)
+from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.routing import IntegerConverter, ValidationError
 
 from db import (Database, FLAIRS, MAX_REWARDED_REPLIES_PER_THREAD_PER_DAY,
                 PTS_HEARTBEAT, PTS_MENTION, PTS_REACTION_RECEIVED, PTS_REPLY,
@@ -65,17 +67,50 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 KEY_FILE = os.path.join(HERE, ".agent_key")
 
 app = Flask(__name__)
+# Render terminates TLS at its edge and appends the real client IP to
+# X-Forwarded-For. Trust exactly one proxy hop: ProxyFix moves the
+# edge-supplied IP into REMOTE_ADDR. client_ip() below reads ONLY
+# REMOTE_ADDR — any client-supplied X-Forwarded-For is untrusted and
+# ignored, so rotating the header can no longer evade rate limits.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
+
+
+class SqliteIntConverter(IntegerConverter):
+    """Flask <sqlite_int:> accepts arbitrary-precision ints; sqlite INTEGER caps
+    at 64-bit, so /video/<10**30> 500'd in the db layer. Out-of-range ids
+    404 like any other nonexistent id instead."""
+    def to_python(self, value):
+        v = super().to_python(value)
+        if v > 2**63 - 1:
+            raise ValidationError()
+        return v
+
+
+app.url_map.converters["sqlite_int"] = SqliteIntConverter
 # 34MB ceiling so signed video uploads (max 32MB) fit; per-route checks apply.
 app.config["MAX_CONTENT_LENGTH"] = 34 * 1024 * 1024
 
 DB_PATH = os.path.join(HERE, os.environ.get("TOWNSQUARE_DB", "townsquare.db"))
-db = Database(DB_PATH)
-gifs.ensure_gif_schema(db)
-ai_images.ensure_ai_schema(db)
-videos.ensure_video_schema(db)
-fb_reactions.ensure_fb_reactions_schema(db)
-ensure_musefm_media_schema(db)   # episode video_file, video series tag, photos
-db.ensure_musefm_seeds()            # idempotent: ep01-ep04, episode posts, photos
+
+
+def init_db(path):
+    """Build a Database and run EVERY schema ensure + seeds against it.
+
+    Called at import AND after a --db rebind: the old __main__ block
+    rebound `db` after the module-level ensures had already run against
+    the default path, so fresh --db files were missing the uploads, gif,
+    video, fb_reaction and musefm-media tables (uploads 500'd)."""
+    _db = Database(path)
+    gifs.ensure_gif_schema(_db)
+    ai_images.ensure_ai_schema(_db)
+    videos.ensure_video_schema(_db)
+    fb_reactions.ensure_fb_reactions_schema(_db)
+    ensure_musefm_media_schema(_db)   # episode video_file, video series tag, photos
+    _db.ensure_musefm_seeds()            # idempotent: ep01-ep04, episode posts, photos
+    return _db
+
+
+db = init_db(DB_PATH)
 
 # Uploaded muse audio lives next to the DB so it rides the same persistent
 # disk on Render (TOWNSQUARE_DB=/opt/render/project/src/data/townsquare.db).
@@ -127,8 +162,38 @@ def agent_authed():
     given = (request.headers.get("X-Agent-Key", "")
              or request.args.get("agent_key", ""))
     if not given and request.is_json:
-        given = (request.get_json(silent=True) or {}).get("agent_key", "")
+        body = request.get_json(silent=True)
+        # non-object JSON (arrays, scalars) carries no agent key — and
+        # .get() on a list 500'd here before the isinstance guard.
+        if isinstance(body, dict):
+            given = body.get("agent_key", "")
     return bool(given) and secrets.compare_digest(given, AGENT_KEY)
+
+
+def json_body():
+    """Parsed JSON request body, guaranteed to be a dict.
+
+    Returns {} for absent/unparseable JSON. Non-object JSON (arrays,
+    strings, numbers) is a 400 — every endpoint that reads fields expects
+    an object, and .get() on a list 500'd app-wide before this guard."""
+    data = request.get_json(force=True, silent=True)
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        return api_error("JSON body must be an object", 400)
+    return data
+
+
+def _fs(data, key, default=""):
+    """String field from a JSON body (or form). Non-string values are a
+    400, not a 500 — e.g. {"body": ["hi"]} must not crash clean()/strip().
+    None falls back to the default."""
+    v = data.get(key, default)
+    if v is None:
+        return default
+    if not isinstance(v, str):
+        raise ValueError(f"bad {key}: must be a string")
+    return v
 
 
 def require_agent(fn):
@@ -150,6 +215,8 @@ def require_agent_or_signature(action):
         @wraps(fn)
         def wrapper(*a, **kw):
             data = request.get_json(force=True, silent=True) or {}
+            if not isinstance(data, dict):
+                return api_error("JSON body must be an object", 400)
             if agent_authed():
                 handle = data.get("handle", "")
                 if not valid_handle(handle):
@@ -189,8 +256,7 @@ def limited(bucket, ip, max_hits, window_sec):
 
 
 def check_limit(bucket, max_hits, window_sec=3600):
-    ip = request.headers.get("X-Forwarded-For", request.remote_addr or "?").split(",")[0].strip()
-    if limited(bucket, ip, max_hits, window_sec):
+    if limited(bucket, client_ip(), max_hits, window_sec):
         return jsonify({"ok": False, "error": "rate limit hit — slow down, friend"}), 429
     return None
 
@@ -200,8 +266,29 @@ def api_error(msg, code=400):
     return jsonify({"ok": False, "error": msg}), code
 
 
+def _web_handle_blocked(handle):
+    """Unsigned web forms must not impersonate a registered musefm-v1
+    identity: a form post attributed to someone else's handle is
+    indistinguishable from a genuine signed post. Returns a 400 response
+    when `handle` belongs to the identity registry, else None.
+
+    Unregistered handles keep working exactly as today; registered
+    identities must use the signed API (/api/docs) so attribution is
+    cryptographically proven."""
+    h = handle if isinstance(handle, str) else ""
+    h = h.strip()
+    if h and h != "anon" and db.get_identity_by_handle(h):
+        return (f"the handle '{h}' is a registered Muse FM identity — "
+                "unsigned web forms can't post as registered identities. "
+                "Use the signed API (see /api/docs) or pick another handle."), 400
+    return None
+
+
 def client_ip():
-    return request.headers.get("X-Forwarded-For", request.remote_addr or "?").split(",")[0].strip()
+    # REMOTE_ADDR only. ProxyFix(x_for=1) above already moved the
+    # edge-supplied client IP here; any client-sent X-Forwarded-For is
+    # untrusted (rotating it used to trivially bypass every rate limit).
+    return request.remote_addr or "?"
 
 
 def fmt_dur(sec):
@@ -287,7 +374,7 @@ def community(slug):
                            sort=sort, q=q or "")
 
 
-@app.route("/c/<slug>/post/<int:pid>")
+@app.route("/c/<slug>/post/<sqlite_int:pid>")
 def thread(slug, pid):
     c = db.community(slug)
     post = db.get_post(pid)
@@ -388,6 +475,10 @@ def submit():
         hit = check_limit("post", 5)
         if hit:
             return hit
+        blocked = _web_handle_blocked(request.form.get("handle", ""))
+        if blocked:
+            return render_template("submit.html", communities=communities,
+                                   error=blocked[0]), 400
         try:
             gif_url = _gif_from_form(request, request.form.get("handle", ""))
             image_url, image_ai = _image_from_form(request,
@@ -402,6 +493,12 @@ def submit():
                 request.form.get("flair", "discussion"),
                 gif_url=gif_url, image_url=image_url, image_ai=image_ai,
                 video_url=video_url, video_ai=video_ai)
+            # same mention/notify logic as the signed API: web authors have
+            # no verified identity, so they earn no Signal, but registered
+            # recipients still get their mention notifications.
+            db.record_mentions(None, request.form.get("handle", "") or "anon",
+                               "post", str(pid),
+                               request.form.get("body", ""))
         except ValueError as e:
             return render_template("submit.html", communities=communities,
                                    error=str(e)), 400
@@ -414,7 +511,32 @@ def submit():
                            pre_community=request.args.get("c", "lobby"))
 
 
-@app.route("/post/<int:pid>/comment", methods=["POST"])
+def _web_comment_side_effects(author_handle, ref_type, ref_id, body,
+                              post=None, parent_id=None):
+    """Reply/mention notifications for UNSIGNED web comments — mirrors the
+    signed API path. The author has no verified identity (impersonation is
+    blocked above), so no Signal is awarded; notifications to registered
+    recipients fire identically."""
+    db.record_mentions(None, author_handle, ref_type, ref_id, body)
+    if post:
+        notify_target = None
+        if parent_id:
+            try:
+                parent = db.comment_author(int(parent_id))
+            except (TypeError, ValueError):
+                parent = None
+            if parent:
+                notify_target = parent
+        else:
+            notify_target = post["handle"]
+        if notify_target:
+            target_ident = db.get_identity_by_handle(notify_target)
+            if target_ident:
+                db.notify(target_ident["fm_id"], "reply", ref_type, ref_id,
+                          f"@{author_handle} replied to you")
+
+
+@app.route("/post/<sqlite_int:pid>/comment", methods=["POST"])
 def add_comment(pid):
     hit = check_limit("comment", 30)
     if hit:
@@ -422,17 +544,24 @@ def add_comment(pid):
     post = db.get_post(pid)
     if not post:
         return render_template("404.html", msg="no such thread"), 404
+    blocked = _web_handle_blocked(request.form.get("handle", ""))
+    if blocked:
+        return blocked[0], 400
     try:
         image_url, image_ai = _image_from_form(request,
                                                request.form.get("handle", ""))
         video_url, video_ai = _video_from_form(request,
                                                request.form.get("handle", ""))
-        db.create_comment(pid,
-                          request.form.get("parent_id") or None,
-                          request.form.get("handle", ""),
-                          request.form.get("body", ""),
-                          image_url=image_url, image_ai=image_ai,
-                          video_url=video_url, video_ai=video_ai)
+        cid = db.create_comment(pid,
+                                request.form.get("parent_id") or None,
+                                request.form.get("handle", ""),
+                                request.form.get("body", ""),
+                                image_url=image_url, image_ai=image_ai,
+                                video_url=video_url, video_ai=video_ai)
+        _web_comment_side_effects(
+            request.form.get("handle", "") or "anon", "comment", str(cid),
+            request.form.get("body", ""), post=post,
+            parent_id=request.form.get("parent_id") or None)
     except ValueError as e:
         return str(e), 400
     resp = redirect(url_for("thread", slug=post["community"], pid=pid))
@@ -446,6 +575,9 @@ def vote_html():
     hit = check_limit("vote", 120)
     if hit:
         return hit
+    blocked = _web_handle_blocked(request.form.get("handle", ""))
+    if blocked:
+        return blocked[0], 400
     try:
         db.vote(request.form.get("target_type", "post"),
                 int(request.form.get("target_id", 0)),
@@ -480,6 +612,9 @@ def episode_comment(slug):
     hit = check_limit("ep_comment", 30)
     if hit:
         return hit
+    blocked = _web_handle_blocked(request.form.get("handle", ""))
+    if blocked:
+        return blocked[0], 400
     try:
         db.add_episode_comment(slug, request.form.get("handle", ""),
                                request.form.get("body", ""))
@@ -652,7 +787,7 @@ def photos_page():
                            handle=_musefm_handle())
 
 
-@app.route("/musefm/photos/<int:pid>")
+@app.route("/musefm/photos/<sqlite_int:pid>")
 def photo_page(pid):
     p = db.get_photo(pid)
     if not p:
@@ -663,7 +798,7 @@ def photo_page(pid):
     return render_template("photo.html", photo=p, handle=_musefm_handle())
 
 
-@app.route("/photo-file/<int:pid>")
+@app.route("/photo-file/<sqlite_int:pid>")
 def serve_photo_file(pid):
     """Serve an uploaded (non-static) photo from the data dir."""
     p = db.get_photo(pid)
@@ -793,9 +928,14 @@ def api_episode_comments(slug):
     hit = check_limit("ep_comment", 30)
     if hit:
         return hit
-    data = request.get_json(force=True, silent=True) or {}
+    data = json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
     try:
-        cid = db.add_episode_comment(slug, data.get("handle", ""), data.get("body", ""))
+        blocked = _web_handle_blocked(data.get("handle", ""))
+        if blocked:
+            return blocked
+        cid = db.add_episode_comment(slug, _fs(data, "handle"), _fs(data, "body"))
     except ValueError as e:
         return api_error(str(e))
     return jsonify({"ok": True, "id": cid})
@@ -810,11 +950,13 @@ def api_clips(slug):
     hit = check_limit("ep_comment", 30)
     if hit:
         return hit
-    data = request.get_json(force=True, silent=True) or {}
+    data = json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
     try:
-        cid = db.add_clip(slug, data.get("handle", ""),
+        cid = db.add_clip(slug, _fs(data, "handle"),
                           data.get("start_sec", 0), data.get("end_sec", 0),
-                          data.get("note", ""))
+                          _fs(data, "note"))
     except (ValueError, TypeError) as e:
         return api_error(str(e))
     return jsonify({"ok": True, "id": cid,
@@ -845,7 +987,7 @@ def api_posts():
     return jsonify({"ok": True, "posts": posts})
 
 
-@app.route("/api/forum/post/<int:pid>")
+@app.route("/api/forum/post/<sqlite_int:pid>")
 def api_post(pid):
     post = db.get_post(pid)
     if not post:
@@ -873,16 +1015,21 @@ def api_create_post():
     hit = check_limit("post", 5)
     if hit:
         return hit
-    data = g.signed_data or request.get_json(force=True, silent=True) or {}
-    community = data.get("community", "lobby")
+    data = g.signed_data or json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
     try:
+        community = _fs(data, "community", "lobby")
+        title = _fs(data, "title")
+        body = _fs(data, "body")
+        flair = _fs(data, "flair", "discussion")
         pid = db.create_post(community,
-                             g.author_handle, data.get("title", ""),
-                             data.get("body", ""), data.get("flair", "discussion"),
-                             gif_url=data.get("gif_url", ""),
-                             image_url=data.get("image_url", ""),
+                             g.author_handle, title,
+                             body, flair,
+                             gif_url=_fs(data, "gif_url"),
+                             image_url=_fs(data, "image_url"),
                              image_ai=bool(data.get("image_ai")),
-                             video_url=data.get("video_url", ""),
+                             video_url=_fs(data, "video_url"),
                              video_ai=bool(data.get("video_ai")))
     except ValueError as e:
         return api_error(str(e))
@@ -893,7 +1040,7 @@ def api_create_post():
         signal_earned += db.award(fm_id, g.author_handle, PTS_THREAD,
                                   "thread", "post", str(pid))
         mentioned, mpts = db.record_mentions(fm_id, g.author_handle, "post",
-                                             str(pid), data.get("body", ""))
+                                             str(pid), body)
         signal_earned += mpts
     return jsonify({"ok": True, "id": pid, "handle": g.author_handle,
                     "signal_earned": signal_earned, "mentioned": mentioned,
@@ -907,18 +1054,20 @@ def api_create_comment():
     hit = check_limit("comment", 30)
     if hit:
         return hit
-    data = g.signed_data or request.get_json(force=True, silent=True) or {}
+    data = g.signed_data or json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
     try:
         post_id = int(data.get("post_id", 0))
         parent_id = data.get("parent_id")
         if parent_id is not None:
             parent_id = int(parent_id)
-        body = data.get("body", "")
+        body = _fs(data, "body")
         cid = db.create_comment(post_id, parent_id,
                                 g.author_handle, body,
-                                image_url=data.get("image_url", ""),
+                                image_url=_fs(data, "image_url"),
                                 image_ai=bool(data.get("image_ai")),
-                                video_url=data.get("video_url", ""),
+                                video_url=_fs(data, "video_url"),
                                 video_ai=bool(data.get("video_ai")))
     except (ValueError, TypeError) as e:
         return api_error(str(e))
@@ -958,9 +1107,11 @@ def api_vote():
     hit = check_limit("vote", 120)
     if hit:
         return hit
-    data = g.signed_data or request.get_json(force=True, silent=True) or {}
+    data = g.signed_data or json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
     try:
-        score = db.vote(data.get("target_type", "post"),
+        score = db.vote(_fs(data, "target_type", "post"),
                         int(data.get("target_id", 0)),
                         g.author_handle, int(data.get("value", 1)))
     except (ValueError, TypeError) as e:
@@ -975,13 +1126,17 @@ def api_identity_register():
     hit = check_limit("identity_register", 10)
     if hit:
         return hit
-    data = request.get_json(force=True, silent=True) or {}
+    data = json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
     try:
-        ident = db.register_identity(data.get("handle", ""),
-                                     data.get("public_key", ""),
-                                     data.get("avatar_url", ""),
-                                     data.get("bio", ""),
-                                     invited_by=data.get("invited_by", ""))
+        # every field must be a string when present — non-string JSON
+        # (e.g. {"handle": 12345}) is a 400, not a 500 in .strip().
+        ident = db.register_identity(_fs(data, "handle"),
+                                     _fs(data, "public_key"),
+                                     _fs(data, "avatar_url"),
+                                     _fs(data, "bio"),
+                                     invited_by=_fs(data, "invited_by"))
     except ValueError as e:
         return api_error(str(e))
     return jsonify({"ok": True, **ident})
@@ -1000,17 +1155,19 @@ def api_identity_update():
     hit = check_limit("identity_update", 30)
     if hit:
         return hit
-    data = request.get_json(force=True, silent=True) or {}
+    data = json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
     try:
         ident = verify_signed_body(data, db, expected_action="identity_update")
     except IdentityError as e:
         return api_error(f"musefm-v1 auth failed: {e}", 401)
     try:
         db.update_identity(ident["fm_id"],
-                           avatar_url=data.get("avatar_url"),
-                           bio=data.get("bio"),
-                           visibility=data.get("visibility"),
-                           human_handle=data.get("human_handle"))
+                           avatar_url=_fs(data, "avatar_url", None),
+                           bio=_fs(data, "bio", None),
+                           visibility=_fs(data, "visibility", None),
+                           human_handle=_fs(data, "human_handle", None))
     except ValueError as e:
         return api_error(str(e))
     profile = db.public_profile(ident["fm_id"])
@@ -1031,7 +1188,9 @@ def api_heartbeat():
     hit = check_limit("heartbeat", 10)
     if hit:
         return hit
-    data = request.get_json(force=True, silent=True) or {}
+    data = json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
     try:
         ident = verify_signed_body(data, db, expected_action="heartbeat")
     except IdentityError as e:
@@ -1089,7 +1248,9 @@ def api_invite_code():
         if err:
             return err
     else:
-        data = request.get_json(force=True, silent=True) or {}
+        data = json_body()
+        if not isinstance(data, dict):
+            return data  # 400: JSON body must be an object
         try:
             ident = verify_signed_body(data, db, expected_action="invite_code")
         except IdentityError as e:
@@ -1122,8 +1283,10 @@ def api_challenges_settle():
     """Settle a completed ISO week (default: last completed week). Highest-
     score thread and reply win — no human judging, ties break earliest.
     Idempotent: settling twice never double-pays."""
-    data = request.get_json(force=True, silent=True) or {}
-    week_id = (data.get("week_id") or "").strip()
+    data = json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
+    week_id = _fs(data, "week_id").strip()
     if not week_id:
         week_id = challenge_week_id(time.time() - 7 * 86400)
     try:
@@ -1162,7 +1325,9 @@ def api_reengagement_nudges():
 def api_reengagement_opt():
     """Signed. Opt in/out of the public calling-all mention in the weekly
     roundup thread. Default ON for registered identities."""
-    data = request.get_json(force=True, silent=True) or {}
+    data = json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
     try:
         ident = verify_signed_body(data, db, expected_action="reengagement_opt")
     except IdentityError as e:
@@ -1246,15 +1411,17 @@ def api_pet_rules():
 def api_pet_adopt():
     """Signed. Adopt one Tidepal: {"species": "<key>", "name": "<name>"}.
     One pet per identity; names are 2–24 chars and profanity-filtered."""
-    data = request.get_json(force=True, silent=True) or {}
+    data = json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
     try:
         ident = verify_signed_body(data, db, expected_action="pet_adopt")
     except IdentityError as e:
         return api_error(f"musefm-v1 auth failed: {e}", 401)
     try:
         pet = adopt(db, ident["fm_id"], ident["handle"],
-                    (data.get("species") or "").strip(),
-                    data.get("name", ""))
+                    _fs(data, "species").strip(),
+                    _fs(data, "name"))
     except ValueError as e:
         return api_error(str(e))
     return jsonify({"ok": True, "pet": pet_status(db, ident["fm_id"])})
@@ -1263,13 +1430,15 @@ def api_pet_adopt():
 @app.route("/api/pets/rename", methods=["POST"])
 def api_pet_rename():
     """Signed. Rename your Tidepal: {"name": "<name>"}. Same naming rules."""
-    data = request.get_json(force=True, silent=True) or {}
+    data = json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
     try:
         ident = verify_signed_body(data, db, expected_action="pet_rename")
     except IdentityError as e:
         return api_error(f"musefm-v1 auth failed: {e}", 401)
     try:
-        rename_pet(db, ident["fm_id"], data.get("name", ""))
+        rename_pet(db, ident["fm_id"], _fs(data, "name"))
     except ValueError as e:
         return api_error(str(e))
     return jsonify({"ok": True, "pet": pet_status(db, ident["fm_id"])})
@@ -1358,15 +1527,17 @@ def api_shop_balance_handle(handle):
 def api_shop_buy():
     """Signed. Buy a shop item: {"item": "<key>", "idempotency_key": "<opt>"}.
     Idempotent — a double-tap can never double-charge."""
-    data = request.get_json(force=True, silent=True) or {}
+    data = json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
     try:
         ident = verify_signed_body(data, db, expected_action="shop_buy")
     except IdentityError as e:
         return api_error(f"musefm-v1 auth failed: {e}", 401)
     try:
         res = shopmod.buy(db, ident["fm_id"],
-                          (data.get("item") or "").strip(),
-                          data.get("idempotency_key"))
+                          _fs(data, "item").strip(),
+                          _fs(data, "idempotency_key", None))
     except ValueError as e:
         msg = str(e)
         code = 402 if msg.startswith("insufficient") else 400
@@ -1378,14 +1549,16 @@ def api_shop_buy():
 @app.route("/api/shop/equip", methods=["POST"])
 def api_shop_equip():
     """Signed. Switch to another owned accessory: {"item": "<key>"}."""
-    data = request.get_json(force=True, silent=True) or {}
+    data = json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
     try:
         ident = verify_signed_body(data, db, expected_action="shop_equip")
     except IdentityError as e:
         return api_error(f"musefm-v1 auth failed: {e}", 401)
     try:
         equipped = shopmod.equip(db, ident["fm_id"],
-                                 (data.get("item") or "").strip())
+                                 _fs(data, "item").strip())
     except ValueError as e:
         return api_error(str(e))
     return jsonify({"ok": True, "equipped": equipped,
@@ -1401,9 +1574,11 @@ def api_react():
     hit = check_limit("react", 120)
     if hit:
         return hit
-    data = g.signed_data or request.get_json(force=True, silent=True) or {}
-    target_type = data.get("target_type", "post")
-    emoji = data.get("emoji", "")
+    data = g.signed_data or json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
+    target_type = _fs(data, "target_type", "post")
+    emoji = _fs(data, "emoji")
     try:
         target_id = int(data.get("target_id", 0))
         counts = db.react(target_type, target_id,
@@ -1446,11 +1621,13 @@ def api_fb_react():
     hit = check_limit("fb_react", 120)
     if hit:
         return hit
-    data = g.signed_data or request.get_json(force=True, silent=True) or {}
-    reaction = (data.get("reaction", "") or "").strip().lower()
+    data = g.signed_data or json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
+    reaction = _fs(data, "reaction").strip().lower()
     try:
         action, counts = fb_reactions.fb_react(
-            db, data.get("target_type", "post"),
+            db, _fs(data, "target_type", "post"),
             int(data.get("target_id", 0)),
             g.author_identity["fm_id"] if g.author_identity
             else "agent:" + g.author_handle,
@@ -1473,12 +1650,20 @@ def fb_react_web():
         return hit
     want_json = (request.is_json
                  or "application/json" in (request.headers.get("Accept") or ""))
-    data = request.get_json(force=True, silent=True) if request.is_json else request.form
-    handle = ((data.get("handle") or "").strip() or "anon")
-    reaction = ((data.get("reaction") or "").strip().lower())
+    if request.is_json:
+        data = json_body()
+        if not isinstance(data, dict):
+            return data  # 400: JSON body must be an object
+    else:
+        data = request.form
+    handle = ((_fs(data, "handle", "") or "").strip() or "anon")
+    blocked = _web_handle_blocked(data.get("handle", ""))
+    if blocked:
+        return blocked
+    reaction = (_fs(data, "reaction", "").strip().lower())
     try:
         action, counts = fb_reactions.fb_react(
-            db, data.get("target_type") or "post",
+            db, _fs(data, "target_type", "post") or "post",
             int(data.get("target_id") or 0),
             "web:" + handle, handle, reaction)
     except (ValueError, TypeError) as e:
@@ -1548,7 +1733,9 @@ def api_notifications_read():
     hit = check_limit("notif_read", 60)
     if hit:
         return hit
-    data = request.get_json(force=True, silent=True) or {}
+    data = json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
     try:
         ident = verify_signed_body(data, db, expected_action="notifications_read")
     except IdentityError as e:
@@ -1574,16 +1761,18 @@ def api_claim_human():
     hit = check_limit("claim_human", 5)
     if hit:
         return hit
-    data = request.get_json(force=True, silent=True) or {}
-    handle = (data.get("handle") or "").strip()
+    data = json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
+    handle = _fs(data, "handle").strip()
     priv = Ed25519PrivateKey.generate()
     priv_b64 = b64u_encode(priv.private_bytes_raw())
     pub_b64 = b64u_encode(priv.public_key().public_bytes_raw())
     try:
         ident = db.register_identity(handle, pub_b64,
-                                     data.get("avatar_url", ""),
-                                     data.get("bio", ""),
-                                     invited_by=data.get("invited_by", ""))
+                                     _fs(data, "avatar_url"),
+                                     _fs(data, "bio"),
+                                     invited_by=_fs(data, "invited_by"))
     except ValueError as e:
         return api_error(str(e))
     return jsonify({"ok": True, **ident, "private_key": priv_b64,
@@ -1666,7 +1855,7 @@ def api_upload_audio():
     })
 
 
-@app.route("/audio/uploads/<int:uid>")
+@app.route("/audio/uploads/<sqlite_int:uid>")
 def audio_upload(uid):
     u = db.get_upload(uid)
     if not u or ".." in (u["stored_path"] or ""):
@@ -1766,7 +1955,7 @@ def api_upload_image():
     })
 
 
-@app.route("/img/<int:uid>")
+@app.route("/img/<sqlite_int:uid>")
 def serve_image(uid):
     u = ai_images.get_image_upload(db, uid)
     if not u or ".." in (u["stored_path"] or ""):
@@ -1816,8 +2005,8 @@ def api_upload_video():
         return api_error(str(e))
     # Title/description ride in the signed body, so they are provenance-bound
     # like ai_generated: the uploader's signature covers them.
-    title = (data.get("title") or "").strip()[:120]
-    description = (data.get("description") or "").strip()[:500]
+    title = _fs(data, "title").strip()[:120]
+    description = _fs(data, "description").strip()[:500]
     try:
         uid, _stored = videos.create_video_upload(
             db, ident["fm_id"], ident["handle"], f.filename, raw, UPLOAD_DIR,
@@ -1836,7 +2025,7 @@ def api_upload_video():
     })
 
 
-@app.route("/api/video/<int:uid>/tag", methods=["POST"])
+@app.route("/api/video/<sqlite_int:uid>/tag", methods=["POST"])
 def api_video_tag(uid):
     """Signed series tag for an agent's own video upload.
 
@@ -1849,7 +2038,9 @@ def api_video_tag(uid):
     hit = check_limit("video_tag", 30)
     if hit:
         return hit
-    data = request.get_json(force=True, silent=True) or {}
+    data = json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
     try:
         ident = verify_signed_body(data, db, expected_action="upload")
     except IdentityError as e:
@@ -1859,14 +2050,14 @@ def api_video_tag(uid):
         return api_error("no such video upload", 404)
     if u["fm_id"] != ident["fm_id"]:
         return api_error("only the uploading identity may tag its video", 403)
-    series = (data.get("series") or "").strip().lower()
+    series = _fs(data, "series").strip().lower()
     if series not in ("", "musefm"):
         return api_error("unknown series tag", 400)
     videos.set_series(db, uid, series)
     # The uploading identity may also (re)set its video's title/description —
     # both ride in the signed body, so they are provenance-bound.
-    new_title = (data.get("title") or "").strip()[:120]
-    new_desc = (data.get("description") or "").strip()[:500]
+    new_title = _fs(data, "title").strip()[:120]
+    new_desc = _fs(data, "description").strip()[:500]
     if "title" in data or "description" in data:
         videos.set_video_meta(db, uid, title=new_title or None,
                               description=new_desc or None)
@@ -1875,7 +2066,7 @@ def api_video_tag(uid):
                     "watch_url": url_for("watch_video", uid=uid)})
 
 
-@app.route("/api/video/<int:uid>/delete", methods=["POST"])
+@app.route("/api/video/<sqlite_int:uid>/delete", methods=["POST"])
 def api_video_delete(uid):
     """Signed delete for an agent's own video upload.
 
@@ -1886,7 +2077,9 @@ def api_video_delete(uid):
     hit = check_limit("video_delete", 10)
     if hit:
         return hit
-    data = request.get_json(force=True, silent=True) or {}
+    data = json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
     try:
         ident = verify_signed_body(data, db, expected_action="delete_video")
     except IdentityError as e:
@@ -1916,12 +2109,14 @@ def api_photo_create():
     hit = check_limit("photo_create", 10)
     if hit:
         return hit
-    data = request.get_json(force=True, silent=True) or {}
+    data = json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
     try:
         ident = verify_signed_body(data, db, expected_action="upload")
     except IdentityError as e:
         return api_error(f"musefm-v1 auth failed: {e}", 401)
-    image_url = (data.get("image_url") or "").strip()
+    image_url = _fs(data, "image_url").strip()
     if not image_url.startswith("/img/") or not image_url[5:].isdigit():
         return api_error("image_url must be your /img/<id> upload from /api/upload/image")
     img = ai_images.get_image_upload(db, int(image_url[5:]))
@@ -1929,8 +2124,8 @@ def api_photo_create():
         return api_error("no such image upload", 404)
     if img["fm_id"] != ident["fm_id"]:
         return api_error("only the uploading identity may publish its image", 403)
-    title = (data.get("title") or "").strip()
-    caption = (data.get("caption") or "").strip()
+    title = _fs(data, "title").strip()
+    caption = _fs(data, "caption").strip()
     try:
         pid = db.add_photo(title, caption, "photos/pending", "", ident["handle"])
         # read via UPLOAD_DIR: the same dir /api/upload/image wrote the bytes to
@@ -1954,7 +2149,7 @@ def api_photo_create():
                     "photo_url": url_for("photo_page", pid=pid)})
 
 
-@app.route("/video/<int:uid>")
+@app.route("/video/<sqlite_int:uid>")
 def serve_video(uid):
     u = videos.get_video_upload(db, uid)
     if not u or ".." in (u["stored_path"] or ""):
@@ -2075,7 +2270,7 @@ def shorts_page():
                            handle=_musefm_handle())
 
 
-@app.route("/watch/<int:uid>")
+@app.route("/watch/<sqlite_int:uid>")
 def watch_video(uid):
     """Long-form theater view for a single video."""
     u = videos.get_video_upload(db, uid)
@@ -2104,7 +2299,7 @@ def watch_video(uid):
                                      u["duration_secs"] < videos.SHORTS_MAX_SECS))
 
 
-@app.route("/gif/<int:uid>")
+@app.route("/gif/<sqlite_int:uid>")
 def serve_gif(uid):
     u = gifs.get_gif_upload(db, uid)
     if not u or ".." in (u["stored_path"] or ""):
@@ -2230,7 +2425,11 @@ if __name__ == "__main__":
     p.add_argument("--db", default=DB_PATH)
     args = p.parse_args()
     if args.db != DB_PATH:
-        db = Database(args.db)
+        # Re-bind EVERYTHING to the alternate database: a bare
+        # Database(args.db) skips all auxiliary schema ensures, so fresh
+        # --db files were missing uploads/gif/video/fb_reaction/media
+        # tables (uploads 500'd). init_db runs the full ensure sequence.
+        db = init_db(args.db)
     print(f"[townsquare] db={args.db} port={args.port} "
           f"agent_key={'set' if AGENT_KEY else 'MISSING'}")
     app.run(host="0.0.0.0", port=args.port, threaded=True)

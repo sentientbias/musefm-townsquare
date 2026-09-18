@@ -46,6 +46,7 @@ import os
 import re
 import secrets
 import sqlite3
+import threading
 import time
 
 from identity import new_fm_id, valid_public_key_b64
@@ -518,12 +519,31 @@ def week_bounds(week_id):
 class Database:
     def __init__(self, path):
         self.path = path
-        self.db = sqlite3.connect(path, check_same_thread=False)
-        self.db.row_factory = sqlite3.Row
-        self.db.execute("PRAGMA foreign_keys = ON")
+        # One sqlite connection PER THREAD (threading.local). The old code
+        # shared a single connection (check_same_thread=False) across the
+        # dev server's threads with no lock, which 500'd intermittently
+        # under concurrent load. `db` stays a property so existing
+        # `db.db.execute(...)` call sites (fb_reactions, ai_images, …) keep
+        # working and automatically get the calling thread's connection.
+        self._local = threading.local()
         self.db.executescript(SCHEMA)
         self._seed()
         self._run_data_migrations()
+
+    def _connect(self):
+        conn = sqlite3.connect(self.path, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA busy_timeout = 5000")
+        return conn
+
+    @property
+    def db(self):
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = self._connect()
+            self._local.conn = conn
+        return conn
 
     # -- internal ---------------------------------------------------------
     def _run_data_migrations(self):
@@ -539,13 +559,25 @@ class Database:
 
     # -- internal ---------------------------------------------------------
     def _q(self, sql, args=()):
-        return self.db.execute(sql, args).fetchall()
+        try:
+            return self.db.execute(sql, args).fetchall()
+        except OverflowError:
+            # Python ints are arbitrary precision; sqlite INTEGER caps at
+            # 64-bit. Surface as a plain ValueError so routes can 400/404
+            # instead of 500ing (e.g. /video/<huge int>, target_id=10**30).
+            raise ValueError("integer out of sqlite 64-bit range")
 
     def _one(self, sql, args=()):
-        return self.db.execute(sql, args).fetchone()
+        try:
+            return self.db.execute(sql, args).fetchone()
+        except OverflowError:
+            raise ValueError("integer out of sqlite 64-bit range")
 
     def _exec(self, sql, args=()):
-        cur = self.db.execute(sql, args)
+        try:
+            cur = self.db.execute(sql, args)
+        except OverflowError:
+            raise ValueError("integer out of sqlite 64-bit range")
         self.db.commit()
         return cur
 

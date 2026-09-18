@@ -81,7 +81,7 @@ _ip_counter = [0]
 
 def fresh_ip():
     _ip_counter[0] += 1
-    return {"X-Forwarded-For": "10.99.0.%d" % _ip_counter[0]}
+    return {"REMOTE_ADDR": "10.99.0.%d" % _ip_counter[0]}
 
 
 def post_video(client, priv, fm_id, raw, duration=None, ai="0", filename="clip.mp4"):
@@ -91,7 +91,7 @@ def post_video(client, priv, fm_id, raw, duration=None, ai="0", filename="clip.m
     data = signed_body(priv, "upload", fm_id, **kw)
     data["video"] = (io.BytesIO(raw), filename, "video/mp4")
     return client.post("/api/upload/video", data=data,
-                       content_type="multipart/form-data", headers=fresh_ip())
+                       content_type="multipart/form-data", environ_base=fresh_ip())
 
 
 def main():
@@ -186,7 +186,7 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
     data["duration_secs"] = "600"
     data["video"] = (io.BytesIO(raw), "clip.mp4", "video/mp4")
     r = client.post("/api/upload/video", data=data,
-                    content_type="multipart/form-data", headers=fresh_ip())
+                    content_type="multipart/form-data", environ_base=fresh_ip())
     check("tampered duration_secs -> 401", r.status_code == 401,
           str(r.status_code))
 
@@ -233,12 +233,12 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
     r = client.post("/api/forum/post", json=signed_body(
         priv, "post", fm_id, community="lobby", title="my short",
         body="watch this", flair="discussion",
-        video_url="/video/%d" % uid_short, video_ai=True), headers=fresh_ip())
+        video_url="/video/%d" % uid_short, video_ai=True), environ_base=fresh_ip())
     pid = r.get_json()["id"]
     check("post with video -> 200", r.status_code == 200, str(r.status_code))
     r = client.post("/api/forum/comment", json=signed_body(
         priv, "comment", fm_id, post_id=pid, body="first!",
-        video_url="/video/%d" % uid_unk, video_ai=False), headers=fresh_ip())
+        video_url="/video/%d" % uid_unk, video_ai=False), environ_base=fresh_ip())
     check("comment with video -> 200", r.status_code == 200, str(r.status_code))
 
     r = client.get("/api/shorts?limit=50")
@@ -276,10 +276,10 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
     r = client.post("/api/forum/post", json=signed_body(
         priv, "post", fm_id, community="lobby", title="my short",
         body="watch this", flair="discussion",
-        video_url="/video/%d" % uid_short, video_ai=True), headers=fresh_ip())
+        video_url="/video/%d" % uid_short, video_ai=True), environ_base=fresh_ip())
     pid = r.get_json()["id"]
     r = client.post("/api/forum/comment", json=signed_body(
-        priv, "comment", fm_id, post_id=pid, body="so good"), headers=fresh_ip())
+        priv, "comment", fm_id, post_id=pid, body="so good"), environ_base=fresh_ip())
     assert r.status_code == 200
 
     print("== /watch/<uid> ==")
@@ -309,7 +309,7 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
             "video_duration": "45",
             "video_file": (io.BytesIO(make_mp4(300)), "v.mp4", "video/mp4")}
     r = client.post("/submit", data=form, content_type="multipart/form-data",
-                    headers=fresh_ip(), follow_redirects=False)
+                    environ_base=fresh_ip(), follow_redirects=False)
     check("form submit with duration -> redirect",
           r.status_code in (301, 302, 303), str(r.status_code))
     posts = [pp for pp in appmod.db.list_posts("lobby", sort="new", limit=50)
@@ -322,7 +322,7 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
     form["video_duration"] = "0"
     form["video_file"] = (io.BytesIO(make_mp4(300)), "v.mp4", "video/mp4")
     r = client.post("/submit", data=form, content_type="multipart/form-data",
-                    headers=fresh_ip(), follow_redirects=False)
+                    environ_base=fresh_ip(), follow_redirects=False)
     check("form duration 0 -> 400", r.status_code == 400, str(r.status_code))
 
     print("== anchored Shorts feed (?video=) ==")

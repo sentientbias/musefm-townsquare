@@ -217,6 +217,20 @@ def buy(db, fm_id, item, idempotency_key=None):
     one_time = spec["kind"] in ("accessory", "bypass")
     ref_id = item if one_time else (idempotency_key or
                                     f"rename_token:{now()}")
+    # Idempotent retry BEFORE the funds check: a retry that arrives after
+    # a successful purchase must return the original success, not 402 —
+    # the first purchase already reduced the spendable balance.
+    # (The IntegrityError fallback below still covers a lost race with an
+    # in-flight twin.)
+    prior = db._one(
+        "SELECT item FROM shop_purchases WHERE fm_id=? AND ref_id=?",
+        (fm_id, ref_id))
+    if prior:
+        return {"charged": 0, "already_owned": True,
+                "spendable": spendable(db, fm_id),
+                "item": prior["item"],
+                "name": items.get(prior["item"], {}).get("name",
+                                                         prior["item"])}
 
     if one_time and owns(db, fm_id, item):
         return {"charged": 0, "already_owned": True,

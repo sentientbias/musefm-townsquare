@@ -81,15 +81,17 @@ _ip_counter = [0]
 
 def fresh_ip():
     _ip_counter[0] += 1
-    return {"X-Forwarded-For": "10.88.0.%d" % _ip_counter[0]}
+    return {"REMOTE_ADDR": "10.88.0.%d" % _ip_counter[0]}
 
 
-def post_video(client, fields, raw, filename="clip.mp4", headers=None):
+def post_video(client, fields, raw, filename="clip.mp4", headers=None,
+               environ_base=None):
     data = dict(fields)
     data["video"] = (io.BytesIO(raw), filename, "video/mp4")
     return client.post("/api/upload/video", data=data,
                        content_type="multipart/form-data",
-                       headers=headers or {})
+                       headers=headers or {},
+                       environ_base=environ_base or {})
 
 
 def main():
@@ -193,7 +195,7 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
     # webm upload
     wraw = make_webm(500)
     r = post_video(client, fields(wraw, ai="0"), wraw, filename="clip.webm",
-                   headers=fresh_ip())
+                   environ_base=fresh_ip())
     jw = r.get_json()
     check("webm upload -> 200", r.status_code == 200, str(r.status_code))
     uw = videos.get_video_upload(appmod.db, jw["id"])
@@ -203,23 +205,23 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
     # tamper with the signed flag -> signature must fail
     tampered = fields(raw, ai="1")
     tampered["ai_generated"] = "0"
-    r = post_video(client, tampered, raw, headers=fresh_ip())
+    r = post_video(client, tampered, raw, environ_base=fresh_ip())
     check("tampered ai_generated -> 401", r.status_code == 401, str(r.status_code))
 
-    r = post_video(client, fields(raw, sha="0" * 64), raw, headers=fresh_ip())
+    r = post_video(client, fields(raw, sha="0" * 64), raw, environ_base=fresh_ip())
     check("sha256 mismatch -> 401", r.status_code == 401, str(r.status_code))
 
     notvid = b"\x89PNG\r\n\x1a\n" + bytes(100)
     r = post_video(client, fields(notvid), notvid, filename="evil.mp4",
-                   headers=fresh_ip())
+                   environ_base=fresh_ip())
     check("png bytes as .mp4 rejected", r.status_code == 400, str(r.status_code))
 
     big = b"\x00\x00\x00\x18" + b"ftyp" + bytes(videos.MAX_VIDEO_BYTES + 100)
-    r = post_video(client, fields(big), big, headers=fresh_ip())
+    r = post_video(client, fields(big), big, environ_base=fresh_ip())
     check("oversize video -> 413", r.status_code == 413, str(r.status_code))
 
     r = client.post("/api/upload/video", data=fields(raw),
-                    content_type="multipart/form-data", headers=fresh_ip())
+                    content_type="multipart/form-data", environ_base=fresh_ip())
     check("missing file -> 400", r.status_code == 400, str(r.status_code))
 
     print("== GET /video/<uid> ==")
@@ -239,7 +241,7 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
         rr = post_video(client, signed_body(
             priv2, "upload", fm2,
             file_sha256=hashlib.sha256(raw).hexdigest(), ai_generated="0"),
-            raw, filename="x.mp4", headers=fresh_ip())
+            raw, filename="x.mp4", environ_base=fresh_ip())
         last = rr
         if rr.status_code == 200:
             ok += 1
@@ -250,7 +252,7 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
     r = client.post("/api/forum/post", json=signed_body(
         priv, "post", fm_id, community="lobby", title="muse clip",
         body="made this", flair="discussion",
-        video_url="/video/%d" % uid, video_ai=True), headers=fresh_ip())
+        video_url="/video/%d" % uid, video_ai=True), environ_base=fresh_ip())
     d = r.get_json()
     check("api post with video_url -> 200", r.status_code == 200, str(d))
     pid = d["id"]
@@ -270,7 +272,7 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
     r = client.post("/api/forum/post", json=signed_body(
         priv, "post", fm_id, community="lobby", title="plain clip",
         body="no ai", flair="discussion",
-        video_url=jw["video_url"], video_ai=False), headers=fresh_ip())
+        video_url=jw["video_url"], video_ai=False), environ_base=fresh_ip())
     pid2 = r.get_json()["id"]
     html2 = client.get("/c/lobby/post/%d" % pid2).get_data(as_text=True)
     check("no badge when unflagged",
@@ -280,14 +282,14 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
     r = client.post("/api/forum/post", json=signed_body(
         priv, "post", fm_id, community="lobby", title="evil",
         body="x", flair="discussion",
-        video_url="https://evil.example.com/x.mp4"), headers=fresh_ip())
+        video_url="https://evil.example.com/x.mp4"), environ_base=fresh_ip())
     check("external video_url rejected by api post", r.status_code == 400,
           str(r.status_code))
 
     print("== video on comment + badge rendering ==")
     r = client.post("/api/forum/comment", json=signed_body(
         priv, "comment", fm_id, post_id=pid, body="my take",
-        video_url="/video/%d" % uid, video_ai=True), headers=fresh_ip())
+        video_url="/video/%d" % uid, video_ai=True), environ_base=fresh_ip())
     cd = r.get_json()
     check("api comment with video -> 200", r.status_code == 200, str(cd))
     html3 = client.get("/c/lobby/post/%d" % pid).get_data(as_text=True)
@@ -295,7 +297,7 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
           str(html3.count("AI-generated")))
     r = client.post("/api/forum/comment", json=signed_body(
         priv, "comment", fm_id, post_id=pid, body="plain reply"),
-        headers=fresh_ip())
+        environ_base=fresh_ip())
     check("comment without video still works", r.status_code == 200, str(r.status_code))
 
     print("== human form comment with video ==")
@@ -304,7 +306,7 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
             "video_file": (io.BytesIO(make_webm(300)), "clip.webm", "video/webm")}
     r = client.post("/post/%d/comment" % pid, data=form,
                     content_type="multipart/form-data",
-                    headers=fresh_ip(), follow_redirects=False)
+                    environ_base=fresh_ip(), follow_redirects=False)
     check("form comment with video -> redirect", r.status_code in (301, 302, 303),
           str(r.status_code))
     tree = appmod.db.comment_tree(pid)
@@ -320,7 +322,7 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
              "ai_generated_video": "1",
              "video_file": (io.BytesIO(make_mp4(300)), "v.mp4", "video/mp4")}
     r = client.post("/submit", data=form2, content_type="multipart/form-data",
-                    headers=fresh_ip(), follow_redirects=False)
+                    environ_base=fresh_ip(), follow_redirects=False)
     check("form submit with video -> redirect", r.status_code in (301, 302, 303),
           str(r.status_code))
     posts = [pp for pp in appmod.db.list_posts("lobby", sort="new", limit=50)
