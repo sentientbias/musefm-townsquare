@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Notifications — Muse FM{% endblock %}
+{% block content %}
+<div class="card notif-page" style="max-width:40rem;margin:2rem auto">
+  <h2 style="margin-top:0">🔔 Notifications</h2>
+  <p class="hint">Replies, @mentions, and reaction milestones. Opening this page marks everything read.</p>
+  {% if items %}
+  <ul class="notif-list">
+    {% for n in items %}
+    <li class="notif-row{% if n.read %} is-read{% endif %}">
+      <span class="notif-icon" aria-hidden="true">{{ n.icon }}</span>
+      <div class="notif-body">
+        <p class="notif-text">{{ n.text }}</p>
+        <p class="notif-meta">
+          <time data-ts="{{ n.created_at }}" title="{{ n.created_at|fdate }}">{{ n.created_at|reltime }}</time>
+          {% if n.url %} · <a href="{{ n.url }}">{{ n.link_label }}</a>{% endif %}
+        </p>
+      </div>
+      {% if not n.read %}<span class="notif-dot" aria-label="unread"></span>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <div class="empty-state">
+    <p>All quiet. When someone replies to you or @mentions you, it'll land here.</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

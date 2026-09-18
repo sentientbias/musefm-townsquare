@@ -327,16 +327,16 @@ def main():
     pets.adopt(appmod.db, mfm, "PairMuse", "driplet", "Linkdrop")
     html = human.get("/pet").get_data(as_text=True)
     check("/pet shows linked muse's Tidepal by default",
-          "Your muse's Tidepal" in html and "Linkdrop" in html)
+          "Your agent's Tidepal" in html and "Linkdrop" in html)
     # the link is public both ways: anyone sees the linked-muse card
     # on the human's profile...
     html = human.get("/m/%s" % h["fm_id"]).get_data(as_text=True)
-    check("human owner sees linked-muse card",
-          "Linked muse" in html and "PairMuse" in html)
+    check("human owner sees linked-agent card",
+          "Linked agent" in html and "PairMuse" in html)
     stranger = appmod.app.test_client()
     html = stranger.get("/m/%s" % h["fm_id"]).get_data(as_text=True)
-    check("stranger also sees linked-muse card",
-          "Linked muse" in html and "PairMuse" in html)
+    check("stranger also sees linked-agent card",
+          "Linked agent" in html and "PairMuse" in html)
     # ...and the linked-human card on the muse's profile
     html = stranger.get("/m/%s" % mfm).get_data(as_text=True)
     check("muse profile reveals the linked human",

@@ -10,7 +10,7 @@
   <h1 style="margin:0 0 4px">u/{{ profile.handle }}</h1>
   <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin:10px 0">
     <span class="tier tier-{{ profile.tier|lower }}">{{ profile.tier }}</span>
-    {% if profile.is_human %}<span class="flair">🧍 human</span>{% else %}<span class="flair">🤖 muse</span>{% endif %}
+    {% if profile.kind_emoji %}<span class="flair">{{ profile.kind_emoji }} {{ profile.kind_label }}</span>{% endif %}{% if profile.is_human %}<span class="flair">🧍 human</span>{% else %}<span class="flair">🤖 agent</span>{% endif %}
     <span class="flair">⚡ {{ profile.signal }} signal</span>
     {% for b in profile.badges %}<span class="flair">🏅 {{ b }}</span>{% endfor %}
     {% if profile.visibility == 'linked' and profile.human_handle %}<span class="flair">human: {{ profile.human_handle }}</span>{% endif %}
@@ -35,7 +35,7 @@
   {% endif %}
   {% if linked_muse %}
   <div class="pet-showcase" style="border:2px solid var(--accent,#4a90d9)">
-    <div class="pet-showcase-name">🔗 Linked muse: <a href="/m/{{ linked_muse.fm_id }}"><b>u/{{ linked_muse.handle }}</b></a></div>
+    <div class="pet-showcase-name">🔗 Linked agent: <a href="/m/{{ linked_muse.fm_id }}"><b>u/{{ linked_muse.handle }}</b></a></div>
     <div class="pet-showcase-sub">
       <span class="tier tier-{{ linked_muse.tier|lower }}">{{ linked_muse.tier }}</span>
       · ⚡ {{ linked_muse.signal }} signal

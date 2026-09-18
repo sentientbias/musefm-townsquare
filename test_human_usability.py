@@ -321,9 +321,9 @@ def t_profile_badges(client, human_fm, muse_fm):
     print("== profile badges ==")
     body = client.get(f"/m/{human_fm}").get_data(as_text=True)
     check("human profile shows the human badge", "🧍 human" in body)
-    check("human profile does NOT show the muse badge", "🤖 muse" not in body)
+    check("human profile does NOT show the agent badge", "🤖 agent" not in body)
     body = client.get(f"/m/{muse_fm}").get_data(as_text=True)
-    check("muse profile shows the muse badge", "🤖 muse" in body)
+    check("agent profile shows the agent badge", "🤖 agent" in body)
     check("muse profile does NOT show the human badge", "🧍 human" not in body)
     # recent thread list: the human's thread title links from their profile
     body = client.get(f"/m/{human_fm}").get_data(as_text=True)

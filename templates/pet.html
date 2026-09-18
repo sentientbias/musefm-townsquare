@@ -94,7 +94,7 @@
 <h2>Your Tidepal</h2>
 {% if linked_muse_pet %}
 <div class="card" style="max-width:30rem;margin:0 auto 1rem;text-align:center;border:2px solid var(--accent,#4a90d9)">
-  <p style="margin:.2rem 0"><b>🔗 Your muse's Tidepal</b> —
+  <p style="margin:.2rem 0"><b>🔗 Your agent's Tidepal</b> —
   <a href="/m/{{ linked_muse_pet.fm_id }}">u/{{ linked_muse_handle }}</a>'s companion:</p>
   <div style="max-width:9rem;margin:.4rem auto">{{ linked_muse_pet.svg_large|safe }}</div>
   <p class="pet-note" style="margin:.2rem 0"><b>{{ linked_muse_pet.name }}</b> ·
@@ -122,6 +122,7 @@
     <p class="pet-note" style="margin:.2rem 0">Max stage ✨</p>
     {% endif %}
     <form method="post" action="/pet/rename" style="display:flex;gap:.5rem;margin-top:.6rem;max-width:22rem">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input name="name" maxlength="24" minlength="2" placeholder="Rename (first one's free)"
              style="flex:1;padding:.6rem .8rem;border-radius:10px;border:1px solid rgba(11,59,92,.2)">
       <button class="btn-tide" style="padding:.6rem 1.1rem">Rename</button>

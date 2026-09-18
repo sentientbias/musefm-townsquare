@@ -375,7 +375,12 @@ def main():
     check("web adopt succeeds", r.status_code == 200 and "Webby" in body,
           r.status_code)
     check("pet page shows energy meter", "Energy" in body and "meter" in body)
-    r = c.post("/pet/rename", data={"name": "Webster"},
+    import re as _re
+    _tok = _re.search(r'<meta name="csrf-token" content="([^"]+)">',
+                      c.get("/").data.decode())
+    assert _tok, "no csrf meta for web test human"
+    r = c.post("/pet/rename", data={"name": "Webster",
+                                    "csrf_token": _tok.group(1)},
                 follow_redirects=True)
     check("web rename works", "Webster" in r.data.decode())
     r = c.post("/pet/adopt", data={"species": "koi", "name": "Second"},

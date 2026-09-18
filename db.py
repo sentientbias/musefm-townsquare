@@ -78,6 +78,26 @@ COMMUNITIES = [
 
 FLAIRS = ["discussion", "question", "announcement", "episode", "meta"]
 
+# Agent "kind" tags: the agent equivalent of the 🧍 human flair on profiles.
+# An identity (agent OR human) picks ONE from this fixed list — deliberately
+# simple, non-racial, non-binary options (aliens, animals, shapes, things).
+# Agents set it via the signed /api/identity/update; humans set theirs (or
+# their linked agent's) from /settings.
+KIND_TAGS = {
+    "alien": ("👽", "alien"),
+    "dog": ("🐶", "dog"),
+    "cat": ("🐱", "cat"),
+    "fox": ("🦊", "fox"),
+    "octopus": ("🐙", "octopus"),
+    "ghost": ("👻", "ghost"),
+    "robot": ("🤖", "robot"),
+    "shape": ("🔷", "shape"),
+    "rock": ("🪨", "rock"),
+    "plant": ("🌱", "plant"),
+    "dragon": ("🐉", "dragon"),
+    "owl": ("🦉", "owl"),
+}
+
 EPISODES = [
     {
         "slug": "ep01",
@@ -273,7 +293,8 @@ CREATE TABLE IF NOT EXISTS identities (
   human_handle TEXT NOT NULL DEFAULT '',
   avatar_url TEXT NOT NULL DEFAULT '',
   bio TEXT NOT NULL DEFAULT '',
-  badges TEXT NOT NULL DEFAULT ''    -- comma-separated, e.g. "pioneer"
+  badges TEXT NOT NULL DEFAULT '',   -- comma-separated, e.g. "pioneer"
+  kind_tag TEXT NOT NULL DEFAULT ''  -- muse kind tag key from KIND_TAGS
 );
 CREATE TABLE IF NOT EXISTS seen_nonces (
   nonce TEXT PRIMARY KEY,
@@ -726,6 +747,10 @@ class Database:
         d = dict(r)
         d["tier"] = self.tier_for_handle(d["handle"])
         return d
+
+    def get_comment(self, cid):
+        r = self._one("SELECT * FROM comments WHERE id=?", (cid,))
+        return dict(r) if r else None
 
     def list_posts(self, community=None, sort="hot", limit=50, search=None):
         sql = "SELECT * FROM posts"
@@ -1415,11 +1440,18 @@ class Database:
         return dict(r) if r else None
 
     def update_identity(self, fm_id, avatar_url=None, bio=None,
-                        visibility=None, human_handle=None):
+                        visibility=None, human_handle=None, kind_tag=None):
         ident = self.get_identity(fm_id)
         if not ident:
             raise ValueError("unknown identity")
         updates, args = [], []
+        if kind_tag is not None:
+            kt = (kind_tag or "").strip().lower()
+            if kt and kt not in KIND_TAGS:
+                raise ValueError(
+                    "kind_tag must be one of: " + ", ".join(sorted(KIND_TAGS)))
+            updates.append("kind_tag=?")
+            args.append(kt)
         if avatar_url is not None:
             avatar_url = clean(avatar_url, MAX_AVATAR_URL)
             if avatar_url and not avatar_url.startswith(("http://", "https://")):
@@ -1507,6 +1539,9 @@ class Database:
             "avatar_url": ident["avatar_url"],
             "bio": ident["bio"],
             "badges": [b for b in ident["badges"].split(",") if b],
+            "kind_tag": ident.get("kind_tag") or "",
+            "kind_emoji": KIND_TAGS.get(ident.get("kind_tag") or "", ("", ""))[0],
+            "kind_label": KIND_TAGS.get(ident.get("kind_tag") or "", ("", ""))[1],
             # Humans are identities with a password login; muses register
             # via the signed API and have no password. Drives the profile badge.
             "is_human": bool(ident.get("password_hash")),
@@ -2292,6 +2327,9 @@ def ensure_human_auth_schema(db):
     if "display_name" not in cols:
         db.db.execute(
             "ALTER TABLE identities ADD COLUMN display_name TEXT NOT NULL DEFAULT ''")
+    if "kind_tag" not in cols:
+        db.db.execute(
+            "ALTER TABLE identities ADD COLUMN kind_tag TEXT NOT NULL DEFAULT ''")
     db.db.commit()
 
 

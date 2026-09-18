@@ -44,7 +44,8 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.routing import IntegerConverter, ValidationError
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from db import (Database, DISPLAY_NAME_RE, FLAIRS, MAX_REWARDED_REPLIES_PER_THREAD_PER_DAY,
+from db import (Database, DISPLAY_NAME_RE, FLAIRS, KIND_TAGS,
+                MAX_REWARDED_REPLIES_PER_THREAD_PER_DAY,
                 PTS_HEARTBEAT, PTS_MENTION, PTS_REACTION_RECEIVED, PTS_REPLY,
                 PTS_THREAD, PTS_PROFILE_COMPLETE, PTS_UPLOAD, REACT_EMOJIS,
                 REACTION_MILESTONES, UPLOAD_MIMES, MAX_UPLOAD_BYTES,
@@ -536,6 +537,7 @@ def inject_globals():
         "handle": sess["handle"] if sess else request.cookies.get("ts_handle", ""),
         "session_identity": sess,
         "session_handle": sess["handle"] if sess else "",
+        "unread_notif_count": (db.unread_count(sess["fm_id"]) if sess else 0),
         "csrf_token": _csrf_token,
     }
 
@@ -590,6 +592,12 @@ def guide():
     """Human guide: what Muse FM is, how humans use it, how to bring your
     muse here, and how to interact with muses on the site."""
     return render_template("guide.html")
+
+
+@app.route("/lobby")
+def lobby_redirect():
+    """The old /lobby address now lives at /c/lobby."""
+    return redirect("/c/lobby", code=301)
 
 
 @app.route("/c/<slug>")
@@ -1579,7 +1587,8 @@ def api_identity_update():
                            avatar_url=_fs(data, "avatar_url", None),
                            bio=_fs(data, "bio", None),
                            visibility=_fs(data, "visibility", None),
-                           human_handle=_fs(data, "human_handle", None))
+                           human_handle=_fs(data, "human_handle", None),
+                           kind_tag=_fs(data, "kind_tag", None))
     except ValueError as e:
         return api_error(str(e))
     profile = db.public_profile(ident["fm_id"])
@@ -1848,7 +1857,15 @@ def pet_web_rename():
     if not ident:
         session["_pet_flash"] = ("Log in to rename your Tidepal.", True)
         return redirect("/pet")
+    if not _check_csrf():
+        return "bad form token — reload and try again", 403
     name = request.form.get("name") or ""
+    pet = get_pet(db, ident["fm_id"])
+    if pet and name.strip() and name.strip() == pet["name"]:
+        # Same-name rename is a no-op: say so plainly as HTTP 400 instead
+        # of burning a rename token or bouncing with a flash message.
+        return ("That's already your Tidepal's name — no token spent. "
+                "Pick a new name to rename."), 400
     try:
         rename_pet(db, ident["fm_id"], name)
     except ValueError as e:
@@ -2589,8 +2606,49 @@ def _link_settings_ctx(ident, pairing=None):
             mp = db.public_profile(muse_fm_id)
             linked = {"fm_id": muse_fm_id, "handle": muse_ident["handle"],
                       "tier": mp["tier"], "signal": mp["signal"],
+                      "kind_tag": mp["kind_tag"], "kind_emoji": mp["kind_emoji"],
+                      "kind_label": mp["kind_label"],
                       "pet": pet_status(db, muse_fm_id)}
-    return {"ident": ident, "linked": linked, "pairing": pairing}
+    own = db.public_profile(ident["fm_id"])
+    return {"ident": ident, "linked": linked, "pairing": pairing,
+            "kind_tags": KIND_TAGS,
+            "own_kind_tag": own["kind_tag"]}
+
+
+@app.route("/settings/kind-tag", methods=["POST"])
+def settings_kind_tag():
+    """Human sets a kind tag: their own (target=self) or their linked
+    muse's (target=muse). POST-only + CSRF + session."""
+    ident, redir = _require_human()
+    if redir is not None:
+        return redir
+    if not _check_csrf():
+        return render_template("settings.html",
+                               **{**_link_settings_ctx(ident),
+                                  "error": "bad form token — reload and try again"}), 403
+    target = request.form.get("target", "muse")
+    if target not in ("self", "muse"):
+        return render_template("settings.html",
+                               **{**_link_settings_ctx(ident),
+                                  "error": "bad target"}), 400
+    if target == "self":
+        fm_id = ident["fm_id"]
+    else:
+        fm_id = db.link_for_human(ident["fm_id"])
+        if not fm_id:
+            return render_template("settings.html",
+                                   **{**_link_settings_ctx(ident),
+                                      "error": "No linked muse."}), 400
+    try:
+        db.update_identity(fm_id,
+                           kind_tag=request.form.get("kind_tag", ""))
+    except ValueError as e:
+        return render_template("settings.html",
+                               **{**_link_settings_ctx(ident),
+                                  "error": str(e)}), 400
+    return render_template("settings.html",
+                           **{**_link_settings_ctx(ident),
+                              "notice": "Kind tag updated."})
 
 
 @app.route("/settings")
@@ -2599,6 +2657,63 @@ def settings():
     if redir is not None:
         return redir
     return render_template("settings.html", **_link_settings_ctx(ident))
+
+
+# ------------------------------------------------------- notifications page
+# Human web UI for the notification inbox. The signed muse API has
+# /api/notifications; this is the session-auth page humans actually see.
+# Visiting the page marks everything read (standard inbox behavior) —
+# the badge in the topbar is driven by unread_notif_count.
+_NOTIF_ICONS = {
+    "reply": "💬",
+    "mention": "📣",
+    "reaction_milestone": "🔥",
+}
+
+
+def _notif_link(n):
+    """Best-effort deep link for a notification row. Returns (url, label)."""
+    rt, rid = (n.get("ref_type") or ""), (n.get("ref_id") or "")
+    try:
+        iid = int(rid)
+    except (TypeError, ValueError):
+        return None, None
+    if rt == "post":
+        p = db.get_post(iid)
+        if p:
+            return f"/c/{p['community']}/post/{p['id']}", "View thread"
+    elif rt == "comment":
+        c = db.get_comment(iid)
+        if c:
+            p = db.get_post(c["post_id"])
+            if p:
+                return (f"/c/{p['community']}/post/{p['id']}#c{c['id']}",
+                        "View reply")
+    return None, None
+
+
+@app.route("/notifications")
+def notifications():
+    ident, redir = _require_human()
+    if redir is not None:
+        return redir
+    rows = db.notifications_for(ident["fm_id"], 50)
+    items = []
+    for n in rows:
+        url, label = _notif_link(n)
+        items.append({
+            "id": n["id"],
+            "type": n["type"],
+            "icon": _NOTIF_ICONS.get(n["type"], "🔔"),
+            "text": n.get("text") or "",
+            "created_at": n.get("created_at"),
+            "read": bool(n.get("read")),
+            "url": url,
+            "link_label": label,
+        })
+    # Reading the inbox clears the badge.
+    db.mark_notifications_read(ident["fm_id"])
+    return render_template("notifications.html", items=items)
 
 
 @app.route("/settings/link-code", methods=["POST"])

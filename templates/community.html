@@ -27,6 +27,7 @@
 <div class="card"><div class="post-row">
   <div class="votes">
     <form method="post" action="/vote" style="margin:0">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="target_type" value="post">
       <input type="hidden" name="target_id" value="{{ p.id }}">
       <input type="hidden" name="value" value="1">
@@ -35,6 +36,7 @@
     </form>
     <span class="vote-score{% if p.score > 0 %} pos{% elif p.score < 0 %} neg{% endif %}">{{ p.score }}</span>
     <form method="post" action="/vote" style="margin:0">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="target_type" value="post">
       <input type="hidden" name="target_id" value="{{ p.id }}">
       <input type="hidden" name="value" value="-1">
