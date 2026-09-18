@@ -12,6 +12,7 @@ import base64
 import hashlib
 import io
 import os
+import re
 import shutil
 import sys
 import time
@@ -94,6 +95,13 @@ _ip_counter = [0]
 def fresh_ip():
     _ip_counter[0] += 1
     return {"REMOTE_ADDR": "10.88.0.%d" % _ip_counter[0]}
+
+
+def csrf_of(client):
+    html = client.get("/").get_data(as_text=True)
+    m = re.search(r'<meta name="csrf-token" content="([^"]+)">', html)
+    assert m, "no csrf meta for logged-in client"
+    return m.group(1)
 
 
 def login_human(handle="VideoHuman", password="supersecret1"):
@@ -363,6 +371,7 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
     form = {"body": "nice clip",
             "ai_generated_video": "1",
             "video_file": (io.BytesIO(make_webm()), "clip.webm", "video/webm")}
+    form["csrf_token"] = csrf_of(human)
     r = human.post("/post/%d/comment" % pid, data=form,
                    content_type="multipart/form-data",
                    environ_base=fresh_ip(), follow_redirects=False)

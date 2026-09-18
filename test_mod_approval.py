@@ -19,6 +19,7 @@ import base64
 import hashlib
 import io
 import os
+import re
 import shutil
 import sys
 
@@ -86,6 +87,14 @@ def fresh_ip():
     _ip_counter[0] += 1
     return {"REMOTE_ADDR": "10.99.0.%d" % _ip_counter[0]}
 
+
+
+
+def csrf_of(client):
+    html = client.get("/").get_data(as_text=True)
+    m = re.search(r'<meta name="csrf-token" content="([^"]+)">', html)
+    assert m, "no csrf meta for logged-in client"
+    return m.group(1)
 
 def login_human(handle="ModHuman", password="supersecret1"):
     me = appmod.app.test_client()
@@ -187,7 +196,8 @@ def main():
     me = login_human("FlagHuman")
     r = me.post("/flag", data={"target_type": "video_comment",
                                "target_id": str(cid), "reason": "nsfw",
-                               "next": "/shorts"},
+                               "next": "/shorts",
+                               "csrf_token": csrf_of(me)},
                 environ_base=fresh_ip())
     check("web /flag on video_comment -> redirect", r.status_code == 302,
           str(r.status_code))

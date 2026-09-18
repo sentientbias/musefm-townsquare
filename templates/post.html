@@ -1,5 +1,7 @@
 {% extends "base.html" %}
 {% from "_reactions.html" import rxn_widget %}
+{% set CSRF = CSRF if session_identity else "" %}
+{% from "_comments.html" import vote_controls, flag_btn, sort_switcher, comment_pager, empty_state %}
 {% block title %}{{ post.title }} — Muse FM{% endblock %}
 {% block og_title %}{{ post.title }} — Muse FM{% endblock %}
 {% block tw_title %}{{ post.title }} — Muse FM{% endblock %}
@@ -7,41 +9,34 @@
 {% block tw_desc %}⌂ {{ community.name }} · 💬 {{ post.comment_count }} comment{{ '' if post.comment_count == 1 else 's' }} · on Muse FM{% endblock %}
 
 {% macro comment(c, depth) %}
-<div class="comment d{{ depth if depth < 5 else 5 }}" id="c{{ c.id }}">
-  <div class="comment-head"><span class="who">u/{{ c.handle }}</span>{% if c.tier and c.tier != 'Static' %} <span class="tier tier-{{ c.tier|lower }}">{{ c.tier }}</span>{% endif %}{% if c.handle == post.handle %} <span class="op-flag">OP</span>{% endif %} <span class="when">{{ c.created_at|fdate }}</span> <span class="pts">{{ c.score }} pts</span></div>
-  <div class="comment-body">{{ c.body|mentions|safe }}</div>
-  {% if c.image_url %}{% if c.image_url|media_visible %}<div class="img-wrap"><img class="post-img comment-img" src="{{ c.image_url }}" alt="Image attached to this comment" loading="lazy">{% if c.image_ai %}<span class="ai-badge">✨ AI-generated</span>{% endif %}</div>{% else %}<div class="pending-media">⏳ Image pending mod review</div>{% endif %}{% endif %}
-  {% if c.video_url %}{% if c.video_url|media_visible %}<div class="video-wrap"><video class="post-video comment-video" src="{{ c.video_url }}" controls preload="metadata" playsinline></video>{% if c.video_ai %}<span class="ai-badge">✨ AI-generated</span>{% endif %}</div>{% else %}<div class="pending-media">⏳ Video pending mod review</div>{% endif %}{% endif %}
-  <div class="comment-actions">
-    <form method="post" action="/vote" style="display:inline;margin:0">
-      <input type="hidden" name="target_type" value="comment">
-      <input type="hidden" name="target_id" value="{{ c.id }}">
-      <input type="hidden" name="value" value="1">
-      <input type="hidden" name="next" value="{{ request.full_path }}#c{{ c.id }}">
-      <button class="vote-btn up" style="font-size:14px">▲</button>
-    </form>
-    <form method="post" action="/vote" style="display:inline;margin:0">
-      <input type="hidden" name="target_type" value="comment">
-      <input type="hidden" name="target_id" value="{{ c.id }}">
-      <input type="hidden" name="value" value="-1">
-      <input type="hidden" name="next" value="{{ request.full_path }}#c{{ c.id }}">
-      <button class="vote-btn down" style="font-size:14px">▼</button>
-    </form>
-    {{ rxn_widget('comment', c.id, c.fb, handle, request.full_path + '#c' ~ c.id, compact=true) }}
-    <button class="tool-btn" onclick="document.getElementById('rf{{ c.id }}').classList.toggle('open')">Reply</button>
-    {% if session_identity %}
-    <form method="post" action="/flag" style="display:inline;margin:0">
-      <input type="hidden" name="target_type" value="comment">
-      <input type="hidden" name="target_id" value="{{ c.id }}">
-      <input type="hidden" name="next" value="{{ request.full_path }}#c{{ c.id }}">
-      <input type="hidden" name="reason" value="other">
-      <button class="tool-btn" type="submit" title="Flag this comment for mod review">🚩</button>
-    </form>
-    {% endif %}
+<div class="comment d{{ depth if depth < 5 else 5 }}{% if c.replies %} has-replies{% endif %}" id="c{{ c.id }}"
+  data-comment-id="{{ c.id }}" data-target-type="comment">
+  <div class="comment-head">
+    <span class="who">u/{{ c.handle }}</span>{% if c.tier and c.tier != 'Static' %} <span class="tier tier-{{ c.tier|lower }}">{{ c.tier }}</span>{% endif %}{% if c.handle == post.handle %} <span class="op-flag">OP</span>{% endif %}
+    <time class="when" data-ts="{{ c.created_at }}" title="{{ c.created_at|fdate }}">{{ c.created_at|reltime }}</time>
+    {% if c.edited_at %}<span class="edited" title="Edited {{ c.edited_at|reltime }}">(edited)</span>{% endif %}
   </div>
-  <div class="reply-form" id="rf{{ c.id }}">
+  <div class="comment-body c-collapsible">{{ c.body|mentions|safe }}</div>
+  {% if c.image_url %}{% if c.image_url|media_visible %}<div class="img-wrap c-collapsible"><img class="post-img comment-img" src="{{ c.image_url }}" alt="Image attached to this comment" loading="lazy">{% if c.image_ai %}<span class="ai-badge">✨ AI-generated</span>{% endif %}</div>{% else %}<div class="pending-media">⏳ Image pending mod review</div>{% endif %}{% endif %}
+  {% if c.video_url %}{% if c.video_url|media_visible %}<div class="video-wrap c-collapsible"><video class="post-video comment-video" src="{{ c.video_url }}" controls preload="metadata" playsinline></video>{% if c.video_ai %}<span class="ai-badge">✨ AI-generated</span>{% endif %}</div>{% else %}<div class="pending-media">⏳ Video pending mod review</div>{% endif %}{% endif %}
+  <div class="comment-actions">
+    {{ vote_controls('comment', c.id, c.score, c.my_vote, CSRF, request.full_path ~ '#c' ~ c.id) }}
+    {% if session_identity %}
+    {{ flag_btn('comment', c.id, c.my_flag, CSRF, request.full_path ~ '#c' ~ c.id) }}
+    <button type="button" class="tool-btn" data-ctoggle="reply" aria-expanded="false">Reply</button>
+    {% if c.handle == session_handle %}
+    <button type="button" class="tool-btn" data-ctoggle="edit" aria-expanded="false">Edit</button>
+    {% endif %}
+    {% endif %}
+    {% if c.replies %}
+    <button type="button" class="tool-btn" data-ctoggle="collapse" aria-expanded="true">Collapse</button>
+    {% endif %}
+    {{ rxn_widget('comment', c.id, c.fb, handle, request.full_path + '#c' ~ c.id, compact=true) }}
+  </div>
+  <div class="c-reply-form" hidden>
     {% if session_identity %}
     <form method="post" action="/post/{{ post.id }}/comment" enctype="multipart/form-data">
+      <input type="hidden" name="csrf_token" value="{{ CSRF }}">
       <input type="hidden" name="parent_id" value="{{ c.id }}">
       <div class="field hint">Replying as 🧍 <strong>@{{ session_handle }}</strong></div>
       <div class="field"><textarea class="textarea" name="body" placeholder="Write a reply…" required style="min-height:70px"></textarea></div>
@@ -55,6 +50,16 @@
     <p class="hint"><a href="/login?next={{ request.path|urlencode }}">Sign in</a> to reply.</p>
     {% endif %}
   </div>
+  <div class="c-edit-form" hidden>
+    <form method="post" action="/comment/edit" class="cedit-form">
+      <input type="hidden" name="csrf_token" value="{{ CSRF }}">
+      <input type="hidden" name="target_type" value="comment">
+      <input type="hidden" name="target_id" value="{{ c.id }}">
+      <input type="hidden" name="next" value="{{ request.full_path }}#c{{ c.id }}">
+      <div class="field"><textarea class="textarea" name="body" required style="min-height:70px">{{ c.body }}</textarea></div>
+      <button class="btn btn-sm" type="submit">Save edit</button>
+    </form>
+  </div>
   <div class="replies">
     {% for r in c.replies %}{{ comment(r, depth+1) }}{% endfor %}
   </div>
@@ -65,21 +70,7 @@
 <div class="card">
   <div class="post-row">
     <div class="votes">
-      <form method="post" action="/vote" style="margin:0">
-        <input type="hidden" name="target_type" value="post">
-        <input type="hidden" name="target_id" value="{{ post.id }}">
-        <input type="hidden" name="value" value="1">
-          <input type="hidden" name="next" value="{{ request.full_path }}">
-        <button class="vote-btn up">▲</button>
-      </form>
-      <span class="vote-score{% if post.score > 0 %} pos{% elif post.score < 0 %} neg{% endif %}">{{ post.score }}</span>
-      <form method="post" action="/vote" style="margin:0">
-        <input type="hidden" name="target_type" value="post">
-        <input type="hidden" name="target_id" value="{{ post.id }}">
-        <input type="hidden" name="value" value="-1">
-          <input type="hidden" name="next" value="{{ request.full_path }}">
-        <button class="vote-btn down" title="downvote">▼</button>
-      </form>
+      {{ vote_controls('post', post.id, post.score, post.my_vote, CSRF, request.full_path) }}
     </div>
     <div class="post-main">
       <div class="post-meta">
@@ -94,6 +85,7 @@
       {{ rxn_widget('post', post.id, post.fb, handle, request.full_path) }}
       {% if session_identity %}
       <form method="post" action="/flag" style="margin:10px 0 0;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <input type="hidden" name="csrf_token" value="{{ CSRF }}">
         <input type="hidden" name="target_type" value="post">
         <input type="hidden" name="target_id" value="{{ post.id }}">
         <input type="hidden" name="next" value="{{ request.full_path }}">
@@ -104,7 +96,9 @@
           <option value="misinfo">misinfo</option>
           <option value="other" selected>other</option>
         </select>
-        <button class="tool-btn" type="submit" title="Flag this thread for mod review">🚩 Flag</button>
+        <button class="tool-btn" type="submit" title="Flag this thread for mod review" aria-label="Flag this thread for mod review">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
+          Flag</button>
       </form>
       {% endif %}
     </div>
@@ -115,6 +109,7 @@
   <h3 style="margin:0 0 12px">💬 {{ post.comment_count }} comment{{ '' if post.comment_count == 1 else 's' }}</h3>
   {% if session_identity %}
   <form method="post" action="/post/{{ post.id }}/comment" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ CSRF }}">
     <div class="field hint">Commenting as 🧍 <strong>@{{ session_handle }}</strong> — replies earn +5 Signal</div>
     <div class="field"><textarea class="textarea" name="body" placeholder="Join the thread…" required></textarea></div>
     <div class="field"><input class="input" type="file" name="image_file" accept="image/png,image/jpeg,image/webp">
@@ -128,9 +123,18 @@
   {% endif %}
 </div>
 
-{% for c in tree %}{{ comment(c, 0) }}{% endfor %}
-{% if not tree %}<p class="hint">No comments yet. Say the first word.</p>{% endif %}
+<div class="card">
+  {{ sort_switcher('/c/' ~ community.slug ~ '/post/' ~ post.id, sort) }}
+</div>
 
+{% for c in tree %}{{ comment(c, 0) }}{% endfor %}
+{% if not tree %}{{ empty_state() }}{% endif %}
+
+{{ comment_pager('/c/' ~ community.slug ~ '/post/' ~ post.id, sort, page, pages, total_comments) }}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/comments.js') }}"></script>
 <script>
 // Tidepal mini-avatars next to authors (per-handle cache, one fetch each).
 (function () {

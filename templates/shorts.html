@@ -16,17 +16,21 @@
         {% if it.ai_generated %}<span class="ai-badge ai-badge-static">✨ AI-generated</span>{% endif %}
         {% if it.duration_secs %}<span class="dur-chip">{{ (it.duration_secs // 60) }}:{{ "%02d"|format(it.duration_secs % 60) }}</span>{% endif %}
       </div>
+      {% if it.thread_url %}<a class="short-thread-link" href="{{ it.thread_url }}">View thread →</a>{% endif %}
     </div>
     <div class="short-actions">
-      {% if it.thread_url %}<a class="short-btn" href="{{ it.thread_url }}" title="Open the thread">🧵</a>{% endif %}
       <button class="short-btn short-comments-btn" data-vid="{{ it.id }}" title="Comments" aria-label="Comments">
-        💬<span class="short-ccount" data-vid="{{ it.id }}">{{ it.comment_count }}</span>
+        <svg class="short-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5c-1.5 0-3-.4-4.2-1L3 20l1.2-4.1A8.5 8.5 0 1 1 21 11.5z"/></svg>
+        <span class="short-ccount" data-vid="{{ it.id }}">{{ it.comment_count }}</span>
       </button>
-      <a class="short-btn" href="{{ it.watch_url }}" title="Watch page">⛶</a>
+      <a class="short-btn" href="{{ it.watch_url }}" title="Watch page" aria-label="Watch page">⛶</a>
     </div>
   </div>
-  <div class="short-comments" data-vid="{{ it.id }}" hidden>
+  <div class="short-comments" data-vid="{{ it.id }}" data-sort="top" data-page="1" hidden>
     <div class="sc-head"><span>Comments</span><button class="sc-close" aria-label="Close comments">✕</button></div>
+    <div class="sc-sortbar" role="group" aria-label="Sort comments">
+      <button type="button" data-sort="top" class="is-active">Top</button><button type="button" data-sort="new">Newest</button><button type="button" data-sort="old">Oldest</button>
+    </div>
     <div class="sc-list" aria-live="polite"></div>
     <div class="sc-composer">
       {% if handle != 'anon' %}
@@ -70,10 +74,10 @@
   {% endif %}
   <div class="shorts-end" id="shorts-end" hidden>— you're all caught up —</div>
 </div>
-<p style="text-align:center"><a class="btn btn-sm" href="/">⌂ Home</a></p>
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', filename='js/comments.js') }}"></script>
 <script>
 (function () {
   const feed = document.getElementById('shorts-feed');
@@ -125,7 +129,7 @@
   function cardHTML(it) {
     const badge = it.ai_generated ? '<span class="ai-badge ai-badge-static">✨ AI-generated</span>' : '';
     const dur = it.duration_secs != null ? '<span class="dur-chip">' + fmtDur(it.duration_secs) + '</span>' : '';
-    const thread = it.thread_url ? '<a class="short-btn" href="' + esc(it.thread_url) + '" title="Open the thread">🧵</a>' : '';
+    const thread = it.thread_url ? '<a class="short-thread-link" href="' + esc(it.thread_url) + '">View thread →</a>' : '';
     const ccount = it.comment_count != null ? it.comment_count : 0;
     return '<article class="short-item" data-id="' + it.id + '">' +
       '<video class="short-video" src="' + esc(it.video_url) + '" muted loop playsinline preload="metadata" disablepictureinpicture></video>' +
@@ -133,10 +137,12 @@
       '<div class="short-overlay"><div class="short-meta">' +
       '<div class="short-author">u/' + esc(it.handle) + '</div>' +
       '<div class="short-title">' + esc(it.title) + '</div>' +
-      '<div class="short-chips">' + badge + dur + '</div></div>' +
-      '<div class="short-actions">' + thread +
-      '<button class="short-btn short-comments-btn" data-vid="' + it.id + '" title="Comments" aria-label="Comments">💬<span class="short-ccount" data-vid="' + it.id + '">' + ccount + '</span></button>' +
-      '<a class="short-btn" href="' + esc(it.watch_url) + '" title="Watch page">⛶</a>' +
+      '<div class="short-chips">' + badge + dur + '</div>' + thread + '</div>' +
+      '<div class="short-actions">' +
+      '<button class="short-btn short-comments-btn" data-vid="' + it.id + '" title="Comments" aria-label="Comments">' +
+      '<svg class="short-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5c-1.5 0-3-.4-4.2-1L3 20l1.2-4.1A8.5 8.5 0 1 1 21 11.5z"/></svg>' +
+      '<span class="short-ccount" data-vid="' + it.id + '">' + ccount + '</span></button>' +
+      '<a class="short-btn" href="' + esc(it.watch_url) + '" title="Watch page" aria-label="Watch page">⛶</a>' +
       '</div></div>' +
       commentsPanelHTML(it) +
       '<div class="short-rxn">' + rxnWidgetHTML(it) + '</div>' +
@@ -144,58 +150,124 @@
   }
 
   var LOGGED_IN = {{ 'true' if handle != 'anon' else 'false' }};
+  var MY_HANDLE = {{ session_handle|tojson if session_identity else 'null' }};
+
+  function csrfTok() {
+    var m = document.querySelector('meta[name="csrf-token"]');
+    return (m && m.content) || '';
+  }
+
+  var SVG_UP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 15l-6-6-6 6"/></svg>';
+  var SVG_DOWN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+  var SVG_FLAG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>';
+
+  function voteHTML(c) {
+    var loginNext = '/login?next=' + encodeURIComponent(location.pathname + location.search);
+    if (!LOGGED_IN) {
+      return '<span class="cvote">' +
+        '<a class="cvote-btn" href="' + loginNext + '" aria-label="Sign in to upvote">' + SVG_UP + '</a>' +
+        '<span class="cvote-score">' + (c.score || 0) + '</span>' +
+        '<a class="cvote-btn" href="' + loginNext + '" aria-label="Sign in to downvote">' + SVG_DOWN + '</a></span>';
+    }
+    function btn(val, dir, svg, label) {
+      var active = c.my_vote === val;
+      return '<form method="post" action="/vote" class="cvote-form" data-value="' + val + '">' +
+        '<input type="hidden" name="csrf_token" value="' + esc(csrfTok()) + '">' +
+        '<input type="hidden" name="target_type" value="video_comment">' +
+        '<input type="hidden" name="target_id" value="' + c.id + '">' +
+        '<input type="hidden" name="value" value="' + val + '">' +
+        '<button type="submit" class="cvote-btn ' + dir + (active ? ' is-active' : '') + '"' +
+        ' aria-label="' + label + '" aria-pressed="' + active + '" title="' + label + '">' + svg + '</button></form>';
+    }
+    return '<span class="cvote" data-target-type="video_comment" data-target-id="' + c.id + '">' +
+      btn(1, 'up', SVG_UP, 'Upvote') +
+      '<span class="cvote-score">' + (c.score || 0) + '</span>' +
+      btn(-1, 'down', SVG_DOWN, 'Downvote') + '</span>';
+  }
+
+  function flagHTML(c) {
+    if (!LOGGED_IN) return '';
+    var flagged = !!c.my_flag;
+    return '<form method="post" action="/flag" class="cflag-form">' +
+      '<input type="hidden" name="csrf_token" value="' + esc(csrfTok()) + '">' +
+      '<input type="hidden" name="target_type" value="video_comment">' +
+      '<input type="hidden" name="target_id" value="' + c.id + '">' +
+      '<input type="hidden" name="reason" value="other">' +
+      '<button type="submit" class="cflag-btn' + (flagged ? ' is-flagged' : '') + '"' +
+      ' aria-label="' + (flagged ? 'Flagged for review' : 'Flag for moderator review') + '"' +
+      ' aria-pressed="' + flagged + '"' +
+      ' title="' + (flagged ? 'Flagged — in the mod queue' : 'Flag for moderator review') + '">' + SVG_FLAG + '</button></form>';
+  }
+
+  function fmtAgo(ts) {
+    if (!ts) return '';
+    var diff = Math.floor(Date.now() / 1000) - ts;
+    if (diff < 0) diff = 0;
+    if (diff < 60) return 'just now';
+    if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+    if (diff < 7 * 86400) return Math.floor(diff / 86400) + 'd ago';
+    return new Date(ts * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  }
 
   function commentsPanelHTML(it) {
     var nudge = '<a class="sc-nudge" href="/login?next=' +
       encodeURIComponent('/shorts?video=' + it.id) + '">Sign in to comment</a>';
     var form = '<form class="sc-form" data-vid="' + it.id + '" action="/video/' + it.id + '/comment" method="post">' +
+      '<input type="hidden" name="csrf_token" value="' + esc(csrfTok()) + '">' +
       '<input class="sc-input" name="body" maxlength="2000" placeholder="Add a comment…" autocomplete="off">' +
       '<button class="sc-send" type="submit" aria-label="Post comment">➤</button></form>';
-    return '<div class="short-comments" data-vid="' + it.id + '" hidden>' +
+    return '<div class="short-comments" data-vid="' + it.id + '" data-sort="top" data-page="1" hidden>' +
       '<div class="sc-head"><span>Comments</span><button class="sc-close" aria-label="Close comments">✕</button></div>' +
+      '<div class="sc-sortbar" role="group" aria-label="Sort comments">' +
+      '<button type="button" data-sort="top" class="is-active">Top</button>' +
+      '<button type="button" data-sort="new">Newest</button>' +
+      '<button type="button" data-sort="old">Oldest</button></div>' +
       '<div class="sc-list" aria-live="polite"></div>' +
       '<div class="sc-composer">' + (LOGGED_IN ? form : nudge) + '</div></div>';
   }
 
-  function commentNode(c) {
+  function commentNode(c, depth) {
+    depth = depth || 0;
     var el = document.createElement('div');
-    el.className = 'sc-comment';
-    el.innerHTML = '<div class="sc-chead"><b>u/' + esc(c.handle) + '</b>' +
-      '<span class="sc-ctime">' + esc(fmtTime(c.created_at)) + '</span></div>' +
-      '<div class="sc-cbody"></div>';
-    el.querySelector('.sc-cbody').textContent = c.body || '';
-    if (LOGGED_IN) {
-      // One-tap flag — same pattern as the post page's comment flag form.
-      var f = document.createElement('form');
-      f.method = 'post';
-      f.action = '/flag';
-      f.className = 'sc-flagform';
-      f.innerHTML = '<input type="hidden" name="target_type" value="video_comment">' +
-        '<input type="hidden" name="target_id" value="' + c.id + '">' +
-        '<input type="hidden" name="reason" value="other">' +
-        '<input type="hidden" name="next" value="' + esc(location.pathname + location.search) + '">' +
-        '<button type="submit" class="sc-flagbtn" title="Flag this comment for mod review">🚩</button>';
-      el.querySelector('.sc-chead').appendChild(f);
-    }
+    el.className = 'sc-comment comment d' + Math.min(depth, 5);
+    el.setAttribute('data-comment-id', c.id);
+    var edited = c.edited_at ? ' <span class="edited">(edited)</span>' : '';
+    var html = '<div class="sc-chead comment-head"><b>u/' + esc(c.handle) + '</b>' +
+      ' <span class="sc-ctime when">' + esc(fmtAgo(c.created_at)) + '</span>' + edited + '</div>' +
+      '<div class="sc-cbody comment-body">' + (c.body_html || '') + '</div>' +
+      '<div class="comment-actions">' + voteHTML(c) + flagHTML(c);
     var replies = c.replies || [];
+    var own = LOGGED_IN && MY_HANDLE && c.handle === MY_HANDLE;
+    if (LOGGED_IN && depth < 4) html += '<button type="button" class="tool-btn sc-reply-toggle" aria-expanded="false">Reply</button>';
+    if (own) html += '<button type="button" class="tool-btn sc-edit-toggle">Edit</button>';
+    if (replies.length) html += '<button type="button" class="tool-btn sc-collapse-toggle" aria-expanded="true">Collapse</button>';
+    html += '</div>';
+    el.innerHTML = html;
+    if (LOGGED_IN && depth < 4) {
+      var rf = document.createElement('div');
+      rf.className = 'sc-replybox';
+      rf.hidden = true;
+      rf.innerHTML = '<form class="sc-replyform"><input class="sc-input" name="body" maxlength="2000" placeholder="Write a reply…" autocomplete="off">' +
+        '<button class="sc-send" type="submit" aria-label="Post reply">➤</button></form>';
+      el.appendChild(rf);
+    }
+    if (own) {
+      var ef = document.createElement('div');
+      ef.className = 'sc-editbox';
+      ef.hidden = true;
+      ef.innerHTML = '<form class="sc-editform"><input class="sc-input" name="body" maxlength="2000" autocomplete="off">' +
+        '<button class="sc-send" type="submit" aria-label="Save edit">Save</button></form>';
+      ef.querySelector('input[name="body"]').value = c.body || '';
+      el.appendChild(ef);
+    }
     if (replies.length) {
       var box = document.createElement('div');
-      box.className = 'sc-replies';
-      replies.forEach(function (r) { box.appendChild(commentNode(r)); });
+      box.className = 'sc-replies replies';
+      replies.forEach(function (r) { box.appendChild(commentNode(r, depth + 1)); });
       el.appendChild(box);
     }
     return el;
-  }
-
-  function fmtTime(ts) {
-    if (!ts) return '';
-    var d = new Date(ts * 1000), now = new Date();
-    var mins = Math.floor((now - d) / 60000);
-    if (mins < 1) return 'now';
-    if (mins < 60) return mins + 'm';
-    var hrs = Math.floor(mins / 60);
-    if (hrs < 24) return hrs + 'h';
-    return Math.floor(hrs / 24) + 'd';
   }
 
   function setCount(vid, n) {
@@ -205,28 +277,53 @@
     });
   }
 
-  function loadComments(panel) {
-    var vid = panel.getAttribute('data-vid');
-    var list = panel.querySelector('.sc-list');
-    if (panel._loaded) return Promise.resolve();
-    panel._loaded = true;
-    list.innerHTML = '<div class="sc-loading">loading…</div>';
-    return fetch('/api/videos/' + vid + '/comments').then(function (r) { return r.json(); })
-      .then(function (d) {
-        list.innerHTML = '';
-        var items = (d.ok && d.comments) || [];
-        if (!items.length) list.innerHTML = '<div class="sc-empty">No comments yet — say something.</div>';
-        items.forEach(function (c) { list.appendChild(commentNode(c)); });
-        if (d.ok && d.count != null) setCount(vid, d.count);
-      }).catch(function () {
-        list.innerHTML = '<div class="sc-empty">Could not load comments.</div>';
-        panel._loaded = false;
-      });
+  function syncSortUI(panel) {
+    var sort = panel.getAttribute('data-sort') || 'top';
+    panel.querySelectorAll('.sc-sortbar button').forEach(function (b) {
+      b.classList.toggle('is-active', b.getAttribute('data-sort') === sort);
+    });
   }
 
-  function showNudge(panel, signinUrl) {
-    var composer = panel.querySelector('.sc-composer');
-    composer.innerHTML = '<a class="sc-nudge" href="' + esc(signinUrl || '/login') + '">Sign in to comment</a>';
+  function loadComments(panel, opts) {
+    opts = opts || {};
+    var vid = panel.getAttribute('data-vid');
+    var list = panel.querySelector('.sc-list');
+    var sort = panel.getAttribute('data-sort') || 'top';
+    var page = opts.page || 1;
+    var append = !!opts.append;
+    if (!append) {
+      list.innerHTML = '<div class="cskeleton" aria-hidden="true">' +
+        '<div class="cskeleton-row"><span class="sk-avatar"></span><span class="sk-lines"><span class="sk-l1"></span><span class="sk-l2"></span></span></div>' +
+        '<div class="cskeleton-row"><span class="sk-avatar"></span><span class="sk-lines"><span class="sk-l1"></span><span class="sk-l2"></span></span></div>' +
+        '<div class="cskeleton-row"><span class="sk-avatar"></span><span class="sk-lines"><span class="sk-l1"></span><span class="sk-l2"></span></span></div></div>';
+    }
+    var oldMore = panel.querySelector('.sc-more');
+    if (oldMore) oldMore.remove();
+    return fetch('/api/videos/' + vid + '/comments?sort=' + sort + '&page=' + page + '&limit=20')
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!append) list.innerHTML = '';
+        var items = (d.ok && d.comments) || [];
+        if (!items.length && !append) {
+          list.innerHTML = '<div class="cempty"><p><strong>Be the first to comment.</strong></p>' +
+            '<p class="hint">Say the first word — good threads start here.</p></div>';
+        }
+        items.forEach(function (c) { list.appendChild(commentNode(c, 0)); });
+        panel.setAttribute('data-page', page);
+        panel.setAttribute('data-sort', d.sort || sort);
+        syncSortUI(panel);
+        if (d.ok && d.has_more) {
+          var mb = document.createElement('button');
+          mb.type = 'button';
+          mb.className = 'sc-more tool-btn';
+          mb.textContent = 'Load more comments';
+          mb.addEventListener('click', function () { loadComments(panel, { page: page + 1, append: true }); });
+          list.appendChild(mb);
+        }
+        if (d.ok && d.count != null) setCount(vid, d.count);
+      }).catch(function () {
+        if (!append) list.innerHTML = '<div class="sc-empty">Could not load comments.</div>';
+      });
   }
 
   function wireComments(card) {
@@ -248,6 +345,97 @@
       panel.hidden ? open() : shut();
     });
     if (close) close.addEventListener('click', shut);
+    panel.querySelectorAll('.sc-sortbar button').forEach(function (b) {
+      b.addEventListener('click', function () {
+        panel.setAttribute('data-sort', b.getAttribute('data-sort'));
+        loadComments(panel, { page: 1 });
+      });
+    });
+    // Reply / edit / collapse toggles inside the thread.
+    panel.addEventListener('click', function (ev) {
+      var t = ev.target.closest('.sc-reply-toggle, .sc-edit-toggle, .sc-collapse-toggle');
+      if (!t) return;
+      var card = t.closest('.sc-comment');
+      if (!card) return;
+      if (t.classList.contains('sc-reply-toggle')) {
+        var rf = card.querySelector(':scope > .sc-replybox');
+        if (rf) {
+          rf.hidden = !rf.hidden;
+          t.setAttribute('aria-expanded', String(!rf.hidden));
+          var rin = rf.querySelector('.sc-input');
+          if (rin && !rf.hidden) rin.focus();
+        }
+      } else if (t.classList.contains('sc-edit-toggle')) {
+        var ef = card.querySelector(':scope > .sc-editbox');
+        if (ef) {
+          ef.hidden = !ef.hidden;
+          var ein = ef.querySelector('.sc-input');
+          if (ein && !ef.hidden) { ein.focus(); ein.setSelectionRange(ein.value.length, ein.value.length); }
+        }
+      } else if (t.classList.contains('sc-collapse-toggle')) {
+        var collapsed = card.classList.toggle('is-collapsed');
+        var box = card.querySelector(':scope > .sc-replies');
+        if (box) box.hidden = collapsed;
+        t.setAttribute('aria-expanded', String(!collapsed));
+        t.textContent = collapsed ? 'Expand' : 'Collapse';
+      }
+    });
+    // Reply + edit submits (JSON; plain form POST stays the no-JS fallback elsewhere).
+    panel.addEventListener('submit', function (ev) {
+      var f = ev.target;
+      var vid = panel.getAttribute('data-vid');
+      if (f.classList.contains('sc-replyform')) {
+        ev.preventDefault();
+        var input = f.querySelector('.sc-input');
+        var body = (input.value || '').trim();
+        if (!body) return;
+        var cid = parseInt(f.closest('.sc-comment').getAttribute('data-comment-id'), 10);
+        var send = f.querySelector('.sc-send');
+        send.disabled = true;
+        fetch('/api/videos/' + vid + '/comments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ body: body, parent_id: cid, csrf_token: csrfTok() })
+        }).then(function (r) { return r.json(); })
+          .then(function (d) {
+            send.disabled = false;
+            if (!d.ok) { input.placeholder = d.error || 'Could not post — try again'; return; }
+            loadComments(panel, { page: 1 });
+            if (d.comment_count != null) setCount(vid, d.comment_count);
+          }).catch(function () {
+            send.disabled = false;
+            input.placeholder = 'Could not post — try again';
+          });
+      } else if (f.classList.contains('sc-editform')) {
+        ev.preventDefault();
+        var einput = f.querySelector('.sc-input');
+        var ebody = (einput.value || '').trim();
+        if (!ebody) return;
+        var card = f.closest('.sc-comment');
+        var ecid = parseInt(card.getAttribute('data-comment-id'), 10);
+        var esend = f.querySelector('.sc-send');
+        esend.disabled = true;
+        fetch('/comment/edit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ csrf_token: csrfTok(), target_type: 'video_comment', target_id: ecid, body: ebody })
+        }).then(function (r) { return r.json(); })
+          .then(function (d) {
+            esend.disabled = false;
+            if (!d.ok) return;
+            var bodyEl = card.querySelector(':scope > .sc-cbody');
+            if (bodyEl && d.body_html) bodyEl.innerHTML = d.body_html;
+            var head = card.querySelector(':scope > .sc-chead');
+            if (head && !head.querySelector('.edited')) {
+              var sp = document.createElement('span');
+              sp.className = 'edited';
+              sp.textContent = '(edited)';
+              head.appendChild(sp);
+            }
+            f.closest('.sc-editbox').hidden = true;
+          }).catch(function () { esend.disabled = false; });
+      }
+    });
     var form = panel.querySelector('.sc-form');
     if (form) form.addEventListener('submit', function (ev) {
       ev.preventDefault();  // JS path: JSON API; the plain form POST stays as the no-JS fallback
@@ -260,15 +448,14 @@
       fetch('/api/videos/' + vid + '/comments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ body: body })
+        body: JSON.stringify({ body: body, csrf_token: csrfTok() })
       }).then(function (r) { return r.json().then(function (d) { return { s: r.status, d: d }; }); })
         .then(function (res) {
           send.disabled = false;
           if (res.s === 401 && res.d.signin_url) { showNudge(panel, res.d.signin_url); return; }
           if (!res.d.ok) { input.placeholder = res.d.error || 'Could not post — try again'; return; }
           input.value = '';
-          panel._loaded = false;  // refresh the thread to include the new comment
-          loadComments(panel).then(function () {
+          loadComments(panel, { page: 1 }).then(function () {
             var list = panel.querySelector('.sc-list');
             list.scrollTop = 0;
           });
@@ -358,20 +545,15 @@
 
   feed.querySelectorAll('.short-item').forEach(card => { wireCard(card); wireComments(card); });
   // ?video= deep-link: jump to the anchored card before autoplay
-  // observation settles, so the right clip plays instead of the first —
-  // and surface that video's conversation by opening its comments panel.
+  // observation settles, so the right clip plays instead of the first.
+  // Comments stay closed until tapped — the deep link anchors the video,
+  // it doesn't open the conversation for you.
   (function () {
     var a = feed.getAttribute('data-anchor');
     if (!a) return;
     var t = feed.querySelector('.short-item[data-id="' + a + '"]');
     if (!t) return;
     t.scrollIntoView({ block: 'start' });
-    var p = t.querySelector('.short-comments');
-    if (p) {
-      p.hidden = false;
-      t.classList.add('comments-open');
-      loadComments(p);
-    }
   })();
   feed.querySelectorAll('.short-item').forEach(card => io.observe(card));
   // keep observing dynamically added cards

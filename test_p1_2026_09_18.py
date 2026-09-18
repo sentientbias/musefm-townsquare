@@ -23,6 +23,7 @@ Throwaway SQLite db + Flask test client. Nothing touches townsquare.db.
 """
 import base64
 import os
+import re
 import sys
 import threading
 
@@ -38,6 +39,14 @@ from identity import signed_body
 TEST_DB = "/tmp/test-townsquare-p1-20260918.db"
 
 PASS, FAIL = [], []
+
+
+
+def csrf_of(client):
+    html = client.get("/").get_data(as_text=True)
+    m = re.search(r'<meta name="csrf-token" content="([^"]+)">', html)
+    assert m, "no csrf meta for logged-in client"
+    return m.group(1)
 
 
 def check(name, cond, detail=""):
@@ -216,7 +225,8 @@ def t_web_notifications(client):
 
     # logged-in human web comment, mentioning + replying
     r = human.post(f"/post/{pid}/comment",
-                   data={"body": "@P1Target great post!"},
+                   data={"body": "@P1Target great post!",
+                         "csrf_token": csrf_of(human)},
                    environ_base=fresh_ip())
     check("logged-in human web comment posts (redirect)", r.status_code == 302,
           r.status_code)

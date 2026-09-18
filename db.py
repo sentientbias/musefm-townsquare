@@ -169,6 +169,18 @@ def hot_rank(score, created_at):
     return score / ((age_hours + 2.0) ** 1.5)
 
 
+def comment_sort_key(sort):
+    """Key function for top-level comment sorting. `sort` is one of
+    'top' (score desc, oldest first on ties), 'new' (newest first),
+    'old' (oldest first). Unknown values fall back to 'top'."""
+    if sort == "new":
+        return lambda c: (-(c["created_at"] or 0), -(c["id"] or 0))
+    if sort == "old":
+        return lambda c: ((c["created_at"] or 0), (c["id"] or 0))
+    return lambda c: (-(c["score"] or 0), (c["created_at"] or 0),
+                      (c["id"] or 0))
+
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS communities (
   slug TEXT PRIMARY KEY,
@@ -208,7 +220,7 @@ CREATE TABLE IF NOT EXISTS comments (
 );
 CREATE INDEX IF NOT EXISTS idx_comments_post ON comments(post_id, created_at);
 CREATE TABLE IF NOT EXISTS votes (
-  target_type TEXT NOT NULL,      -- 'post' or 'comment'
+  target_type TEXT NOT NULL,      -- 'post', 'comment', or 'video_comment'
   target_id INTEGER NOT NULL,
   handle TEXT NOT NULL,
   value INTEGER NOT NULL,        -- +1 or -1
@@ -773,7 +785,7 @@ class Database:
         r = self._one("SELECT handle FROM comments WHERE id=?", (cid,))
         return r["handle"] if r else None
 
-    def comment_tree(self, post_id):
+    def comment_tree(self, post_id, sort="top"):
         rows = [dict(r) for r in self._q(
             "SELECT * FROM comments WHERE post_id=? ORDER BY created_at", (post_id,))]
         by_parent = {}
@@ -784,7 +796,10 @@ class Database:
             for c in by_parent.get(parent, []):
                 c["replies"] = build(c["id"])
                 out.append(c)
-            out.sort(key=lambda c: (-c["score"], c["created_at"]))
+            if parent is None:
+                out.sort(key=comment_sort_key(sort))
+            else:
+                out.sort(key=lambda c: (c["created_at"], c["id"]))
             return out
         return self._add_tiers_tree(build(None))
 
@@ -821,8 +836,9 @@ class Database:
                    " WHERE id=?", (video_id,))
         return cur.lastrowid
 
-    def video_comment_tree(self, video_id):
-        """Chronological nested tree (oldest first) for a video's comments."""
+    def video_comment_tree(self, video_id, sort="top"):
+        """Nested tree for a video's comments. Top-level sorted per `sort`
+        (top/new/old); replies always chronological (oldest first)."""
         rows = [dict(r) for r in self._q(
             "SELECT * FROM video_comments WHERE video_id=? ORDER BY created_at",
             (video_id,))]
@@ -835,6 +851,10 @@ class Database:
             for c in by_parent.get(parent, []):
                 c["replies"] = build(c["id"])
                 out.append(c)
+            if parent is None:
+                out.sort(key=comment_sort_key(sort))
+            else:
+                out.sort(key=lambda c: (c["created_at"], c["id"]))
             return out
         return build(None)
 
@@ -853,13 +873,17 @@ class Database:
 
     # -- votes ------------------------------------------------------------
     def vote(self, target_type, target_id, handle, value):
-        if target_type not in ("post", "comment"):
-            raise ValueError("target_type must be post or comment")
+        if target_type not in ("post", "comment", "video_comment",
+                               "episode_comment"):
+            raise ValueError("target_type must be post, comment, video_comment,"
+                             " or episode_comment")
         if value not in (1, -1):
             raise ValueError("value must be 1 or -1")
         if not valid_handle(handle):
             raise ValueError("bad handle")
-        table = "posts" if target_type == "post" else "comments"
+        table = {"post": "posts", "comment": "comments",
+                 "video_comment": "video_comments",
+                 "episode_comment": "episode_comments"}[target_type]
         # Single-writer transaction (BEGIN IMMEDIATE): the old code did a
         # read-modify-write across separate autocommit statements, so two
         # concurrent voters read the same old state and their deltas never
@@ -918,12 +942,15 @@ class Database:
                   reason="other"):
         """Record a content flag. One flag per flagger per target (re-flagging
         updates the reason). Raises ValueError on bad target/reason."""
-        if target_type not in ("post", "comment", "video_comment"):
-            raise ValueError("target_type must be post, comment, or video_comment")
+        if target_type not in ("post", "comment", "video_comment",
+                               "episode_comment"):
+            raise ValueError("target_type must be post, comment, video_comment,"
+                             " or episode_comment")
         if reason not in self.FLAG_REASONS:
             raise ValueError("bad reason (spam, harassment, nsfw, misinfo, other)")
         table = {"post": "posts", "comment": "comments",
-                 "video_comment": "video_comments"}[target_type]
+                 "video_comment": "video_comments",
+                 "episode_comment": "episode_comments"}[target_type]
         try:
             known = self._one(f"SELECT id FROM {table} WHERE id=?", (target_id,))
         except sqlite3.OperationalError:
@@ -1221,9 +1248,20 @@ class Database:
             "SELECT * FROM episode_comments WHERE episode_slug=? ORDER BY created_at",
             (slug,))]
 
-    def add_episode_comment(self, slug, handle, body):
+    def add_episode_comment(self, slug, handle, body, parent_id=None):
         if not self.episode(slug):
             raise ValueError("unknown episode")
+        if parent_id:
+            try:
+                parent_id = int(parent_id)
+            except (TypeError, ValueError):
+                raise ValueError("unknown parent comment")
+            p = self._one("SELECT id FROM episode_comments WHERE id=? AND episode_slug=?",
+                          (parent_id, slug))
+            if not p:
+                raise ValueError("unknown parent comment")
+        else:
+            parent_id = None
         if not valid_handle(handle):
             raise ValueError("bad handle")
         body = clean(body, 2000)
@@ -1232,9 +1270,68 @@ class Database:
         if has_banned(body):
             raise ValueError("content blocked by the town filter")
         cur = self._exec(
-            "INSERT INTO episode_comments (episode_slug, handle, body, created_at)"
-            " VALUES (?,?,?,?)", (slug, handle, body, now()))
+            "INSERT INTO episode_comments (episode_slug, parent_id, handle, body, created_at)"
+            " VALUES (?,?,?,?,?)", (slug, parent_id, handle, body, now()))
         return cur.lastrowid
+
+    def episode_comment_tree(self, slug, sort="top"):
+        """Nested episode-comment tree. Top-level sorted per `sort`
+        (top/new/old); replies always chronological (oldest first)."""
+        rows = [dict(r) for r in self._q(
+            "SELECT * FROM episode_comments WHERE episode_slug=? ORDER BY created_at",
+            (slug,))]
+        by_parent = {}
+        for c in rows:
+            by_parent.setdefault(c["parent_id"], []).append(c)
+
+        def build(parent):
+            out = []
+            for c in by_parent.get(parent, []):
+                c["replies"] = build(c["id"])
+                out.append(c)
+            if parent is None:
+                out.sort(key=comment_sort_key(sort))
+            else:
+                out.sort(key=lambda c: (c["created_at"], c["id"]))
+            return out
+        return build(None)
+
+    def edit_comment(self, target_type, target_id, handle, body):
+        """Author-only edit on a comment. Sets body + edited_at; returns
+        the edited timestamp. Raises ValueError on bad target/body and
+        PermissionError when the handle isn't the author."""
+        if target_type not in ("comment", "video_comment", "episode_comment"):
+            raise ValueError("target_type must be comment, video_comment,"
+                             " or episode_comment")
+        table = {"comment": "comments", "video_comment": "video_comments",
+                 "episode_comment": "episode_comments"}[target_type]
+        row = self._one(f"SELECT handle FROM {table} WHERE id=?", (target_id,))
+        if not row:
+            raise ValueError("unknown comment")
+        if row["handle"] != handle:
+            raise PermissionError("only the author can edit this comment")
+        body = clean(body, 2000)
+        if not body:
+            raise ValueError("comment body required")
+        if has_banned(body):
+            raise ValueError("content blocked by the town filter")
+        ts = now()
+        self._exec(f"UPDATE {table} SET body=?, edited_at=? WHERE id=?",
+                   (body, ts, target_id))
+        return ts
+
+    def has_flagged(self, target_type, target_id, flagger_fm_id):
+        """True when this identity already has an open flag on the target —
+        drives the 'flagged' UI state."""
+        try:
+            row = self._one(
+                "SELECT id FROM post_flags WHERE target_type=? AND target_id=?"
+                " AND flagger_fm_id=? AND status='open'",
+                (target_type, target_id, flagger_fm_id))
+        except sqlite3.OperationalError:
+            # Pre-migration scratch DBs may lack the post_flags table.
+            return False
+        return bool(row)
 
     # -- clips ------------------------------------------------------------
     def add_clip(self, slug, handle, start_sec, end_sec, note=""):
@@ -1271,7 +1368,7 @@ class Database:
             raise ValueError("that handle is reserved — pick another")
         if not valid_public_key_b64(public_key):
             raise ValueError("bad public_key (need base64url Ed25519, 32 bytes)")
-        if self._one("SELECT fm_id FROM identities WHERE handle=?", (handle,)):
+        if self._one("SELECT fm_id FROM identities WHERE handle=? COLLATE NOCASE", (handle,)):
             raise ValueError("handle taken — pick another")
         avatar_url = clean(avatar_url, MAX_AVATAR_URL)
         if avatar_url and not avatar_url.startswith(("http://", "https://")):
@@ -1314,7 +1411,7 @@ class Database:
         return dict(r) if r else None
 
     def get_identity_by_handle(self, handle):
-        r = self._one("SELECT * FROM identities WHERE handle=?", (handle,))
+        r = self._one("SELECT * FROM identities WHERE handle=? COLLATE NOCASE", (handle,))
         return dict(r) if r else None
 
     def update_identity(self, fm_id, avatar_url=None, bio=None,
@@ -2236,6 +2333,29 @@ def ensure_linking_schema(db):
         ");"
         "CREATE INDEX IF NOT EXISTS idx_link_audit_time"
         "  ON link_audit(created_at DESC);")
+    db.db.commit()
+
+
+def ensure_comment_pro_schema(db):
+    """Additive only: professional comment-section columns (2026-09-18
+    comment-pro batch). edited_at on all three comment tables, plus
+    score + parent_id on episode_comments so episode comments get voting
+    and one level of nested replies like the other surfaces. Safe on
+    fresh and existing DBs; never touches data."""
+    def _cols(table):
+        return [r["name"] for r in db.db.execute(f"PRAGMA table_info({table})")]
+
+    for table in ("comments", "video_comments", "episode_comments"):
+        if "edited_at" not in _cols(table):
+            db.db.execute(
+                f"ALTER TABLE {table} ADD COLUMN edited_at INTEGER")
+    if "score" not in _cols("episode_comments"):
+        db.db.execute(
+            "ALTER TABLE episode_comments"
+            " ADD COLUMN score INTEGER NOT NULL DEFAULT 0")
+    if "parent_id" not in _cols("episode_comments"):
+        db.db.execute(
+            "ALTER TABLE episode_comments ADD COLUMN parent_id INTEGER")
     db.db.commit()
 
 

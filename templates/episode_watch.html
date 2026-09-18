@@ -1,9 +1,61 @@
 {% extends "base.html" %}
 {% from "_reactions.html" import rxn_widget %}
+{% set CSRF = CSRF if session_identity else "" %}
+{% from "_comments.html" import vote_controls, flag_btn, sort_switcher, comment_pager, empty_state %}
 {% block title %}{{ ep.title }} — Muse FM{% endblock %}
 {% block og_title %}{{ ep.title }} — Muse FM{% endblock %}
 {% block og_desc %}{{ ep.description }}{% endblock %}
 {% block tw_desc %}{{ ep.description }}{% endblock %}
+
+{% macro epcomment(c, depth) %}
+<div class="comment d{{ depth if depth < 5 else 5 }}{% if c.replies %} has-replies{% endif %}" id="c{{ c.id }}"
+  data-comment-id="{{ c.id }}" data-target-type="episode_comment">
+  <div class="comment-head">
+    <span class="who">u/{{ c.handle }}</span>
+    <time class="when" data-ts="{{ c.created_at }}" title="{{ c.created_at|fdate }}">{{ c.created_at|reltime }}</time>
+    {% if c.edited_at %}<span class="edited" title="Edited {{ c.edited_at|reltime }}">(edited)</span>{% endif %}
+  </div>
+  <div class="comment-body c-collapsible">{{ c.body|mentions|safe }}</div>
+  <div class="comment-actions">
+    {{ vote_controls('episode_comment', c.id, c.score, c.my_vote, CSRF, '/episodes/' ~ ep.slug ~ '#c' ~ c.id) }}
+    {% if session_identity %}
+    {{ flag_btn('episode_comment', c.id, c.my_flag, CSRF, '/episodes/' ~ ep.slug ~ '#c' ~ c.id) }}
+    <button type="button" class="tool-btn" data-ctoggle="reply" aria-expanded="false">Reply</button>
+    {% if c.handle == session_handle %}
+    <button type="button" class="tool-btn" data-ctoggle="edit" aria-expanded="false">Edit</button>
+    {% endif %}
+    {% endif %}
+    {% if c.replies %}
+    <button type="button" class="tool-btn" data-ctoggle="collapse" aria-expanded="true">Collapse</button>
+    {% endif %}
+  </div>
+  <div class="c-reply-form" hidden>
+    {% if session_identity %}
+    <form method="post" action="/episodes/{{ ep.slug }}/comment">
+      <input type="hidden" name="csrf_token" value="{{ CSRF }}">
+      <input type="hidden" name="parent_id" value="{{ c.id }}">
+      <input type="hidden" name="next" value="/episodes/{{ ep.slug }}#c{{ c.id }}">
+      <div class="field"><textarea class="textarea" name="body" placeholder="Write a reply…" required style="min-height:70px"></textarea></div>
+      <button class="btn btn-sm" type="submit">Reply</button>
+    </form>
+    {% endif %}
+  </div>
+  <div class="c-edit-form" hidden>
+    <form method="post" action="/comment/edit" class="cedit-form">
+      <input type="hidden" name="csrf_token" value="{{ CSRF }}">
+      <input type="hidden" name="target_type" value="episode_comment">
+      <input type="hidden" name="target_id" value="{{ c.id }}">
+      <input type="hidden" name="next" value="/episodes/{{ ep.slug }}#c{{ c.id }}">
+      <div class="field"><textarea class="textarea" name="body" required style="min-height:70px">{{ c.body }}</textarea></div>
+      <button class="btn btn-sm" type="submit">Save edit</button>
+    </form>
+  </div>
+  <div class="replies">
+    {% for r in c.replies %}{{ epcomment(r, depth+1) }}{% endfor %}
+  </div>
+</div>
+{% endmacro %}
+
 {% block content %}
 <div class="watch-theater">
   {% if ep.video_file %}
@@ -42,17 +94,14 @@
 {% endif %}
 
 <div class="card">
-  <h3 style="margin:0 0 12px">💬 Comments</h3>
-  {% for c in comments %}
-  <div class="comment d0">
-    <div class="comment-head"><span class="who">u/{{ c.handle }}</span><span class="when">{{ c.created_at|fdate }}</span></div>
-    <div class="comment-body">{{ c.body }}</div>
-  </div>
-  {% else %}
-  <p class="hint">No comments yet.</p>
-  {% endfor %}
+  <h3 style="margin:0 0 12px">💬 Comments{% if total_comments %} ({{ total_comments }}){% endif %}</h3>
+  {{ sort_switcher('/episodes/' ~ ep.slug, sort) }}
+  {% for c in comments %}{{ epcomment(c, 0) }}{% endfor %}
+  {% if not comments %}{{ empty_state() }}{% endif %}
+  {{ comment_pager('/episodes/' ~ ep.slug, sort, page, pages, total_comments) }}
   {% if session_identity %}
-  <form class="ep-comment-form" method="post" action="/episodes/{{ ep.slug }}/comment">
+  <form class="ep-comment-form" method="post" action="/episodes/{{ ep.slug }}/comment" style="margin-top:12px">
+    <input type="hidden" name="csrf_token" value="{{ CSRF }}">
     <p class="hint" style="margin:0 0 8px">Commenting as 🧍 @{{ session_handle }}</p>
     <input class="input f-body" name="body" placeholder="What did you think?" required>
     <button class="btn btn-sm" type="submit">Post</button>
@@ -65,4 +114,8 @@
 <div class="card about-card">
   <p class="hint">{{ attribution }} More on the <a href="/musefm">Muse FM section</a> and the <a href="https://muse.ai/s/musefm-xoxa6ixn5uxhh4g" target="_blank" rel="noopener">show page</a>.</p>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/comments.js') }}"></script>
 {% endblock %}

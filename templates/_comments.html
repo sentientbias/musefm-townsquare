@@ -1,0 +1,106 @@
+{# Shared professional comment kit: SVG vote controls, flag button,
+   sort switcher, and pager. Used by post.html, watch.html,
+   episode_watch.html, and (via comments.js) the Shorts panels.
+   Every form carries a CSRF token; every icon button has an
+   aria-label and a 44px minimum touch target (see style.css). #}
+
+{% macro vote_controls(target_type, target_id, score, my_vote, csrf_tok, next_url) %}
+<span class="cvote" data-target-type="{{ target_type }}" data-target-id="{{ target_id }}">
+  <form method="post" action="/vote" class="cvote-form" data-value="1">
+    <input type="hidden" name="csrf_token" value="{{ csrf_tok }}">
+    <input type="hidden" name="target_type" value="{{ target_type }}">
+    <input type="hidden" name="target_id" value="{{ target_id }}">
+    <input type="hidden" name="value" value="1">
+    <input type="hidden" name="next" value="{{ next_url }}">
+    <button type="submit" class="cvote-btn up{% if my_vote == 1 %} is-active{% endif %}"
+      aria-label="Upvote" aria-pressed="{{ 'true' if my_vote == 1 else 'false' }}" title="Upvote">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 15l-6-6-6 6"/></svg>
+    </button>
+  </form>
+  <span class="cvote-score{% if score > 0 %} pos{% elif score < 0 %} neg{% endif %}"
+    aria-label="Score {{ score }}">{{ score }}</span>
+  <form method="post" action="/vote" class="cvote-form" data-value="-1">
+    <input type="hidden" name="csrf_token" value="{{ csrf_tok }}">
+    <input type="hidden" name="target_type" value="{{ target_type }}">
+    <input type="hidden" name="target_id" value="{{ target_id }}">
+    <input type="hidden" name="value" value="-1">
+    <input type="hidden" name="next" value="{{ next_url }}">
+    <button type="submit" class="cvote-btn down{% if my_vote == -1 %} is-active{% endif %}"
+      aria-label="Downvote" aria-pressed="{{ 'true' if my_vote == -1 else 'false' }}" title="Downvote">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+    </button>
+  </form>
+</span>
+{% endmacro %}
+
+{% macro flag_btn(target_type, target_id, flagged, csrf_tok, next_url) %}
+<form method="post" action="/flag" class="cflag-form"
+  data-target-type="{{ target_type }}" data-target-id="{{ target_id }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_tok }}">
+  <input type="hidden" name="target_type" value="{{ target_type }}">
+  <input type="hidden" name="target_id" value="{{ target_id }}">
+  <input type="hidden" name="reason" value="other">
+  <input type="hidden" name="next" value="{{ next_url }}">
+  <button type="submit" class="cflag-btn{% if flagged %} is-flagged{% endif %}"
+    aria-label="{{ 'Flagged for review' if flagged else 'Flag for moderator review' }}"
+    aria-pressed="{{ 'true' if flagged else 'false' }}"
+    title="{{ 'Flagged — in the mod queue' if flagged else 'Flag for moderator review' }}">
+    <svg viewBox="0 0 24 24" fill="{{ 'currentColor' if flagged else 'none' }}"
+      stroke="currentColor" stroke-width="2" stroke-linecap="round"
+      stroke-linejoin="round" aria-hidden="true">
+      <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/>
+      <line x1="4" y1="22" x2="4" y2="15"/>
+    </svg>
+  </button>
+</form>
+{% endmacro %}
+
+{% macro sort_switcher(base_url, sort) %}
+<nav class="csort" aria-label="Sort comments">
+  <span class="csort-label">Sort:</span>
+  {% for key, label in [('top', 'Top'), ('new', 'Newest'), ('old', 'Oldest')] %}
+  <a class="csort-opt{% if sort == key %} is-active{% endif %}"
+    href="{{ base_url }}?sort={{ key }}" data-sort="{{ key }}"
+    aria-current="{{ 'true' if sort == key else 'false' }}">{{ label }}</a>
+  {% endfor %}
+</nav>
+{% endmacro %}
+
+{% macro comment_pager(base_url, sort, page, pages, total) %}
+{% if pages > 1 %}
+<nav class="cpager" aria-label="Comment pages">
+  {% if page > 1 %}
+  <a class="btn btn-sm" href="{{ base_url }}?sort={{ sort }}&page={{ page - 1 }}">← Newer comments</a>
+  {% endif %}
+  <span class="hint">Page {{ page }} of {{ pages }} · {{ total }} top-level</span>
+  {% if page < pages %}
+  <a class="btn btn-sm" href="{{ base_url }}?sort={{ sort }}&page={{ page + 1 }}">Older comments →</a>
+  {% endif %}
+</nav>
+{% endif %}
+{% endmacro %}
+
+{% macro empty_state() %}
+<div class="cempty">
+  <div class="cempty-icon" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+      stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5c-1.5 0-3-.4-4.2-1L3 20l1.2-4.1A8.5 8.5 0 1 1 21 11.5z"/>
+    </svg>
+  </div>
+  <p><strong>Be the first to comment.</strong></p>
+  <p class="hint">Say the first word — good threads start here.</p>
+</div>
+{% endmacro %}
+
+{% macro loading_skeleton(n=3) %}
+<div class="cskeleton" aria-hidden="true">
+  {% for i in range(n) %}
+  <div class="cskeleton-row"><span class="sk-avatar"></span>
+    <span class="sk-lines"><span class="sk-l1"></span><span class="sk-l2"></span></span>
+  </div>
+  {% endfor %}
+</div>
+{% endmacro %}

@@ -1,14 +1,30 @@
 {% extends "base.html" %}
 {% from "_reactions.html" import rxn_widget %}
+{% set CSRF = CSRF if session_identity else "" %}
+{% from "_comments.html" import vote_controls, flag_btn %}
 {% block title %}{{ title }} — Watch — Muse FM{% endblock %}
 {% block og_title %}{{ title }} — Watch — Muse FM{% endblock %}
 
 {% macro wcomment(c, depth) %}
-<div class="comment d{{ depth if depth < 5 else 5 }}" id="c{{ c.id }}">
-  <div class="comment-head"><span class="who">u/{{ c.handle }}</span> <span class="when">{{ c.created_at|fdate }}</span> <span class="pts">{{ c.score }} pts</span></div>
-  <div class="comment-body">{{ c.body|mentions|safe }}</div>
-  {% if c.image_url %}<div class="img-wrap"><img class="post-img comment-img" src="{{ c.image_url }}" alt="Image attached to this comment" loading="lazy">{% if c.image_ai %}<span class="ai-badge">✨ AI-generated</span>{% endif %}</div>{% endif %}
-  {% if c.video_url %}<div class="video-wrap"><video class="post-video comment-video" src="{{ c.video_url }}" controls preload="metadata" playsinline></video>{% if c.video_ai %}<span class="ai-badge">✨ AI-generated</span>{% endif %}</div>{% endif %}
+<div class="comment d{{ depth if depth < 5 else 5 }}{% if c.replies %} has-replies{% endif %}" id="c{{ c.id }}"
+  data-comment-id="{{ c.id }}" data-target-type="comment">
+  <div class="comment-head">
+    <span class="who">u/{{ c.handle }}</span>
+    <time class="when" data-ts="{{ c.created_at }}" title="{{ c.created_at|fdate }}">{{ c.created_at|reltime }}</time>
+    {% if c.edited_at %}<span class="edited" title="Edited {{ c.edited_at|reltime }}">(edited)</span>{% endif %}
+  </div>
+  <div class="comment-body c-collapsible">{{ c.body|mentions|safe }}</div>
+  {% if c.image_url %}<div class="img-wrap c-collapsible"><img class="post-img comment-img" src="{{ c.image_url }}" alt="Image attached to this comment" loading="lazy">{% if c.image_ai %}<span class="ai-badge">✨ AI-generated</span>{% endif %}</div>{% endif %}
+  {% if c.video_url %}<div class="video-wrap c-collapsible"><video class="post-video comment-video" src="{{ c.video_url }}" controls preload="metadata" playsinline></video>{% if c.video_ai %}<span class="ai-badge">✨ AI-generated</span>{% endif %}</div>{% endif %}
+  <div class="comment-actions">
+    {{ vote_controls('comment', c.id, c.score, c.my_vote, CSRF, '/watch/' ~ video.id ~ '#c' ~ c.id) }}
+    {% if session_identity %}
+    {{ flag_btn('comment', c.id, c.my_flag, CSRF, '/watch/' ~ video.id ~ '#c' ~ c.id) }}
+    {% if c.replies %}
+    <button type="button" class="tool-btn" data-ctoggle="collapse" aria-expanded="true">Collapse</button>
+    {% endif %}
+    {% endif %}
+  </div>
   <div class="replies">
     {% for r in c.replies %}{{ wcomment(r, depth+1) }}{% endfor %}
   </div>
@@ -43,4 +59,8 @@
   {% if not tree %}<p class="hint">No comments yet.</p>{% endif %}
 </div>
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/comments.js') }}"></script>
 {% endblock %}

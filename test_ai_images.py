@@ -12,6 +12,7 @@ import base64
 import hashlib
 import io
 import os
+import re
 import shutil
 import sys
 import time
@@ -98,6 +99,13 @@ def login_human(handle="ArtFan", password="supersecret1"):
                 environ_base=fresh_ip())
     assert r.status_code == 302, r.get_data(as_text=True)
     return me
+
+
+def csrf_of(client):
+    html = client.get("/").get_data(as_text=True)
+    m = re.search(r'<meta name="csrf-token" content="([^"]+)">', html)
+    assert m, "no csrf meta for logged-in client"
+    return m.group(1)
 
 
 def post_image(client, fields, raw, filename="art.png", headers=None,
@@ -312,6 +320,7 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
     form = {"body": "nice art",
             "ai_generated": "1",
             "image_file": (io.BytesIO(make_jpeg(300)), "snap.jpg", "image/jpeg")}
+    form["csrf_token"] = csrf_of(human)
     r = human.post("/post/%d/comment" % pid, data=form,
                    content_type="multipart/form-data",
                    environ_base=fresh_ip(), follow_redirects=False)

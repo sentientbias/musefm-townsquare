@@ -19,6 +19,7 @@ Run:  .venv/bin/python test_human_usability.py
 Throwaway SQLite db + Flask test client. Nothing touches townsquare.db.
 """
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -153,6 +154,14 @@ def t_session(client):
     return me
 
 
+
+
+def csrf_of(client):
+    html = client.get("/").get_data(as_text=True)
+    m = re.search(r'<meta name="csrf-token" content="([^"]+)">', html)
+    assert m, "no csrf meta for logged-in client"
+    return m.group(1)
+
 # --- 3+4. human posting + Signal ----------------------------------------------
 def _reason_sum(db, fm_id, reason):
     """Sum of Signal granted under one reason — deterministic even with
@@ -187,8 +196,10 @@ def t_human_posting_and_signal(client):
           _reason_sum(db, fm_id, "thread"))
 
     # reply: +PTS_REPLY each, capped per thread per day
+    tok = csrf_of(me)
     for i in range(4):
-        r = me.post(f"/post/{pid}/comment", data={"body": f"reply {i}"},
+        r = me.post(f"/post/{pid}/comment",
+                    data={"body": f"reply {i}", "csrf_token": tok},
                     environ_base=fresh_ip())
         assert r.status_code == 302, r.status_code
     from db import MAX_REWARDED_REPLIES_PER_THREAD_PER_DAY

@@ -51,7 +51,7 @@ from db import (Database, DISPLAY_NAME_RE, FLAIRS, MAX_REWARDED_REPLIES_PER_THRE
                 ATTESTATION_TEXT, challenge_week_id, find_mentions,
                 valid_handle, ensure_musefm_media_schema,
                 ensure_human_auth_schema, ensure_forum_flags_schema,
-                ensure_linking_schema)
+                ensure_linking_schema, ensure_comment_pro_schema)
 from identity import IdentityError, b64u_encode, verify_signed_body
 import gifs
 import ai_images
@@ -148,6 +148,7 @@ def init_db(path):
     ensure_human_auth_schema(_db)     # identities.password_hash/display_name
     ensure_forum_flags_schema(_db)    # post_flags table (report button + mod queue)
     ensure_linking_schema(_db)        # human<->muse 1:1 links + pairing codes
+    ensure_comment_pro_schema(_db)    # comment pro batch: edited_at, ep scores/replies
     _db.ensure_musefm_seeds()            # idempotent: ep01-ep04, episode posts, photos
     return _db
 
@@ -331,11 +332,14 @@ def _csrf_token():
     return tok
 
 
-def _check_csrf():
-    form_tok = request.form.get("csrf_token", "")
+def _check_csrf_token(tok):
     sess_tok = session.get("csrf_token", "")
-    return (bool(form_tok) and bool(sess_tok)
-            and secrets.compare_digest(form_tok, sess_tok))
+    return (bool(tok) and bool(sess_tok)
+            and secrets.compare_digest(tok, sess_tok))
+
+
+def _check_csrf():
+    return _check_csrf_token(request.form.get("csrf_token", ""))
 
 
 def _require_human():
@@ -416,23 +420,73 @@ app.jinja_env.filters["fdate"] = fmt_time
 
 
 def link_mentions(text):
-    """Escape text, then turn @handles of registered identities into links."""
+    """Escape text, linkify http/https URLs, then turn @handles of
+    registered identities into links. Only http/https URLs become links —
+    javascript:, data:, and other schemes never match the URL pattern, so
+    they render as inert escaped text. Links open in a new tab with
+    rel="noopener nofollow"."""
     if not text:
         return ""
+    esc = htmlmod.escape(text)
+    # 1. linkify URLs first, stashing them behind placeholders so the
+    #    @mention pass can't linkify handles inside a URL.
+    urls = []
+
+    def _url_sub(m):
+        raw = m.group(0)
+        url = raw.rstrip(".,;:!?)]}\"'")
+        trail = raw[len(url):]
+        urls.append(url)
+        return "\x00URL%d\x00%s" % (len(urls) - 1, trail)
+
+    esc = _URL_RE.sub(_url_sub, esc)
+    # 2. @mentions of registered identities
     known = {}
     for h in find_mentions(text):
         ident = db.get_identity_by_handle(h)
         if ident:
             known[h] = ident["fm_id"]
-    esc = htmlmod.escape(text)
     for h in sorted(known, key=len, reverse=True):
         esc = esc.replace(
             "@" + h,
             f'<a class="mention" href="/m/{known[h]}">@{h}</a>')
+    # 3. restore the stashed URL links
+    for i, url in enumerate(urls):
+        esc = esc.replace(
+            "\x00URL%d\x00" % i,
+            '<a href="%s" target="_blank"'
+            ' rel="noopener nofollow">%s</a>' % (url, url))
     return esc
 
 
+_URL_RE = re.compile(r"https?://[^\s<>\"']+")
+
+
 app.jinja_env.filters["mentions"] = link_mentions
+
+
+def fmt_reltime(ts):
+    """Relative timestamps for comment sections: 'just now', '3h ago',
+    falling back to an absolute date after a week."""
+    try:
+        ts = int(ts)
+    except (TypeError, ValueError):
+        return ""
+    diff = int(time.time()) - ts
+    if diff < 0:
+        diff = 0
+    if diff < 60:
+        return "just now"
+    if diff < 3600:
+        return "%dm ago" % (diff // 60)
+    if diff < 86400:
+        return "%dh ago" % (diff // 3600)
+    if diff < 7 * 86400:
+        return "%dd ago" % (diff // 86400)
+    return time.strftime("%b %d, %Y", time.localtime(ts))
+
+
+app.jinja_env.filters["reltime"] = fmt_reltime
 
 
 def media_visible(url):
@@ -559,9 +613,35 @@ def thread(slug, pid):
     post = db.get_post(pid)
     if not c or not post or post["community"] != slug:
         return render_template("404.html", msg="no such thread"), 404
-    tree = db.comment_tree(pid)
+    sort = request.args.get("sort", "") or session.get("comment_sort", "top")
+    if sort not in ("top", "new", "old"):
+        sort = "top"
+    session["comment_sort"] = sort
+    tree = db.comment_tree(pid, sort=sort)
     _fb_attach_thread(post, tree, _fb_web_reactor())
-    return render_template("post.html", community=c, post=post, tree=tree)
+    sess_ident = current_session_identity()
+    my_votes = db.votes_for(sess_ident["handle"]) if sess_ident else {}
+    post["my_vote"] = my_votes.get(("post", post["id"]))
+
+    def _tag(nodes, ttype="comment"):
+        for n in nodes:
+            n["my_vote"] = my_votes.get((ttype, n["id"]))
+            n["my_flag"] = (db.has_flagged(ttype, n["id"], sess_ident["fm_id"])
+                            if sess_ident else False)
+            _tag(n.get("replies") or [], ttype)
+    _tag(tree)
+    # Top-level pagination: 20 per page keeps giant threads renderable.
+    per_page = 20
+    try:
+        page = max(1, int(request.args.get("page", 1) or 1))
+    except (TypeError, ValueError):
+        page = 1
+    pages = max(1, (len(tree) + per_page - 1) // per_page)
+    page = min(page, pages)
+    page_tree = tree[(page - 1) * per_page:page * per_page]
+    return render_template("post.html", community=c, post=post, tree=page_tree,
+                           sort=sort, page=page, pages=pages,
+                           total_comments=len(tree))
 
 
 def _gif_from_form(req, handle):
@@ -770,6 +850,8 @@ def add_comment(pid):
     sess_ident, redir = _require_human()
     if redir is not None:
         return redir
+    if not _check_csrf():
+        return "bad form token — reload and try again", 403
     author_handle = sess_ident["handle"]
     hit = check_limit("comment", 30)
     if hit:
@@ -807,17 +889,38 @@ def vote_html():
     # Likes/votes from humans only count when signed in. Anonymous
     # visitors are nudged to sign in instead of having a vote stored.
     sess_ident = current_session_identity()
+    want_json = request.is_json
     if sess_ident is None:
+        if want_json:
+            return jsonify({"ok": False, "error": "sign in to vote",
+                            "signin_url": "/login"}), 401
         nxt = request.form.get("next", "/") or "/"
         return redirect("/login?next=" + quote(nxt, safe="/#?&=%"))
+    data = request.get_json(silent=True) if want_json else request.form
+    if want_json and not isinstance(data, dict):
+        return jsonify({"ok": False, "error": "JSON body must be an object"}), 400
+    if not _check_csrf_token(data.get("csrf_token", "")):
+        if want_json:
+            return jsonify({"ok": False,
+                            "error": "bad form token — reload and try again"}), 403
+        return "bad form token — reload and try again", 403
     try:
-        db.vote(request.form.get("target_type", "post"),
-                int(request.form.get("target_id", 0)),
-                sess_ident["handle"],
-                int(request.form.get("value", 1)))
-    except (ValueError, TypeError):
-        pass
-    return redirect(request.form.get("next", "/"))
+        score = db.vote(data.get("target_type", "post") or "post",
+                        int(data.get("target_id") or 0),
+                        sess_ident["handle"],
+                        int(data.get("value", 1)))
+    except (ValueError, TypeError) as e:
+        if want_json:
+            return jsonify({"ok": False, "error": str(e)}), 400
+        return redirect(data.get("next", "/") or "/")
+    if want_json:
+        target = (data.get("target_type", "post") or "post",
+                  int(data.get("target_id") or 0))
+        return jsonify({"ok": True, "score": score,
+                        "value": int(data.get("value", 1)),
+                        "my_vote": db.votes_for(
+                            sess_ident["handle"]).get(target)})
+    return redirect(data.get("next", "/") or "/")
 
 
 @app.route("/episodes")
@@ -845,16 +948,22 @@ def episode_comment(slug):
     sess_ident, redir = _require_human()
     if redir is not None:
         return redir
+    if not _check_csrf():
+        return "bad form token — reload and try again", 403
     author_handle = sess_ident["handle"]
     hit = check_limit("ep_comment", 30)
     if hit:
         return hit
     try:
         db.add_episode_comment(slug, author_handle,
-                               request.form.get("body", ""))
+                               request.form.get("body", ""),
+                               request.form.get("parent_id") or None)
     except ValueError as e:
         return str(e), 400
-    resp = redirect(url_for("episodes_page") + f"#{slug}")
+    nxt = request.form.get("next", "") or (url_for("episodes_page") + f"#{slug}")
+    if not nxt.startswith("/"):
+        nxt = url_for("episodes_page") + f"#{slug}"  # no open redirects
+    resp = redirect(nxt)
     resp.set_cookie("ts_handle", author_handle,
                     max_age=365 * 86400, samesite="Lax")
     return resp
@@ -917,9 +1026,34 @@ def episode_watch(slug):
     e["rowid"] = rid
     e["fb"] = fb_reactions.fb_reaction_summaries(
         db, [("episode", rid)], _fb_web_reactor())[("episode", rid)]
-    comments = db.episode_comments(slug)
+    sort = request.args.get("sort", "") or session.get("comment_sort", "top")
+    if sort not in ("top", "new", "old"):
+        sort = "top"
+    session["comment_sort"] = sort
+    comments = db.episode_comment_tree(slug, sort=sort)
+    sess_ident = current_session_identity()
+    my_votes = db.votes_for(sess_ident["handle"]) if sess_ident else {}
+
+    def _tag(nodes):
+        for n in nodes:
+            n["my_vote"] = my_votes.get(("episode_comment", n["id"]))
+            n["my_flag"] = (db.has_flagged("episode_comment", n["id"],
+                                           sess_ident["fm_id"])
+                            if sess_ident else False)
+            _tag(n.get("replies") or [])
+    _tag(comments)
+    per_page = 20
+    try:
+        page = max(1, int(request.args.get("page", 1) or 1))
+    except (TypeError, ValueError):
+        page = 1
+    pages = max(1, (len(comments) + per_page - 1) // per_page)
+    page = min(page, pages)
+    page_comments = comments[(page - 1) * per_page:page * per_page]
     clips = db.clips_for(slug)
-    return render_template("episode_watch.html", ep=e, comments=comments,
+    return render_template("episode_watch.html", ep=e, comments=page_comments,
+                           tree=comments, sort=sort, page=page, pages=pages,
+                           total_comments=len(comments),
                            clips=clips, handle=_musefm_handle(),
                            attribution=ATTRIBUTION_LINE, fmt_dur=fmt_dur)
 
@@ -1208,8 +1342,12 @@ def api_episode_comments(slug):
     data = json_body()
     if not isinstance(data, dict):
         return data  # 400: JSON body must be an object
+    if not _check_csrf_token(data.get("csrf_token", "")):
+        return api_error("bad form token — reload and try again", 403)
     try:
-        cid = db.add_episode_comment(slug, sess_ident["handle"], _fs(data, "body"))
+        cid = db.add_episode_comment(slug, sess_ident["handle"],
+                                     _fs(data, "body"),
+                                     data.get("parent_id") or None)
     except ValueError as e:
         return api_error(str(e))
     return jsonify({"ok": True, "id": cid})
@@ -2033,21 +2171,83 @@ def fb_react_web():
 @app.route("/flag", methods=["POST"])
 def flag_web():
     """One-tap Flag on a post or comment — signed-in humans only. Bad input
-    bounces back to the page instead of 500ing."""
+    bounces back to the page instead of 500ing. Accepts form posts and
+    JSON (JSON callers get {ok, flagged} back for in-place UI updates)."""
     sess_ident, redir = _require_human()
     if redir is not None:
+        if request.is_json:
+            return jsonify({"ok": False, "error": "sign in to flag",
+                            "signin_url": "/login"}), 401
         return redir
+    want_json = request.is_json
+    data = request.get_json(silent=True) if want_json else request.form
+    if want_json and not isinstance(data, dict):
+        return jsonify({"ok": False, "error": "JSON body must be an object"}), 400
+    if not _check_csrf_token(data.get("csrf_token", "")):
+        if want_json:
+            return jsonify({"ok": False,
+                            "error": "bad form token — reload and try again"}), 403
+        return "bad form token — reload and try again", 403
     hit = check_limit("flag", 10)
     if hit:
         return hit
-    nxt = request.form.get("next") or "/"
+    nxt = data.get("next") or "/"
     try:
-        db.flag_post(request.form.get("target_type", "post") or "post",
-                     int(request.form.get("target_id") or 0),
+        db.flag_post(data.get("target_type", "post") or "post",
+                     int(data.get("target_id") or 0),
                      sess_ident["fm_id"], sess_ident["handle"],
-                     request.form.get("reason", "other") or "other")
+                     data.get("reason", "other") or "other")
     except (ValueError, TypeError):
-        pass
+        if want_json:
+            return jsonify({"ok": False, "error": "bad flag target"}), 400
+    if want_json:
+        return jsonify({"ok": True, "flagged": True})
+    if not nxt.startswith("/"):
+        nxt = "/"
+    return redirect(nxt)
+
+
+@app.route("/comment/edit", methods=["POST"])
+def comment_edit():
+    """Author-only comment edit (forum comments, video comments, episode
+    comments). Session auth + CSRF; sets body + edited_at via
+    db.edit_comment. Form posts redirect back; JSON callers get the new
+    body and edited timestamp for in-place UI updates."""
+    sess_ident, redir = _require_human()
+    if redir is not None:
+        if request.is_json:
+            return jsonify({"ok": False, "error": "sign in to edit",
+                            "signin_url": "/login"}), 401
+        return redir
+    want_json = request.is_json
+    data = request.get_json(silent=True) if want_json else request.form
+    if want_json and not isinstance(data, dict):
+        return jsonify({"ok": False, "error": "JSON body must be an object"}), 400
+    if not _check_csrf_token(data.get("csrf_token", "")):
+        if want_json:
+            return jsonify({"ok": False,
+                            "error": "bad form token — reload and try again"}), 403
+        return "bad form token — reload and try again", 403
+    hit = check_limit("comment_edit", 30)
+    if hit:
+        return hit
+    try:
+        edited_at = db.edit_comment(
+            data.get("target_type", "comment") or "comment",
+            int(data.get("target_id") or 0),
+            sess_ident["handle"], data.get("body", ""))
+    except PermissionError as e:
+        if want_json:
+            return jsonify({"ok": False, "error": str(e)}), 403
+        return str(e), 403
+    except (ValueError, TypeError) as e:
+        if want_json:
+            return jsonify({"ok": False, "error": str(e)}), 400
+        return str(e), 400
+    if want_json:
+        return jsonify({"ok": True, "edited_at": edited_at,
+                        "body_html": link_mentions(data.get("body", ""))})
+    nxt = data.get("next") or "/"
     if not nxt.startswith("/"):
         nxt = "/"
     return redirect(nxt)
@@ -3142,13 +3342,41 @@ def _video_comment_limits(uid):
 
 @app.route("/api/videos/<sqlite_int:uid>/comments", methods=["GET"])
 def api_video_comments(uid):
-    """Public comment thread for a video. Anonymous read is allowed."""
+    """Public comment thread for a video. Anonymous read is allowed.
+    Query params: sort=top|new|old (persisted in session), page, limit
+    (top-level paging; replies always fully nested)."""
     u = videos.get_video_upload(db, uid)
     if not u:
         return api_error("unknown video", 404)
+    sort = request.args.get("sort", "") or session.get("comment_sort", "top")
+    if sort not in ("top", "new", "old"):
+        sort = "top"
+    session["comment_sort"] = sort
+    try:
+        page = max(1, int(request.args.get("page", 1) or 1))
+        limit = max(1, min(50, int(request.args.get("limit", 20) or 20)))
+    except (TypeError, ValueError):
+        return api_error("bad page/limit", 400)
+    tree = db.video_comment_tree(uid, sort=sort)
+    sess_ident = current_session_identity()
+    my_votes = db.votes_for(sess_ident["handle"]) if sess_ident else {}
+
+    def annotate(nodes):
+        for c in nodes:
+            c["my_vote"] = my_votes.get(("video_comment", c["id"]))
+            c["my_flag"] = (db.has_flagged("video_comment", c["id"],
+                                           sess_ident["fm_id"])
+                            if sess_ident else False)
+            c["body_html"] = link_mentions(c["body"])
+            annotate(c.get("replies") or [])
+    annotate(tree)
+    total = len(tree)
+    page_tree = tree[(page - 1) * limit:page * limit]
     return jsonify({"ok": True, "video_id": uid,
                     "count": int(u.get("comment_count") or 0),
-                    "comments": db.video_comment_tree(uid)})
+                    "comments": page_tree, "sort": sort, "page": page,
+                    "per_page": limit, "total_top": total,
+                    "has_more": page * limit < total})
 
 
 @app.route("/api/videos/<sqlite_int:uid>/comments", methods=["POST"])
@@ -3166,6 +3394,8 @@ def api_post_video_comment(uid):
         return data  # 400: JSON body must be an object
     sess_ident = current_session_identity()
     if sess_ident is not None:
+        if not _check_csrf_token(data.get("csrf_token", "")):
+            return api_error("bad form token — reload and try again", 403)
         author_handle = sess_ident["handle"]
     else:
         try:
@@ -3232,6 +3462,17 @@ def watch_video(uid):
         post = db.get_post(src["post_id"])
         if post:
             tree = db.comment_tree(post["id"])
+    sess_ident = current_session_identity()
+    my_votes = db.votes_for(sess_ident["handle"]) if sess_ident else {}
+
+    def _tag(nodes):
+        for n in nodes:
+            n["my_vote"] = my_votes.get(("comment", n["id"]))
+            n["my_flag"] = (db.has_flagged("comment", n["id"],
+                                           sess_ident["fm_id"])
+                            if sess_ident else False)
+            _tag(n.get("replies") or [])
+    _tag(tree)
     thread_url = None
     if src and post:
         thread_url = url_for("thread", slug=src["community"], pid=src["post_id"])

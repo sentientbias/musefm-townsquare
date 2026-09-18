@@ -93,6 +93,16 @@ def shown_key(html):
     return m.group(1) if m else None
 
 
+
+
+def csrf_of(client):
+    """CSRF token minted for a logged-in client (base.html meta tag)."""
+    html = client.get("/").get_data(as_text=True)
+    m = re.search(r'<meta name="csrf-token" content="([^"]+)">', html)
+    assert m, "no csrf meta for logged-in client"
+    return m.group(1)
+
+
 def t_pages(client):
     print("== pages ==")
     r = client.get("/signup")
@@ -220,8 +230,10 @@ def t_session_posts(client):
     check("post attributed to session identity",
           row["handle"] == "HumanOne", row["handle"])
     pid = appmod.db._one("SELECT id FROM posts ORDER BY id DESC LIMIT 1")["id"]
+    tok = csrf_of(me)
     r = me.post(f"/post/{pid}/comment", data={
-        "handle": "MuseSession9", "body": "session comment"})
+        "handle": "MuseSession9", "body": "session comment",
+        "csrf_token": tok})
     check("logged-in comment -> 302", r.status_code == 302, r.status_code)
     row = appmod.db._one(
         "SELECT handle FROM comments ORDER BY id DESC LIMIT 1")
@@ -230,7 +242,8 @@ def t_session_posts(client):
     # votes bind the session identity too
     r = me.post("/vote", data={"handle": "MuseSession9",
                                "target_type": "post",
-                               "target_id": str(pid), "value": "1"})
+                               "target_id": str(pid), "value": "1",
+                               "csrf_token": tok})
     check("logged-in vote -> 302", r.status_code == 302, r.status_code)
     voters = appmod.db.votes_for("HumanOne")
     check("vote recorded under session handle", len(voters) > 0)

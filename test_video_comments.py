@@ -208,7 +208,8 @@ def main():
 
     print("== human JSON API post (session) ==")
     r = client.post("/api/videos/%d/comments" % vid1,
-                    json={"body": "json path works", "handle": "EvilHacker"},
+                    json={"body": "json path works", "handle": "EvilHacker",
+                          "csrf_token": tok},
                     environ_base=fresh_ip())
     d = r.get_json()
     check("session API post ok", r.status_code == 200 and d["ok"] is True)
@@ -248,7 +249,7 @@ def main():
     check("forum 'comment' action rejected here", r.status_code == 401)
     # non-string body (session path reaches body validation)
     r = client.post("/api/videos/%d/comments" % vid1,
-                    json={"body": ["not", "a", "string"]},
+                    json={"body": ["not", "a", "string"], "csrf_token": tok},
                     environ_base=fresh_ip())
     check("non-string body -> 400", r.status_code == 400)
 
@@ -257,7 +258,8 @@ def main():
                    environ_base=fresh_ip()).get_json()
     top = d["comments"][0]["id"]
     r = client.post("/api/videos/%d/comments" % vid1,
-                    json={"body": "reply to first", "parent_id": top},
+                    json={"body": "reply to first", "parent_id": top,
+                          "csrf_token": tok},
                     environ_base=fresh_ip())
     check("reply ok", r.status_code == 200)
     d = client.get("/api/videos/%d/comments" % vid1,
@@ -266,11 +268,13 @@ def main():
           len(d["comments"][0]["replies"]) == 1 and
           d["comments"][0]["replies"][0]["body"] == "reply to first")
     r = client.post("/api/videos/%d/comments" % vid1,
-                    json={"body": "bad parent", "parent_id": 424242},
+                    json={"body": "bad parent", "parent_id": 424242,
+                          "csrf_token": tok},
                     environ_base=fresh_ip())
     check("unknown parent -> 400", r.status_code == 400)
     r = client.post("/api/videos/%d/comments" % vid2,
-                    json={"body": "cross-video parent", "parent_id": top},
+                    json={"body": "cross-video parent", "parent_id": top,
+                          "csrf_token": tok},
                     environ_base=fresh_ip())
     check("parent from another video -> 400", r.status_code == 400)
 
@@ -285,14 +289,17 @@ def main():
     flood_ip = fresh_ip()
     for i in range(10):
         r = client.post("/api/videos/%d/comments" % vid2,
-                        json={"body": "flood %d" % i}, environ_base=flood_ip)
+                        json={"body": "flood %d" % i, "csrf_token": tok},
+                        environ_base=flood_ip)
         assert r.status_code == 200, r.get_data(as_text=True)[:200]
     r = client.post("/api/videos/%d/comments" % vid2,
-                    json={"body": "flood 10"}, environ_base=flood_ip)
+                    json={"body": "flood 10", "csrf_token": tok},
+                    environ_base=flood_ip)
     check("11th comment/min on one video -> 429", r.status_code == 429)
     # a different video is unaffected by the per-video bucket
     r = client.post("/api/videos/%d/comments" % vid1,
-                    json={"body": "other video fine"}, environ_base=flood_ip)
+                    json={"body": "other video fine", "csrf_token": tok},
+                    environ_base=flood_ip)
     check("other video still ok", r.status_code == 200)
     hr_ip = fresh_ip()
     ok = True
@@ -300,7 +307,8 @@ def main():
     for i in range(32):
         target = vids[i % 4]  # stay under the per-video 10/min cap
         r = client.post("/api/videos/%d/comments" % target,
-                        json={"body": "hourly %d" % i}, environ_base=hr_ip)
+                        json={"body": "hourly %d" % i, "csrf_token": tok},
+                        environ_base=hr_ip)
         if i < 30 and r.status_code != 200:
             ok = False
         if i >= 30 and r.status_code != 429:
