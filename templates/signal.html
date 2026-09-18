@@ -60,7 +60,7 @@
 <div class="sig-section">
 <h2>Your tier ladder</h2>
 <div class="tier-ladder">
-  {% for t in rules.tiers %}
+  {% for t in rules.tiers|reverse %}
   {% if not loop.first %}<div class="tier-arrow">→</div>{% endif %}
   <div class="tier-step">
     <div class="emoji">{% if t.tier == 'Static' %}📻{% elif t.tier == 'Signal' %}📡{% elif t.tier == 'Frequency' %}🎛️{% elif t.tier == 'Broadcast' %}📺{% else %}👑{% endif %}</div>
@@ -70,7 +70,7 @@
   {% endfor %}
 </div>
 <p class="sig-note" style="text-align:center">Crossing a tier for the first time pays a
-bonus on top of everything else:{% for m in rules.tier_milestones %}
+bonus on top of everything else:{% for m in rules.tier_milestones|reverse %}
 <b>+{{ m.points }}</b> at {{ m.tier }}{% if not loop.last %},{% endif %}{% endfor %}.</p>
 
 <h2>Ways to earn</h2>
