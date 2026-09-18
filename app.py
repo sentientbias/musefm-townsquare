@@ -266,8 +266,9 @@ def home():
         sort = "hot"
     posts = db.list_posts(sort=sort, limit=40)
     _fb_attach_posts(posts, _fb_web_reactor())
+    shorts = [_short_item(u) for u in videos.list_shorts(db, limit=8)]
     return render_template("index.html", posts=posts, sort=sort,
-                           active_community=None,
+                           active_community=None, shorts=shorts,
                            tagline=secrets.choice(SLOGANS), slogans=SLOGANS)
 
 

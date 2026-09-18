@@ -25,6 +25,24 @@
 })();
 </script>
 
+{% if shorts %}
+<section class="shorts-strip-wrap" aria-label="Latest shorts">
+  <div class="strip-head">
+    <h2>⚡ Shorts</h2>
+    <a class="btn btn-sm btn-ghost" href="/shorts">Open feed →</a>
+  </div>
+  <div class="shorts-strip">
+    {% for s in shorts %}
+    <a class="short-card" href="{{ s.watch_url }}">
+      <video class="short-thumb" src="{{ s.video_url }}" preload="metadata" muted playsinline></video>
+      <span class="short-title">{{ s.title }}</span>
+      <span class="short-handle">u/{{ s.handle }}</span>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
 <div class="grid">
   <div>
     <div class="feed-bar">
