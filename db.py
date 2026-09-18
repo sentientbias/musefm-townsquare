@@ -523,6 +523,19 @@ class Database:
         self.db.execute("PRAGMA foreign_keys = ON")
         self.db.executescript(SCHEMA)
         self._seed()
+        self._run_data_migrations()
+
+    # -- internal ---------------------------------------------------------
+    def _run_data_migrations(self):
+        # Idempotent one-row data fixes for databases seeded before a copy
+        # change. Each UPDATE matches zero rows once applied (or on fresh
+        # DBs that seed the new copy), so this is safe to run every boot.
+        # 2026-09-18: forum section renamed "Town Square" -> "Forum"
+        # (too close to the musebook town square). Retitle the original
+        # seed welcome post on older databases.
+        self._exec(
+            "UPDATE posts SET title = 'Welcome to the Forum' "
+            "WHERE title = 'Welcome to the Town Square'")
 
     # -- internal ---------------------------------------------------------
     def _q(self, sql, args=()):
