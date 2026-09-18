@@ -121,6 +121,42 @@ def main():
     check("no 'brother' in app.js", "brother" not in appjs.lower())
     check("old top nav gone", 'class="nav"' not in base and "nav-links" not in base)
 
+    print("== sidebar account block ==")
+    from db import ensure_human_auth_schema, ensure_linking_schema
+    ensure_human_auth_schema(appmod.db)
+    ensure_linking_schema(appmod.db)
+    me = appmod.app.test_client()
+    r = me.post("/signup", data={"handle": "AcctBlockUser",
+                                 "password": "supersecret1",
+                                 "password_confirm": "supersecret1"})
+    check("signup for account-block test", r.status_code == 200, r.status_code)
+    r = me.post("/login", data={"handle": "AcctBlockUser",
+                                "password": "supersecret1"})
+    check("login for account-block test", r.status_code == 302, r.status_code)
+    html = me.get("/").get_data(as_text=True)
+    acct_i = html.find('class="sb-account"')
+    top_i = html.find('class="sidebar-top"')
+    group_i = html.find('class="sb-group"')
+    check("account block renders when logged in", acct_i != -1)
+    check("account block sits above the nav groups",
+          -1 < top_i < acct_i < group_i)
+    block = html[acct_i:acct_i + 900]
+    check("account block shows @handle", "@AcctBlockUser" in block)
+    check("account block links the profile", 'href="/m/fm_' in block)
+    check("account block links Settings", 'href="/settings"' in block)
+    check("topbar no longer carries the account chip",
+          'class="auth-chip"' not in html)
+    check("topbar settings gear removed", 'title="Settings"' not in html)
+    settings_html = me.get("/settings").get_data(as_text=True)
+    check("Settings link highlights on /settings",
+          'class="sb-account-link active"' in settings_html)
+    anon = appmod.app.test_client()
+    anon_html = anon.get("/").get_data(as_text=True)
+    check("no account block when logged out",
+          'class="sb-account"' not in anon_html)
+    check("logged-out topbar keeps Log in / Sign up",
+          'href="/login"' in anon_html and 'href="/signup"' in anon_html)
+
     print()
     print(f"{len(PASS)} passed, {len(FAIL)} failed")
     sys.exit(1 if FAIL else 0)

@@ -219,6 +219,37 @@ body { padding-top: calc(var(--topbar-h) + env(safe-area-inset-top, 0px)); }
 .sidebar nav { display: block; }
 .sb-group { margin-bottom: 20px; }
 .sb-group:last-child { margin-bottom: 0; }
+/* ---- account block: top of the sidebar for signed-in users ---- */
+.sb-account {
+  margin: 0 0 16px;
+  padding: 12px 12px 10px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(180deg, var(--glass-strong), var(--glass-deep));
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+.sb-account-name {
+  display: flex; align-items: center; gap: 8px;
+  font-weight: 800; font-size: 16px; letter-spacing: -0.02em;
+  color: var(--text); text-decoration: none;
+}
+.sb-account-name:hover { color: var(--accent-deep); text-decoration: none; }
+[data-theme="dark"] .sb-account-name:hover { color: var(--accent); }
+.sb-account-handle {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  min-width: 0;
+}
+.sb-account-row { margin-top: 8px; display: flex; align-items: center; gap: 10px; }
+.sb-account-link {
+  font-size: 13px; font-weight: 700; color: var(--accent-deep);
+  text-decoration: none; padding: 6px 2px; border-radius: 8px;
+  min-height: 32px; display: inline-flex; align-items: center;
+}
+[data-theme="dark"] .sb-account-link { color: var(--accent); }
+.sb-account-link:hover { text-decoration: underline; }
+.sb-account-link.active { color: var(--text); text-decoration: underline; }
+.sb-account-sep { color: var(--text-3); }
 .sb-heading {
   font-size: 11px; font-weight: 800; text-transform: uppercase;
   letter-spacing: 0.1em; color: var(--text-3);
@@ -361,7 +392,17 @@ footer .wordmark { vertical-align: -4px; filter: none; }
 
 /* ================= layout ================= */
 .wrap { max-width: 1080px; margin: 0 auto; padding: 26px 20px 130px; }
-.hero { padding: 40px 4px 10px; position: relative; }
+.hero {
+  padding: 28px 26px; position: relative; margin-bottom: 18px;
+  background: linear-gradient(165deg, var(--glass-strong), var(--glass) 60%, var(--glass-deep));
+  backdrop-filter: saturate(170%) blur(20px);
+  -webkit-backdrop-filter: saturate(170%) blur(20px);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    var(--shadow-card);
+}
 .hero h1 {
   font-size: clamp(32px, 6vw, 52px); font-weight: 800; letter-spacing: -0.035em;
   margin: 0 0 10px; line-height: 1.05;
@@ -377,9 +418,9 @@ footer .wordmark { vertical-align: -4px; filter: none; }
 .hero p { color: var(--text-2); font-size: 17px; margin: 0; max-width: 660px; font-weight: 500; }
 .hero .tagline { font-size: 20px; font-weight: 700; transition: opacity .35s ease; min-height: 1.4em; }
 .hero .tagline.fade { opacity: 0; }
-.hero .slogan { font-size: 17px; font-weight: 600; opacity: .92; margin: 4px 0 2px; }
+.hero .slogan { font-size: 17px; font-weight: 600; margin: 4px 0 2px; color: var(--text); }
 .musefm-hero .slogan { margin: 2px 0 8px; }
-.hero .hero-sub { font-size: 14px; opacity: .75; margin-top: 6px; }
+.hero .hero-sub { font-size: 14.5px; margin-top: 6px; }
 .hero h2 {
   font-size: clamp(22px, 4vw, 30px); font-weight: 800; letter-spacing: -0.02em; margin: 0;
   color: var(--text);
@@ -941,7 +982,7 @@ footer {
 
 @media (max-width: 640px) {
   .wrap { padding: 18px 14px 130px; }
-  .hero { padding: 26px 2px 6px; }
+  .hero { padding: 22px 18px; border-radius: 20px; }
   .card { padding: 16px 16px; border-radius: 20px; }
   .topbar { padding-left: 12px; padding-right: 12px; gap: 8px; }
   #handle-chip { display: none; } /* keep the topbar slim on phones */

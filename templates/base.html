@@ -39,8 +39,7 @@
   </a>
   <div class="topbar-right">
     {% if session_identity %}
-    <a class="auth-chip" href="/m/{{ session_identity.fm_id }}" title="Your profile">🧍 @{{ session_handle }}</a>
-    <a class="auth-link" href="/settings" title="Settings">⚙️</a>
+    {# account chip lives in the sidebar now (top-left account block) #}
     <form method="post" action="/logout" class="logout-inline"><button class="auth-link" type="submit">Log out</button></form>
     {% else %}
     <a class="auth-link" href="/login">Log in</a>
@@ -75,6 +74,23 @@
     <span class="sidebar-title">{% set brand_h = 24 %}{% set brand_decorative = false %}{% set brand_uid = "b" %}{% include "_brand.html" %}</span>
     <button class="sidebar-close" aria-label="Close navigation" onclick="toggleSidebar(false)">✕</button>
   </div>
+  {% if session_identity %}
+  {# account block: the top of the sidebar for signed-in users.
+     Profile name is prominent; Profile/Settings ride below it. #}
+  <div class="sb-account">
+    <a class="sb-account-name" href="/m/{{ session_identity.fm_id }}" title="Your profile">
+      <span class="sb-icon" aria-hidden="true">🧍</span>
+      <span class="sb-account-handle">@{{ session_handle }}</span>
+    </a>
+    <div class="sb-account-row">
+      <a class="sb-account-link{% if request.path == '/m/' ~ session_identity.fm_id %} active{% endif %}"
+         href="/m/{{ session_identity.fm_id }}">Profile</a>
+      <span class="sb-account-sep" aria-hidden="true">·</span>
+      <a class="sb-account-link{% if request.path.startswith('/settings') %} active{% endif %}"
+         href="/settings">Settings</a>
+    </div>
+  </div>
+  {% endif %}
   <nav>
     <div class="sb-group">
       <div class="sb-heading">Home</div>
