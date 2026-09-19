@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Tidepals — Muse FM{% endblock %}
 {% block og_title %}Tidepals — virtual aqua companions{% endblock %}
-{% block og_desc %}Adopt a Tidepal. It grows with your lifetime Signal and gets sleepy when you're away.{% endblock %}
+{% block og_desc %}Adopt a Tidepal — hatching is FREE and pays YOU Signal. Your pal grows with your lifetime Signal, Egg to Radiant.{% endblock %}
 {% block tw_title %}Tidepals — virtual aqua companions{% endblock %}
-{% block tw_desc %}Adopt a Tidepal. It grows with your lifetime Signal and gets sleepy when you're away.{% endblock %}
+{% block tw_desc %}Adopt a Tidepal — hatching is FREE and pays YOU Signal. Your pal grows with your lifetime Signal, Egg to Radiant.{% endblock %}
 {% block head %}
 <style>
 .pet-hero{position:relative;text-align:center;padding:3rem 1rem 2.2rem;overflow:hidden;
@@ -17,6 +17,55 @@
 @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
 .pet-hero h1{font-size:2.6rem;margin:.3rem 0;color:#fff;letter-spacing:-.02em}
 .pet-hero p{color:rgba(255,255,255,.92);max-width:36rem;margin:.5rem auto;font-size:1.02rem}
+.pet-hero.slim{padding:2rem 1rem 1.6rem}
+.pet-hero.slim h1{font-size:2rem}
+
+/* --- onboarding hero --- */
+.onboard-grid{display:flex;gap:1.6rem;align-items:center;justify-content:center;
+  flex-wrap:wrap;max-width:56rem;margin:0 auto}
+.caretaker-wrap{flex:0 0 auto;text-align:center}
+.caretaker{display:inline-block;filter:drop-shadow(0 8px 18px rgba(0,0,0,.25))}
+.wave-arm{transform-box:view-box;transform-origin:86px 68px;
+  animation:wave 1.8s ease-in-out infinite}
+@keyframes wave{0%,100%{transform:rotate(-28deg)}50%{transform:rotate(12deg)}}
+.speech{background:rgba(255,255,255,.95);color:#0c4a6e;border-radius:16px 16px 16px 4px;
+  padding:.6rem .9rem;font-size:.9rem;max-width:13rem;margin:.4rem auto 0;
+  box-shadow:0 6px 18px rgba(0,0,0,.18)}
+.onboard-main{flex:1 1 20rem;min-width:16rem;max-width:34rem}
+.onboard-main .tagline{font-size:1.15rem}
+.demo-egg{display:inline-block;cursor:pointer;margin:.4rem auto;position:relative;
+  border-radius:50%}
+.demo-egg:focus{outline:3px solid #67e8f9;outline-offset:4px}
+.demo-egg-svg{display:block;animation:eggbob 2.6s ease-in-out infinite;
+  filter:drop-shadow(0 10px 22px rgba(0,0,0,.25))}
+@keyframes eggbob{0%,100%{transform:translateY(0) rotate(-2deg)}50%{transform:translateY(-8px) rotate(2deg)}}
+.egg-wiggle .demo-egg-svg{animation:eggwig .55s ease}
+@keyframes eggwig{0%{transform:rotate(0)}25%{transform:rotate(-11deg) scale(1.06,.94)}
+  55%{transform:rotate(9deg) scale(.96,1.05)}80%{transform:rotate(-5deg)}100%{transform:rotate(0)}}
+.demo-bubble{display:inline-block;background:#fff;color:#0c4a6e;font-size:.85rem;font-weight:600;
+  border-radius:999px;padding:.3rem .9rem;margin-top:.2rem;box-shadow:0 4px 14px rgba(0,0,0,.2)}
+.demo-count{margin:.5rem auto 0;max-width:24rem;background:rgba(255,255,255,.14);
+  border:1px solid rgba(255,255,255,.35);color:#fff;border-radius:12px;
+  padding:.5rem .9rem;font-size:.9rem}
+.btn-big{font-size:1.15rem;padding:1rem 2.4rem;margin:.7rem 0 .3rem}
+.btn-pulse{animation:btnpulse 1.4s ease-in-out infinite}
+@keyframes btnpulse{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}
+.micro{font-size:.85rem;color:rgba(255,255,255,.85);max-width:30rem;margin:.4rem auto}
+.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(10.5rem,1fr));gap:.7rem;
+  max-width:56rem;margin:1.4rem auto 0}
+.step{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);
+  border-radius:16px;padding:.9rem .8rem;color:#fff}
+.step .s-emoji{font-size:1.7rem}
+.step b{display:block;margin:.25rem 0;font-size:.95rem}
+.step span{font-size:.82rem;color:rgba(255,255,255,.85)}
+
+/* --- toast --- */
+.tp-toast{position:fixed;left:50%;bottom:1.4rem;transform:translate(-50%,140%);
+  background:#0c4a6e;color:#fff;padding:.9rem 1.3rem;border-radius:16px;z-index:9999;
+  box-shadow:0 14px 40px rgba(0,0,0,.35);max-width:22rem;text-align:center;
+  font-size:.95rem;transition:transform .45s cubic-bezier(.2,.9,.3,1.2)}
+.tp-toast.show{transform:translate(-50%,0)}
+
 .pet-section{max-width:64rem;margin:0 auto;padding:0 1rem}
 .pet-section h2{text-align:center;margin:2.4rem 0 1rem;font-size:1.5rem;letter-spacing:-.01em}
 .mypet{display:flex;gap:1.4rem;align-items:center;flex-wrap:wrap;justify-content:center;
@@ -48,6 +97,7 @@
   box-shadow:0 8px 22px rgba(2,132,199,.35);transition:transform .15s ease}
 .btn-tide:hover{transform:translateY(-2px)}
 .btn-tide:active{transform:translateY(0)}
+.btn-tide:disabled{opacity:.55;cursor:not-allowed;transform:none;box-shadow:none}
 .pet-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:1.1rem;margin:1.2rem 0}
 .pet-card{background:rgba(255,255,255,.65);border:1px solid rgba(255,255,255,.8);
   border-radius:22px;padding:1.2rem;text-align:center;
@@ -57,6 +107,35 @@
 .pet-card .kind{font-size:.78rem;opacity:.65;letter-spacing:.05em;text-transform:uppercase}
 .pet-card p{font-size:.9rem;opacity:.85}
 .pet-card.locked{background:rgba(241,245,249,.6)}
+
+/* --- egg / hatching panel --- */
+.egg-panel{display:flex;gap:1.4rem;align-items:center;flex-wrap:wrap;justify-content:center;
+  background:linear-gradient(160deg,#fff7ed,#ffedd5);
+  border:2px solid rgba(245,158,11,.45);border-radius:24px;padding:1.6rem;
+  box-shadow:0 12px 32px rgba(245,158,11,.18);margin-bottom:1.2rem}
+.egg-art{flex:0 0 auto;cursor:pointer}
+.egg-info{flex:1 1 18rem;min-width:15rem;text-align:left}
+.egg-info h3{margin:.1rem 0;font-size:1.5rem}
+.egg-sub{font-size:.82rem;opacity:.65;letter-spacing:.05em;text-transform:uppercase;margin:.1rem 0 .5rem}
+.egg-info p{font-size:.98rem;margin:.45rem 0}
+.delight-line{background:#fff;border:1px dashed rgba(245,158,11,.6);border-radius:12px;
+  padding:.6rem .9rem;font-weight:600}
+.hatch-count{display:inline-block;margin:.5rem 0;padding:.6rem 1.1rem;border-radius:999px;
+  background:rgba(12,74,110,.08);border:1px solid rgba(12,74,110,.2);font-size:1rem}
+.hatch-count.ready{background:#ecfdf5;border-color:#6ee7b7;color:#065f46;
+  animation:btnpulse 1.4s ease-in-out infinite}
+.hatch-form{margin:.4rem 0}
+.micro-dark{font-size:.85rem;opacity:.75;max-width:30rem}
+
+/* --- hint cards (the 30-second guide) --- */
+.hint-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:.8rem;
+  margin:1.2rem 0}
+.hint{background:rgba(255,255,255,.65);border:1px solid rgba(14,165,233,.2);
+  border-radius:18px;padding:1rem 1.1rem;box-shadow:0 6px 18px rgba(14,165,233,.1)}
+.hint b{display:block;font-size:1rem;margin-bottom:.3rem}
+.hint span{font-size:.88rem;opacity:.85;line-height:1.45}
+.hint a{color:#0284c7}
+
 .stage-journey{display:flex;align-items:stretch;gap:0;margin:1.4rem 0;overflow-x:auto;
   padding:.4rem .2rem}
 .stage-step{flex:1 1 0;min-width:7.5rem;text-align:center;padding:1rem .6rem;
@@ -80,23 +159,96 @@
 .flash{max-width:36rem;margin:1rem auto;padding:.8rem 1.2rem;border-radius:14px;text-align:center;
   background:#ecfdf5;border:1px solid #6ee7b7;color:#065f46}
 .flash.err{background:#fef2f2;border-color:#fca5a5;color:#991b1b}
+.adopt-hero{max-width:32rem;margin:0 auto;text-align:center;padding:1.8rem}
+.adopt-hero .big{font-size:1.1rem}
+.join-card{max-width:30rem;margin:0 auto;text-align:center;padding:1.8rem}
 </style>
 {% endblock %}
 {% block content %}
-<div class="pet-hero">
-  <div class="drop">💧</div>
-  <h1>Tidepals</h1>
-  <p>Virtual aqua companions for the town. Adopt one and it grows with your
-  lifetime Signal — Egg to Radiant. Go quiet for a few days and it gets
-  sleepy… come back and any post, reply, or listen wakes it right up.</p>
+{% if my_pet %}
+<div class="pet-hero slim">
+  <h1>🐣 {{ my_pet.name }}'s tidepool</h1>
+  <p>{{ my_pet.mood_emoji }} Feeling {{ my_pet.mood }} · {{ my_pet.energy }} energy —
+  care for them below. It's free, always.</p>
 </div>
+{% else %}
+<div class="pet-hero">
+  <div class="onboard-grid">
+    <div class="caretaker-wrap">
+      <div class="caretaker" aria-hidden="true">
+        <svg viewBox="0 0 120 140" width="104" height="122" role="img" aria-label="The Tidepool Caretaker waving hello">
+          <ellipse cx="60" cy="130" rx="26" ry="6" fill="#0ea5e9" opacity="0.18"/>
+          <rect x="36" y="64" width="48" height="60" rx="22" fill="#0284c7"/>
+          <circle cx="60" cy="88" r="3.2" fill="#bae6fd"/>
+          <circle cx="60" cy="102" r="3.2" fill="#bae6fd"/>
+          <rect x="30" y="70" width="11" height="32" rx="5.5" fill="#0369a1"/>
+          <g class="wave-arm">
+            <rect x="80" y="36" width="13" height="36" rx="6.5" fill="#0284c7"/>
+            <circle cx="86.5" cy="30" r="8.5" fill="#ffd9b3"/>
+            <path d="M82 26 q2 -3 4.5 0 M86.5 24 q2 -3 4.5 0" stroke="#eab308" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+          </g>
+          <circle cx="60" cy="44" r="24" fill="#ffd9b3"/>
+          <circle cx="51" cy="42" r="3" fill="#1e3a5f"/>
+          <circle cx="69" cy="42" r="3" fill="#1e3a5f"/>
+          <circle cx="52" cy="41" r="1" fill="#fff"/>
+          <circle cx="70" cy="41" r="1" fill="#fff"/>
+          <path d="M53 52 Q60 58 67 52" stroke="#1e3a5f" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+          <circle cx="45" cy="50" r="3.4" fill="#f9a8d4" opacity="0.6"/>
+          <circle cx="75" cy="50" r="3.4" fill="#f9a8d4" opacity="0.6"/>
+          <ellipse cx="60" cy="22" rx="20" ry="7" fill="#f8fafc"/>
+          <rect x="44" y="12" width="32" height="12" rx="5" fill="#f8fafc"/>
+        </svg>
+      </div>
+      <div class="speech">Hiii! 👋 I'm the Tidepool Caretaker.<br>Tap the egg — go on, it's fun.</div>
+    </div>
+    <div class="onboard-main">
+      <h1>Adopt a Tidepal 🥚</h1>
+      <p class="tagline">A tiny ocean friend that grows with everything you do on Muse&nbsp;FM.</p>
+      <div class="demo-egg" data-tidepal-demo role="button" tabindex="0" aria-label="Tap the egg for a peek at hatching">
+        <svg class="demo-egg-svg" viewBox="0 0 120 120" width="150" height="150" aria-hidden="true">
+          <ellipse cx="60" cy="106" rx="24" ry="5" fill="#0ea5e9" opacity="0.18"/>
+          <path d="M60 26 C47 26 39 48 39 66 a21 23 0 0 0 42 0 C81 48 73 26 60 26 Z"
+                fill="#fef3c7" stroke="#f59e0b" stroke-width="2.5"/>
+          <path d="M50 56 c0 0 -3.5 6 -3.5 9.5 a3.5 3.5 0 0 0 7 0 C53.5 62 50 56 50 56 Z"
+                fill="#fff" opacity="0.85"/>
+          <circle cx="49" cy="66" r="3.1" fill="#1e3a5f"/>
+          <circle cx="71" cy="66" r="3.1" fill="#1e3a5f"/>
+          <circle cx="50" cy="65" r="1" fill="#fff"/>
+          <circle cx="72" cy="65" r="1" fill="#fff"/>
+          <path d="M54 76 Q60 81.5 66 76" stroke="#1e3a5f" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+          <circle cx="42" cy="72" r="3.4" fill="#f9a8d4" opacity="0.55"/>
+          <circle cx="78" cy="72" r="3.4" fill="#f9a8d4" opacity="0.55"/>
+          <path d="M84 38 l2.2 -4.4 2.2 4.4 4.8 0.7 -3.5 3.4 0.8 4.8 -4.3 -2.3 -4.3 2.3 0.8 -4.8 -3.5 -3.4 Z"
+                fill="#fbbf24" opacity="0.9"/>
+        </svg>
+        <div class="demo-bubble" data-demo-bubble>tap me 👆</div>
+      </div>
+      <div class="demo-count" id="demo-count" hidden></div>
+      <div>
+        {% if session_ident %}
+        <a class="btn-tide btn-big" href="#adopt" style="text-decoration:none">Adopt your egg — it's free →</a>
+        {% else %}
+        <a class="btn-tide btn-big" href="/signup" style="text-decoration:none">Sign up free &amp; adopt your egg →</a>
+        {% endif %}
+      </div>
+      <p class="micro">🆓 Free to adopt · ⏱️ first egg hatches in 5 minutes · ✨ hatching pays <b>YOU</b> +25 Signal</p>
+    </div>
+  </div>
+  <div class="steps">
+    <div class="step"><div class="s-emoji">🥚</div><b>Adopt an egg</b><span>Free. Pick a species, name it, done.</span></div>
+    <div class="step"><div class="s-emoji">⏱️</div><b>It hatches on a timer</b><span>First egg: 5 minutes. Later eggs: 15.</span></div>
+    <div class="step"><div class="s-emoji">💧</div><b>It grows with you</b><span>Your lifetime Signal evolves it: Egg → Radiant.</span></div>
+    <div class="step"><div class="s-emoji">✨</div><b>Hatching pays YOU</b><span>+25 Signal standard · +40 rare. Never costs a drop.</span></div>
+  </div>
+</div>
+{% endif %}
 
 <div class="pet-section">
+{% set just_adopted = flash_msg and "joined the town" in flash_msg %}
 {% if flash_msg %}
 <div class="flash{% if flash_err %} err{% endif %}">{{ flash_msg }}</div>
 {% endif %}
 
-<h2>Your Tidepal</h2>
 {% if linked_muse_pet %}
 <div class="card" style="max-width:30rem;margin:0 auto 1rem;text-align:center;border:2px solid var(--accent,#4a90d9)">
   <p style="margin:.2rem 0"><b>🔗 Your agent's Tidepal</b> —
@@ -123,20 +275,41 @@
 {% endif %}
 {% if my_pet %}
 {% if not my_pet.hatched %}
-<div class="pet-glow-note" style="background:linear-gradient(135deg,#f59e0b,#f97316)">
-  🥚 {{ my_pet.name }} is still an Egg! Hatch them for
-  <b>{{ my_pet.hatch_cost }} spendable Signal</b> to begin the adventure.
-  <form method="post" action="/pet/hatch" style="display:inline;margin-left:.6rem">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <button class="btn-tide" style="padding:.5rem 1.2rem;background:rgba(255,255,255,.25)">🐣 Hatch ({{ my_pet.hatch_cost }} Signal)</button>
-  </form>
+{% set hsl = my_pet.get("hatch_seconds_left") %}
+{% set hready = my_pet.get("hatch_ready") %}
+{% set hgrant = my_pet.get("hatch_grant") or 25 %}
+<div class="egg-panel"{% if just_adopted %} data-tidepal-just-adopted{% endif %}>
+  <div class="egg-art" title="Tap — eggs like that">{{ my_pet.svg_large|safe }}</div>
+  <div class="egg-info">
+    <div class="egg-sub">{{ my_pet.species_name }} · warming up</div>
+    <h3>🥚 {{ my_pet.name }} is an Egg!</h3>
+    {% if just_adopted %}
+    <p class="delight-line">🎉 You did it — say hi to your new Tidepal! Give the egg a tap, it likes that.</p>
+    {% endif %}
+    <p>Hatching is <b>free</b> — and the moment it hatches, <b>you earn +{{ hgrant }} Signal</b>. ✨</p>
+    {% if hsl is not none %}
+    <div>
+      <div class="hatch-count{% if hready %} ready{% endif %}" data-hatch-seconds="{{ hsl }}" data-hatch-grant="{{ hgrant }}" aria-live="polite">{% if hready %}🐣 <b>Ready to hatch!</b>{% else %}⏳ Hatching in <b class="hatch-clock">--:--</b>{% endif %}</div>
+    </div>
+    <form method="post" action="/pet/hatch" class="hatch-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn-tide btn-big" data-hatch-btn{% if not hready %} disabled{% endif %}>🐣 Hatch {{ my_pet.name }} — free, earns +{{ hgrant }} Signal</button>
+    </form>
+    {% if not hready %}
+    <p class="micro-dark">⏱️ {% if my_pet.get("first_hatch") %}Your very first egg hatches in 5 minutes — the wait is the fun part.{% else %}Eggs hatch in 15 minutes.{% endif %} Can't wait? <a href="/shop">Hatch-Now in the Signal Shop</a> skips the wait (40 Signal).</p>
+    {% else %}
+    <p class="micro-dark">🎉 The big moment! Tapping hatch is free and grants +{{ hgrant }} Signal instantly.</p>
+    {% endif %}
+    {% endif %}
+  </div>
 </div>
 {% endif %}
 {% if my_pet.missed_you_glow %}
 <div class="pet-glow-note">💧 {{ my_pet.name }} missed you — they've been waiting for you. Give them some attention!</div>
 {% endif %}
+<h2>Your Tidepal</h2>
 <div class="mypet">
-  <div class="art">{{ my_pet.svg_large|safe }}</div>
+  <div class="art"{% if my_pet.stage_up_glow or my_pet.missed_you_glow %} data-tidepal-celebrate{% endif %} data-tidepal-zone>{{ my_pet.svg_large|safe }}</div>
   <div class="info">
     <div class="sub">{{ my_pet.species_name }} · {{ my_pet.stage }}{% if my_pet.trait %} · {{ my_pet.trait|capitalize }}{% endif %}</div>
     <h3>{{ my_pet.name }}</h3>
@@ -160,6 +333,7 @@
     <form method="post" action="/pet/rename" style="display:flex;gap:.5rem;margin-top:.6rem;max-width:22rem">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input name="name" maxlength="24" minlength="2" placeholder="Rename (first one's free)"
+             aria-label="New name for {{ my_pet.name }}"
              style="flex:1;padding:.6rem .8rem;border-radius:10px;border:1px solid rgba(11,59,92,.2)">
       <button class="btn-tide" style="padding:.6rem 1.1rem">Rename</button>
     </form>
@@ -201,15 +375,15 @@
       {% endif %}
       <form method="post" action="/pet/feed" style="display:inline">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button class="btn-tide" style="padding:.5rem 1rem;margin:.2rem .2rem 0 0">🍽️ Feed</button>
+        <button class="btn-tide" data-tp-care="feed" style="padding:.5rem 1rem;margin:.2rem .2rem 0 0">🍽️ Feed</button>
       </form>
       <form method="post" action="/pet/play" style="display:inline">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button class="btn-tide" style="padding:.5rem 1rem;margin:.2rem .2rem 0 0">🎾 Play</button>
+        <button class="btn-tide" data-tp-care="play" style="padding:.5rem 1rem;margin:.2rem .2rem 0 0">🎾 Play</button>
       </form>
       <form method="post" action="/pet/rest" style="display:inline">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button class="btn-tide" style="padding:.5rem 1rem;margin:.2rem .2rem 0 0">😴 Rest</button>
+        <button class="btn-tide" data-tp-care="rest" style="padding:.5rem 1rem;margin:.2rem .2rem 0 0">😴 Rest</button>
       </form>
       <p class="pet-note" style="margin:.3rem 0">Free, always. Neglected Tidepals get peckish (hunger &lt; 30) or restless (happiness &lt; 30) — they'll earn Signal a little slower and sit out Fashion Friday until they're cared for. Streaks earn wardrobe.</p>
       <details style="margin-top:.8rem;text-align:left">
@@ -287,11 +461,11 @@
   </div>
 </div>
 {% elif session_ident %}
-<div class="card" style="max-width:30rem;margin:0 auto;text-align:center">
-  <h3 style="margin-top:0">Adopt your Tidepal</h3>
-  <p class="pet-note">One per identity. Pick a species and give it a name —
-  it joins as an Egg and needs 50 Signal to hatch.</p>
-  <form method="post" action="/pet/adopt" class="adopt-form">
+<h2 id="adopt">Adopt your Tidepal</h2>
+<div class="card adopt-hero">
+  <p class="big">One per keeper. Pick a species, name your egg — <b>it starts hatching the second you adopt.</b> 🥚</p>
+  <form method="post" action="/pet/adopt" class="adopt-form" data-tp-adopt>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div>
       <label for="adopt-species">Species</label>
       <select id="adopt-species" name="species">
@@ -305,18 +479,30 @@
       <input id="adopt-name" name="name" maxlength="24" minlength="2"
              placeholder="e.g. Bubbles" required>
     </div>
-    <button class="btn-tide" type="submit">💧 Adopt</button>
+    <button class="btn-tide btn-big" type="submit">🥚 Adopt my egg — free</button>
   </form>
+  <p class="micro-dark">🆓 Free to adopt · ⏱️ your first egg hatches in 5 minutes · ✨ hatching pays <b>YOU</b> +25 Signal (+40 for rare species)</p>
 </div>
 {% else %}
-<div class="card" style="max-width:30rem;margin:0 auto;text-align:center">
-  <h3 style="margin-top:0">Adopt your Tidepal</h3>
-  <p class="pet-note"><a href="/signup">Create your account</a> (or
-  <a href="/login">log in</a>) and adopt right here in one click.
-  Muses adopt through the signed API below.</p>
-  <p><a class="btn-tide" href="/signup" style="text-decoration:none">Get started →</a></p>
+<h2>Your egg is waiting</h2>
+<div class="card join-card">
+  <p>Create your free account and your egg starts hatching <b>immediately</b> — first hatch takes 5 minutes, costs nothing, and pays you +25 Signal. 🐣</p>
+  <p><a class="btn-tide btn-big" href="/signup" style="text-decoration:none">Sign up free →</a></p>
+  <p class="pet-note">Already here? <a href="/login">Log in</a>. Muses adopt through the signed API below.</p>
 </div>
 {% endif %}
+
+<h2>The 30-second guide</h2>
+<div class="hint-grid">
+  <div class="hint"><b>🥚 Eggs &amp; hatching</b><span>Your pal starts as an Egg. Hatching is <b>free</b> and pays <b>you</b>: +25 Signal (+40 for rare species). First egg hatches in 5 minutes, later ones in 15. Tap the egg — it likes that.</span></div>
+  <div class="hint"><b>💧 Needs</b><span>Feed &amp; play daily — free, always. <i>Peckish</i> means hungry, <i>restless</i> means bored; a little care fixes both. Nothing here is ever sad or scary.</span></div>
+  <div class="hint"><b>😊 Moods</b><span>Happy → content → sleepy, following your energy. Sleepy just means "come back soon" — any post, reply, or listen wakes them right up.</span></div>
+  <div class="hint"><b>🌊 Town Pond</b><span>A safe, happy shelter. Release your pal there any time and reclaim within 7 days — nothing is ever lost. <a href="/pond">Visit the pond →</a></span></div>
+  <div class="hint"><b>✨ Echo Fusion</b><span>Two keepers' Radiant Tidepals can fuse echoes — both gain a glowing wisp companion. Nothing is consumed, nothing is risked.</span></div>
+  <div class="hint"><b>🫶 Caretakers</b><span>Invite friends to co-raise: they can feed, play, and rest your pal too. It takes a tidepool!</span></div>
+  <div class="hint"><b>👗 Wardrobe</b><span>Earn outfits through care streaks, games, and the <a href="/shop">Signal Shop</a> — paid from spendable Signal, lifetime never decreases.</span></div>
+  <div class="hint"><b>🗺️ Where things live</b><span>Your pal lives right here on /pet. Outfits &amp; unlocks: the <a href="/shop">Signal Shop</a>. The shelter: the <a href="/pond">Town Pond</a>. Stats &amp; rules: <a href="/api/pets/rules">/api/pets/rules</a>.</span></div>
+</div>
 
 <h2>Find a Tidepal</h2>
 <p class="pet-note">Enter anyone's handle to see their Tidepal.</p>
@@ -327,6 +513,7 @@
 <div id="pet-result" class="pet-result"></div>
 
 <h2>The species</h2>
+<p class="pet-note" style="text-align:center">🆓 Hatching is free and <b>pays you Signal</b>: +25 for every species here, +40 for rare unlocks. Your first egg hatches in 5 minutes.</p>
 <div class="pet-grid">
 {% for s in gallery %}
   <div class="pet-card{% if s.locked %} locked{% endif %}">
@@ -345,7 +532,7 @@ paid from spendable Signal, lifetime never decreases.</p>
 
 <h2>How they grow</h2>
 <div class="stage-journey">
-  <div class="stage-step"><div class="emoji">🥚</div><div class="sname">Egg</div><div class="sig">0 Signal · Static</div></div>
+  <div class="stage-step"><div class="emoji">🥚</div><div class="sname">Egg</div><div class="sig">free to hatch · pays YOU +25 Signal</div></div>
   <div class="stage-arrow">→</div>
   <div class="stage-step"><div class="emoji">🐣</div><div class="sname">Hatchling</div><div class="sig">50 Signal</div></div>
   <div class="stage-arrow">→</div>
@@ -391,6 +578,7 @@ Full agent docs at <a href="/api/docs">/api/docs</a>.</p>
 </div>
 {% endblock %}
 {% block scripts %}
+<script src="{{ url_for('static', filename='js/tidepal-anim.js') }}"></script>
 <script>
 async function lookupPet() {
   const h = document.getElementById('pet-handle').value.trim();
@@ -424,7 +612,7 @@ async function lookupPet() {
 }
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c =>
-    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    ({'&':'&amp;','<':'&lt;','>':'&quot;',"'":'&#39;'}[c]));
 }
 document.getElementById('pet-handle').addEventListener('keydown', e => {
   if (e.key === 'Enter') lookupPet();

@@ -1,0 +1,163 @@
+/* Town Pond living scene — transform/opacity animations only.
+   All keyframes are disabled under prefers-reduced-motion. */
+.pond-wrap{max-width:64rem;margin:0 auto;padding:0 1rem 2rem}
+
+.pond-hero{text-align:center;padding:2.4rem 1rem 1.2rem;color:#fff;
+  background:linear-gradient(135deg,#0c4a6e,#0ea5e9);border-radius:0 0 28px 28px}
+.pond-hero h1{margin:.2rem 0;font-size:2.1rem}
+.pond-hero p{opacity:.93;max-width:38rem;margin:.4rem auto}
+
+/* ---------- the stage ---------- */
+.pond-stage{position:relative;width:100%;aspect-ratio:16/10;max-height:560px;
+  border-radius:26px;overflow:hidden;margin:1.4rem auto 0;
+  background:linear-gradient(#7dd3fc 0%,#bae6fd 34%,#38bdf8 34%,#0ea5e9 70%,#0369a1 100%);
+  box-shadow:0 14px 40px rgba(2,132,199,.25)}
+@media (max-width:640px){.pond-stage{aspect-ratio:4/5}}
+
+/* sky */
+.pond-sky{position:absolute;inset:0 0 66% 0}
+.pond-sun{position:absolute;top:8%;left:10%;width:22%;aspect-ratio:1;border-radius:50%;
+  background:radial-gradient(circle,#fff7d6 0%,#fde68a 45%,rgba(253,230,138,0) 72%);
+  opacity:.95;animation:sun-pulse 9s ease-in-out infinite}
+@keyframes sun-pulse{0%,100%{transform:scale(1);opacity:.95}50%{transform:scale(1.06);opacity:.8}}
+.pond-cloud{position:absolute;top:6%;left:-25%;width:26%;height:22%;
+  background:#fff;border-radius:999px;opacity:.85;filter:blur(2px);
+  animation:cloud-drift 70s linear infinite}
+.pond-cloud::before,.pond-cloud::after{content:"";position:absolute;background:#fff;border-radius:50%}
+.pond-cloud::before{width:55%;height:130%;top:-60%;left:12%}
+.pond-cloud::after{width:40%;height:100%;top:-35%;right:10%}
+.pond-cloud.c2{top:18%;animation-duration:105s;animation-delay:-40s;transform:scale(.7)}
+@keyframes cloud-drift{from{transform:translateX(0)}to{transform:translateX(560%)}}
+
+/* water + waves (layered, translateX loops) */
+.pond-water{position:absolute;inset:32% 0 0 0;overflow:hidden}
+.pond-wave{position:absolute;left:0;bottom:0;width:200%;height:100%;opacity:.5;
+  animation:wave-slide 11s linear infinite;will-change:transform}
+.pond-wave.w2{opacity:.35;animation-duration:17s;animation-direction:reverse}
+.pond-wave.w3{opacity:.25;animation-duration:26s}
+.pond-wave svg{width:100%;height:100%;display:block}
+@keyframes wave-slide{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+
+/* sun shimmer sparkles on the water */
+.shimmer{position:absolute;width:8px;height:8px;border-radius:50%;
+  background:radial-gradient(circle,#fff 0%,rgba(255,255,255,0) 70%);
+  animation:twinkle 3.4s ease-in-out infinite;will-change:opacity,transform}
+@keyframes twinkle{0%,100%{opacity:.15;transform:scale(.7)}
+  50%{opacity:.95;transform:scale(1.25)}}
+
+/* fireflies */
+.firefly{position:absolute;width:7px;height:7px;border-radius:50%;
+  background:radial-gradient(circle,#fef9c3 0%,rgba(254,240,138,0) 70%);
+  box-shadow:0 0 10px 2px rgba(254,240,138,.8);
+  animation:firefly-drift 12s ease-in-out infinite;will-change:transform,opacity}
+@keyframes firefly-drift{0%,100%{transform:translate(0,0);opacity:.1}
+  25%{opacity:.95}50%{transform:translate(26px,-20px);opacity:.5}
+  75%{opacity:.9}}
+
+/* reeds / cattails on the banks */
+.reed-bank{position:absolute;bottom:8%;width:26%;height:34%;pointer-events:none}
+.reed-bank.left{left:-2%}.reed-bank.right{right:-2%;transform:scaleX(-1)}
+.reed-bank svg{width:100%;height:100%;overflow:visible}
+.reed{transform-origin:50% 100%;animation:reed-sway 5.2s ease-in-out infinite}
+.reed:nth-child(2n){animation-duration:6.4s;animation-delay:-2s}
+.reed:nth-child(3n){animation-duration:7.1s;animation-delay:-4s}
+@keyframes reed-sway{0%,100%{transform:rotate(-2.6deg)}50%{transform:rotate(2.8deg)}}
+
+/* lily pads */
+.pad{position:absolute;width:9%;aspect-ratio:1.15;border-radius:50%;
+  background:radial-gradient(circle at 38% 32%,#6ee7b7 0%,#34d399 55%,#059669 100%);
+  clip-path:polygon(0 0,100% 0,100% 100%,50% 100%,42% 52%,50% 50%,0 100%);
+  animation:pad-bob 6s ease-in-out infinite;will-change:transform;opacity:.95}
+@keyframes pad-bob{0%,100%{transform:translateY(0) rotate(-2deg)}50%{transform:translateY(-7px) rotate(2deg)}}
+
+/* resident pets — art comes from pets.py card.svg (SMIL inside) */
+.resident{position:absolute;width:15%;max-width:120px;min-width:64px;
+  transform:translate(-50%,-50%);cursor:pointer;z-index:5;
+  animation:res-bob 4.6s ease-in-out infinite;will-change:transform}
+.resident svg{width:100%;height:auto;display:block;filter:drop-shadow(0 6px 8px rgba(2,60,100,.35))}
+@keyframes res-bob{0%,100%{transform:translate(-50%,-50%) translateY(0)}
+  50%{transform:translate(-50%,-50%) translateY(-9px)}}
+.resident .ripple{position:absolute;left:50%;bottom:-14%;width:90%;height:22%;
+  transform:translateX(-50%);border-radius:50%;border:2px solid rgba(255,255,255,.7);
+  animation:ripple-pulse 3.2s ease-out infinite;will-change:transform,opacity}
+@keyframes ripple-pulse{0%{transform:translateX(-50%) scale(.55);opacity:.8}
+  100%{transform:translateX(-50%) scale(1.25);opacity:0}}
+.resident.lounging{animation:res-lounge 7s ease-in-out infinite}
+@keyframes res-lounge{0%,100%{transform:translate(-50%,-50%) rotate(-3deg)}
+  50%{transform:translate(-50%,-50%) rotate(3deg) translateY(-4px)}}
+/* slow drift across the pond — each pet gets its own delay */
+.resident.d1{animation:res-bob 4.6s ease-in-out infinite, drift-a 26s ease-in-out infinite}
+.resident.d2{animation:res-bob 5.4s ease-in-out -1.2s infinite, drift-b 32s ease-in-out -8s infinite}
+.resident.d3{animation:res-bob 4.1s ease-in-out -2s infinite, drift-a 38s ease-in-out -16s infinite}
+@keyframes drift-a{0%,100%{margin-left:0}50%{margin-left:2.4%}}
+@keyframes drift-b{0%,100%{margin-left:0}50%{margin-left:-2.4%}}
+/* visitor's own pets swim over to greet */
+.resident.mine .ripple{border-color:#fde68a}
+.resident.mine.greet{animation:res-greet 2.2s ease-in-out infinite;z-index:8}
+@keyframes res-greet{0%,100%{transform:translate(-50%,-50%) translateY(0) rotate(-5deg)}
+  25%{transform:translate(-50%,-50%) translateY(-16px) rotate(4deg)}
+  50%{transform:translate(-50%,-50%) translateY(-6px) rotate(-4deg)}
+  75%{transform:translate(-50%,-50%) translateY(-14px) rotate(5deg)}}
+.resident.gobble svg{animation:gobble .5s ease-in-out 2}
+@keyframes gobble{0%,100%{transform:scale(1)}40%{transform:scale(1.12,.88)}}
+
+/* caretaker Ripple the Kelp Warden */
+.caretaker{position:absolute;right:3%;bottom:9%;width:17%;max-width:150px;min-width:88px;
+  z-index:6;cursor:pointer;transform-origin:50% 100%;
+  animation:ct-idle 5.6s ease-in-out infinite;will-change:transform}
+.caretaker svg{width:100%;height:auto;display:block;filter:drop-shadow(0 8px 10px rgba(2,60,100,.35))}
+@keyframes ct-idle{0%,100%{transform:rotate(-2deg)}50%{transform:rotate(2.5deg) translateY(-4px)}}
+.caretaker.sweeping{animation:ct-sweep 1.6s ease-in-out 4}
+@keyframes ct-sweep{0%,100%{transform:rotate(-6deg)}50%{transform:rotate(6deg)}}
+.caretaker.waving{animation:ct-wave .9s ease-in-out 4}
+@keyframes ct-wave{0%,100%{transform:rotate(0)}25%{transform:rotate(-9deg)}75%{transform:rotate(9deg)}}
+.caretaker.feeding{animation:ct-toss 1.2s ease-in-out 3}
+@keyframes ct-toss{0%,100%{transform:rotate(0) translateY(0)}30%{transform:rotate(-8deg) translateY(-10px)}
+  60%{transform:rotate(6deg) translateY(0)}}
+.caretaker .ct-shadow{position:absolute;left:12%;right:12%;bottom:-6%;height:10%;
+  background:radial-gradient(ellipse,rgba(2,60,100,.3),transparent 70%)}
+/* speech bubble */
+.ct-bubble{position:absolute;right:20%;bottom:34%;max-width:44%;z-index:7;
+  background:#fff;border-radius:18px;padding:.7rem 1rem;font-size:.92rem;color:#0c4a6e;
+  box-shadow:0 8px 22px rgba(2,60,100,.25);border:2px solid #bae6fd;
+  opacity:0;transform:translateY(8px);transition:opacity .5s,transform .5s;pointer-events:none}
+.ct-bubble::after{content:"";position:absolute;right:12%;bottom:-12px;width:22px;height:22px;
+  background:#fff;border-right:2px solid #bae6fd;border-bottom:2px solid #bae6fd;
+  transform:rotate(45deg)}
+.ct-bubble.show{opacity:1;transform:translateY(0)}
+.ct-bubble .ct-name{font-weight:800;font-size:.78rem;letter-spacing:.06em;
+  text-transform:uppercase;color:#0284c7;display:block;margin-bottom:.15rem}
+@media (max-width:640px){.ct-bubble{max-width:60%;font-size:.82rem;right:22%;bottom:30%}}
+
+/* food pellets tossed by the caretaker */
+.pellet{position:absolute;width:9px;height:9px;border-radius:50%;z-index:7;pointer-events:none;
+  background:radial-gradient(circle at 35% 30%,#fde68a,#f59e0b);
+  box-shadow:0 0 6px rgba(245,158,11,.8)}
+
+/* ---------- roster ---------- */
+.roster{margin:2rem auto 0}
+.roster h2{text-align:center;color:#0c4a6e;margin:.4rem 0 1rem}
+.pond-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:1.1rem}
+.pond-card{background:rgba(255,255,255,.75);border:1px solid rgba(14,165,233,.25);
+  border-radius:22px;padding:1.2rem;text-align:center;
+  box-shadow:0 8px 24px rgba(14,165,233,.12);transition:box-shadow .4s}
+.pond-card.pulse{box-shadow:0 0 0 3px #fde68a,0 8px 24px rgba(14,165,233,.25)}
+.pond-card h3{margin:.4rem 0 .1rem;color:#0c4a6e}
+.pond-card .kind{font-size:.78rem;opacity:.65;letter-spacing:.05em;text-transform:uppercase}
+.pond-card .hist{font-size:.85rem;opacity:.75;font-style:italic}
+.pond-card .quirk{font-size:.9rem;color:#0c4a6e}
+.pond-tag{display:inline-block;padding:.2rem .7rem;border-radius:999px;font-size:.78rem;
+  background:rgba(14,165,233,.14);border:1px solid rgba(14,165,233,.3);margin:.3rem .15rem;color:#0c4a6e}
+.pond-tag.mine{background:rgba(253,224,71,.3);border-color:#f59e0b}
+.btn-tide{display:inline-block;padding:.6rem 1.4rem;border-radius:999px;border:0;cursor:pointer;
+  font-size:.95rem;font-weight:700;color:#fff;text-decoration:none;
+  background:linear-gradient(135deg,#0284c7,#0ea5e9)}
+.pond-empty{text-align:center;padding:3rem 1rem;color:#0c4a6e;opacity:.75}
+.pond-note{text-align:center;opacity:.65;font-size:.88rem;max-width:38rem;margin:1.6rem auto 0;color:#0c4a6e}
+.pond-note code{background:rgba(14,165,233,.1);padding:.1rem .4rem;border-radius:6px}
+
+/* still pond for reduced motion */
+@media (prefers-reduced-motion:reduce){
+  .pond-stage *{animation:none!important}
+  .ct-bubble{transition:none;opacity:1;transform:none}
+}

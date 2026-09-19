@@ -555,6 +555,7 @@ def main():
     db._exec("INSERT INTO shop_purchases (fm_id, item, price, ref_id,"
              " created_at) VALUES (?,?,?,?,?)",
              (fmJ, "test_grant", -200, "tg_" + fmJ, int(time.time())))
+    db._exec("UPDATE tidepals SET hatch_ready_at=0 WHERE fm_id=?", (fmJ,))  # test setup: egg ready now
     pets.hatch_pet(db, fmJ)
     db.award(fmJ, "Evolver", 60, "thread", "post", "ev1")
     st = pets.pet_status(db, fmJ)

@@ -147,6 +147,7 @@ def main():
     db._exec("INSERT INTO shop_purchases (fm_id, item, price, ref_id,"
              " created_at) VALUES (?,?,?,?,?)",
              (fmA, "test_grant", -200, "tg1", now()))
+    db._exec("UPDATE tidepals SET hatch_ready_at=0 WHERE fm_id=?", (fmA,))  # test setup: egg ready now
     pets.hatch_pet(db, fmA)
     st = pets.pet_status(db, fmA)
     check("60 Signal -> Hatchling after hatch", st["stage"] == "Hatchling",

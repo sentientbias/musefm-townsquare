@@ -78,15 +78,24 @@ def main():
     c = setup()
     db = appmod.db
 
-    print("== hatch gate ==")
+    print("== hatch economy (free + grants Signal, timer-gated) ==")
     privA, fmA = reg(c, "Hatcher")
+    t0 = now()
     p = pets.adopt(db, fmA, "Hatcher", "driplet", "Eggy")
     check("adopt creates unhatched egg",
           p["hatched"] == 0 and p["trait"] in pets.PET_TRAITS
           and p["quirk"], p)
     st = pets.pet_status(db, fmA)
     check("unhatched pet is stage Egg", st["stage"] == "Egg"
-          and not st["hatched"] and st["hatch_cost"] == 50, st["stage"])
+          and not st["hatched"], st["stage"])
+    check("hatch grants 25 Signal (standard species)",
+          st["hatch_grant"] == 25, st["hatch_grant"])
+    check("first-ever hatch runs the quick 5-min timer",
+          st["first_hatch"] is True
+          and 290 <= st["hatch_ready_at"] - t0 <= 310
+          and 0 < st["hatch_seconds_left"] <= 300
+          and st["hatch_ready"] is False,
+          (st["hatch_ready_at"] - t0, st["hatch_seconds_left"]))
     db.award(fmA, "Hatcher", 500, "thread", "post", "h1")
     st = pets.pet_status(db, fmA)
     check("500 Signal still Egg until hatched", st["stage"] == "Egg", st["stage"])
@@ -94,18 +103,23 @@ def main():
     pets.adopt(db, fmZ, "Broke", "bloop", "NoFunds")
     try:
         pets.hatch_pet(db, fmZ)
-        check("hatch without funds rejected", False)
+        check("hatch before timer rejected", False)
     except ValueError as e:
-        check("hatch without funds rejected", "spendable" in str(e), str(e))
+        check("hatch before timer rejected", "warm up" in str(e), str(e))
+    # fast-forward the egg timer, then hatch: free + grants Signal
+    db._exec("UPDATE tidepals SET hatch_ready_at=? WHERE fm_id=?",
+             (now() - 1, fmA))
     life_before = db.lifetime_points(fmA)
     sp_before = shop.spendable(db, fmA)
     r = pets.hatch_pet(db, fmA)
-    check("hatch ok", r["hatched"] == "Eggy"
-          and r["spendable"] == sp_before - 50, r)
-    check("hatch charged 50 spendable",
-          shop.spendable(db, fmA) == sp_before - 50)
-    check("lifetime untouched by hatch",
+    check("hatch ok", r["hatched"] == "Eggy" and r["grant"] == 25
+          and r["spendable"] == sp_before + 25, r)
+    check("hatch granted 25 spendable",
+          shop.spendable(db, fmA) == sp_before + 25)
+    check("lifetime untouched by hatch grant",
           db.lifetime_points(fmA) == life_before, db.lifetime_points(fmA))
+    check("no longer first hatch after hatching",
+          pets._is_first_hatch(db, fmA) is False)
     st = pets.pet_status(db, fmA)
     expect_stage = pets.stage_for_points(db.lifetime_points(fmA))[1]
     check("hatched stage follows lifetime", st["stage"] == expect_stage
@@ -115,6 +129,33 @@ def main():
         check("double hatch rejected", False)
     except ValueError:
         check("double hatch rejected", True)
+    # second egg for the same keeper (after release) uses the normal timer
+    pets.release_pet(db, fmA)
+    p2 = pets.adopt(db, fmA, "Hatcher", "koi", "Eggy2")
+    st2 = pets.pet_status(db, fmA)
+    check("later hatch runs the normal 15-min timer",
+          st2["first_hatch"] is False
+          and 890 <= st2["hatch_ready_at"] - p2["adopted_at"] <= 910,
+          st2["hatch_ready_at"] - p2["adopted_at"])
+    # Hatch Now: validation + effect + sink math
+    try:
+        pets.hatch_now_seconds_left(db, fmZ)
+        check("hatch-now validation sees warming egg", True)
+    except ValueError as e:
+        check("hatch-now validation sees warming egg", False, str(e))
+    secs = pets.finish_hatch_early(db, fmZ)
+    check("hatch-now finishes the timer",
+          secs["skipped_seconds"] > 0
+          and pets.pet_status(db, fmZ)["hatch_ready"] is True)
+    r2 = pets.hatch_pet(db, fmZ)
+    check("hatch after hatch-now grants Signal", r2["grant"] == 25
+          and r2["hatched"] == "NoFunds", r2)
+    try:
+        pets.hatch_now_seconds_left(db, fmZ)
+        check("hatch-now rejected when egg ready", False)
+    except ValueError as e:
+        check("hatch-now rejected when egg ready", "Hatch Now" in str(e),
+              str(e))
     # legacy grandfathering
     privL, fmL = reg(c, "Legacy")
     pets.adopt(db, fmL, "Legacy", "bloop", "Oldie")
@@ -129,8 +170,12 @@ def main():
     check("quirk present", bool(st["quirk"]), st["quirk"])
     check("speech is kind", isinstance(st["speech"], str) and len(st["speech"]) > 0
           and "die" not in st["speech"].lower(), st["speech"][:60])
+    # hatching grants Signal now, so fmZ is no longer broke — use a fresh
+    # identity with zero spendable for the insufficient-funds check.
+    privB2, fmB2 = reg(c, "Broke2")
+    pets.adopt(db, fmB2, "Broke2", "driplet", "Penniless")
     try:
-        pets.reroll_trait(db, fmZ)
+        pets.reroll_trait(db, fmB2)
         check("reroll without funds rejected", False)
     except ValueError as e:
         check("reroll without funds rejected", "spendable" in str(e), str(e))
@@ -163,6 +208,9 @@ def main():
     privN, fmN = reg(c, "Neglecter")
     pets.adopt(db, fmN, "Neglecter", "kelpy", "Hungry")
     grant(db, fmN, 100)
+    db._exec("UPDATE tidepals SET hatch_ready_at=? WHERE fm_id=?",
+             (now() - 1, fmN))
+    db._exec("UPDATE tidepals SET hatch_ready_at=0 WHERE fm_id=?", (fmN,))  # test setup: egg ready now
     pets.hatch_pet(db, fmN)
     db._exec("UPDATE pet_care SET hunger=10, happiness=10, last_fed=0,"
              " last_played=0, last_rested=0 WHERE fm_id=?", (fmN,))
@@ -184,6 +232,7 @@ def main():
     privM, fmM = reg(c, "Multiplier")
     pets.adopt(db, fmM, "Multiplier", "kelpy", "Mult")
     grant(db, fmM, 300)
+    db._exec("UPDATE tidepals SET hatch_ready_at=0 WHERE fm_id=?", (fmM,))  # test setup: egg ready now
     pets.hatch_pet(db, fmM)
     db.award(fmM, "Multiplier", 2000, "thread", "post", "mm0")
     db._exec("UPDATE pet_care SET hunger=80, happiness=80 WHERE fm_id=?", (fmM,))
@@ -304,6 +353,7 @@ def main():
     privP, fmP = reg(c, "Ponder")
     pets.adopt(db, fmP, "Ponder", "squiddy", "Pondy")
     grant(db, fmP, 200)
+    db._exec("UPDATE tidepals SET hatch_ready_at=0 WHERE fm_id=?", (fmP,))  # test setup: egg ready now
     pets.hatch_pet(db, fmP)
     db._exec("UPDATE pet_care SET feed_streak=7 WHERE fm_id=?", (fmP,))
     rel = pets.release_pet(db, fmP)
@@ -336,9 +386,11 @@ def main():
     privR, fmR = reg(c, "Doubler")
     pets.adopt(db, fmR, "Doubler", "kelpy", "One")
     grant(db, fmR, 300)
+    db._exec("UPDATE tidepals SET hatch_ready_at=0 WHERE fm_id=?", (fmR,))  # test setup: egg ready now
     pets.hatch_pet(db, fmR)
     pets.release_pet(db, fmR)
     pets.adopt(db, fmR, "Doubler", "puffish", "Two")
+    db._exec("UPDATE tidepals SET hatch_ready_at=0 WHERE fm_id=?", (fmR,))  # test setup: egg ready now
     pets.hatch_pet(db, fmR)
     pets.release_pet(db, fmR)
     rows = pets._pond_rows_for_owner(db, fmR)
@@ -403,6 +455,7 @@ def main():
                           (fmG, "Fuser2", "bloop", "GlowB")):
         pets.adopt(db, fm, h, sp, nm)
         grant(db, fm, 300)
+        db._exec("UPDATE tidepals SET hatch_ready_at=0 WHERE fm_id=?", (fm,))
         pets.hatch_pet(db, fm)
     db.award(fmF, "Fuser1", 1200, "thread", "post", "f1")
     # not radiant yet for G
@@ -444,11 +497,13 @@ def main():
     privH, fmH = reg(c, "Fuser3")
     pets.adopt(db, fmH, "Fuser3", "kelpy", "GlowC")
     grant(db, fmH, 300)
+    db._exec("UPDATE tidepals SET hatch_ready_at=0 WHERE fm_id=?", (fmH,))  # test setup: egg ready now
     pets.hatch_pet(db, fmH)
     db.award(fmH, "Fuser3", 1200, "thread", "post", "f3")
     privJ2, fmJ2 = reg(c, "Fuser4")
     pets.adopt(db, fmJ2, "Fuser4", "puffish", "GlowD")
     grant(db, fmJ2, 300)
+    db._exec("UPDATE tidepals SET hatch_ready_at=0 WHERE fm_id=?", (fmJ2,))  # test setup: egg ready now
     pets.hatch_pet(db, fmJ2)
     db.award(fmJ2, "Fuser4", 1200, "thread", "post", "f4")
     pets.invite_fusion(db, fmH, "Fuser4")

@@ -72,13 +72,24 @@ PET_SLEEPY_WARN_MAX_DAYS = 7
 # neglect reads as a buddy asking for a favor, never a victim.)
 # ===========================================================================
 
-# --- hatch gate -----------------------------------------------------------
-# A Tidepal joins as an Egg and stays an Egg until its keeper spends 50
-# spendable Signal to hatch it (Neopets-style money sink, ledger-recorded
-# in shop_purchases; lifetime Signal is never touched and still gates
-# stages). This is the adoption gate Anthony approved: real consequence,
-# real commitment, zero cruelty.
-HATCH_COST = 50
+# --- hatch economy ----------------------------------------------------------
+# Hatching is FREE and GRANTS Signal — the economy loop Anthony approved
+# 2026-09-19: hatch → earn Signal → spend it on instant hatches, personality
+# rerolls, the sniffles clinic, cosmetics. Grants are ledger-recorded as
+# negative-price shop_purchases rows: spendable Signal rises, lifetime
+# Signal (which gates stages) is never touched.
+#   HATCH_GRANT      standard species hatch payout
+#   HATCH_GRANT_RARE locked/premium species hatch payout (rarer = more)
+#   HATCH_NOW_PRICE  shop "Hatch Now" skip-the-wait price — deliberately
+#                    above HATCH_GRANT_RARE so it is a real sink, no loop.
+#   HATCH_TIME       normal egg warm-up after adoption
+#   FIRST_HATCH_TIME a keeper's first-ever hatch is quick (the payoff beat)
+HATCH_GRANT = 25
+HATCH_GRANT_RARE = 40
+HATCH_NOW_PRICE = 40
+HATCH_TIME = 15 * 60
+FIRST_HATCH_TIME = 5 * 60
+HATCH_GRANT_ITEM = "tidepal_hatch_grant"
 
 # --- personality ----------------------------------------------------------
 # Rolled once at adoption; rerollable for spendable Signal. Wholesome
@@ -453,6 +464,17 @@ def _migrate_tidepals(db):
                  " INTEGER NOT NULL DEFAULT 0")
     if "prev_owner_handle" not in cols:
         db._exec("ALTER TABLE tidepals ADD COLUMN prev_owner_handle TEXT")
+    # Hatch economy (2026-09-19): eggs warm up on a timer after adoption.
+    # hatch_ready_at = epoch when the egg may be hatched (0 = ready now,
+    # which also grandfathers pre-timer eggs).
+    if "hatch_ready_at" not in cols:
+        db._exec("ALTER TABLE tidepals ADD COLUMN hatch_ready_at"
+                 " INTEGER NOT NULL DEFAULT 0")
+    # Pond scene (2026-09-19): the pond renders each released pet at the
+    # stage it had when released, so visitors see THEIR actual pet.
+    if "pond_stage" not in cols:
+        db._exec("ALTER TABLE tidepals ADD COLUMN pond_stage"
+                 " INTEGER NOT NULL DEFAULT 2")
 
 
 # --- naming ---------------------------------------------------------------
@@ -534,10 +556,14 @@ def adopt(db, fm_id, handle, species, name):
     t = now()
     trait = _roll_trait()
     quirk = _roll_quirk(trait)
+    grant = HATCH_GRANT_RARE if species in LOCKED_SPECIES else HATCH_GRANT
+    first = _is_first_hatch(db, fm_id)
+    ready_at = t + (FIRST_HATCH_TIME if first else HATCH_TIME)
     db._exec("INSERT INTO tidepals (fm_id, species, name, adopted_at,"
-             " evolved_at, evolved_stage, trait, quirk, hatched)"
-             " VALUES (?,?,?,?,?,?,?,?,?)",
-             (fm_id, species, name, t, 0, 0, trait, quirk, 0))
+             " evolved_at, evolved_stage, trait, quirk, hatched,"
+             " hatch_ready_at)"
+             " VALUES (?,?,?,?,?,?,?,?,?,?)",
+             (fm_id, species, name, t, 0, 0, trait, quirk, 0, ready_at))
     # Fresh stats for the new companion; the feed streak is the *owner's*
     # record and survives (it powers care-gated species unlocks).
     _care_row(db, fm_id)
@@ -546,9 +572,25 @@ def adopt(db, fm_id, handle, species, name):
     db.notify_once(fm_id, "pet", "tidepal", "adopted",
                    f"💧 {name} the {PET_SPECIES[species]['name']} joined"
                    f" the town as an Egg! They're {trait} — and"
-                   f" {quirk}. Hatch them for {HATCH_COST} spendable"
-                   f" Signal on your pet page.")
+                   f" {quirk}. The egg warms up for"
+                   f" {'5 minutes' if first else '15 minutes'}, then hatching"
+                   f" is FREE and earns you {grant} Signal!")
     return get_pet(db, fm_id)
+
+
+def _is_first_hatch(db, fm_id):
+    """True when this keeper has never hatched an egg before — their first
+    hatch runs on the quick timer. Ledger-backed: any prior hatch-grant
+    row means they've hatched before."""
+    shop.ensure_shop_schema(db)
+    r = db._one("SELECT id FROM shop_purchases WHERE fm_id=? AND item=?"
+                " LIMIT 1", (fm_id, HATCH_GRANT_ITEM))
+    return r is None
+
+
+def hatch_grant_for(species):
+    """Signal granted when this species hatches: rarer outcomes pay more."""
+    return HATCH_GRANT_RARE if species in LOCKED_SPECIES else HATCH_GRANT
 
 
 def rename_pet(db, fm_id, name):
@@ -574,7 +616,8 @@ def get_pet(db, fm_id):
     ensure_pet_schema(db)
     ensure_hatched_trait(db, fm_id)
     row = db._one("SELECT fm_id, species, name, adopted_at, trait, quirk,"
-                  " hatched, in_pond, pond_at, prev_owner_handle"
+                  " hatched, in_pond, pond_at, prev_owner_handle,"
+                  " hatch_ready_at"
                   " FROM tidepals WHERE fm_id=?", (fm_id,))
     return dict(row) if row else None
 
@@ -648,8 +691,9 @@ def release_pet(db, fm_id):
     streak = feed_streak_days(db, fm_id)
     pond_key = _pond_key(fm_id)
     t = now()
-    db._exec("UPDATE tidepals SET in_pond=1, pond_at=?, prev_owner_handle=?"
-             " WHERE fm_id=?", (t, handle, fm_id))
+    stage_idx, _stage_name = stage_for_points(db.lifetime_points(fm_id))
+    db._exec("UPDATE tidepals SET in_pond=1, pond_at=?, prev_owner_handle=?,"
+             " pond_stage=? WHERE fm_id=?", (t, handle, stage_idx, fm_id))
     # The pet's rows move to the pond key; the keeper's care record
     # (streak included) stays with the keeper; co-raise was a keeper
     # arrangement and ends here.
@@ -849,7 +893,13 @@ def pet_status(db, fm_id):
         "trait": pet["trait"],
         "quirk": pet["quirk"],
         "hatched": hatched,
-        "hatch_cost": 0 if hatched else HATCH_COST,
+        "hatch_ready_at": pet.get("hatch_ready_at") or 0,
+        "hatch_seconds_left": (0 if hatched else max(
+            0, (pet.get("hatch_ready_at") or 0) - now())),
+        "hatch_ready": (hatched or (pet.get("hatch_ready_at") or 0) == 0
+                        or now() >= (pet.get("hatch_ready_at") or 0)),
+        "hatch_grant": hatch_grant_for(pet["species"]),
+        "first_hatch": (not hatched and _is_first_hatch(db, fm_id)),
         "sniffles": has_sniffles(db, fm_id),
         "sniffles_until": care["sniffles_until"],
         "healing_tide_ready": (care["healing_tide_at"] +
@@ -1011,7 +1061,7 @@ def _f(v):
     return f"{v:.1f}"
 
 
-def _face(cx, cy, u, mood):
+def _face_inner(cx, cy, u, mood):
     """Eyes + mouth. happy = ^ ^ + open smile; content = dots + smile;
     sleepy = closed u u + flat mouth + floating z's."""
     ink = _INK
@@ -1091,6 +1141,12 @@ def _face(cx, cy, u, mood):
         f' {_f(cx+1.7*u)},{_f(cy+1.3*u)}" stroke="{ink}" stroke-width="{sw}"'
         ' fill="none" stroke-linecap="round"/>'
     )
+
+
+def _face(cx, cy, u, mood):
+    """_face_inner wrapped for the client-side animation engine: the
+    .tp-eyes group is what eye-tracking targets."""
+    return f'<g class="tp-eyes">{_face_inner(cx, cy, u, mood)}</g>'
 
 
 def _shadow():
@@ -2230,15 +2286,20 @@ def pet_svg(species, stage_idx, mood, size=120, accessories=(), wardrobe=(),
         aura = _celebrate_aura() + aura
     label = (f"{PET_SPECIES[species]['name']} — "
              f"{PET_STAGES[stage_idx][1]}, {mood}")
-    body = (f'<g transform="translate(60 62) scale({s}) translate(-60 -62)">'
+    body = (f'<g class="tp-body" transform="translate(60 62) scale({s})'
+            f' translate(-60 -62)">'
             f"{inner}{overlays}{top_art}</g>")
     if animate:
         body = _anim_wrap(body, mood, trait, stage_idx)
     mood_fx = _mood_overlay(mood, sniffles) if animate else ""
     wisp_art = _wisp_orbit() if (wisp and animate) else ""
+    hook_trait = trait if trait in PET_TRAITS else "calm"
     return (
         f'<svg viewBox="0 0 120 120" width="{size}" height="{size}" role="img"'
-        f' aria-label="{label}" xmlns="http://www.w3.org/2000/svg">'
+        f' aria-label="{label}" xmlns="http://www.w3.org/2000/svg"'
+        f' data-tidepal="1" data-species="{species}"'
+        f' data-stage="{stage_idx}" data-mood="{mood}"'
+        f' data-trait="{hook_trait}">'
         f"<title>{label}</title>"
         f"{bg_art}{aura}{_shadow()}{trail_art}"
         f"{body}{mood_fx}{wisp_art}</svg>")
@@ -3296,7 +3357,8 @@ def _pet_full(db, fm_id):
     """tidepals row with depth columns (trait, quirk, hatched, pond)."""
     ensure_pet_schema(db)
     row = db._one("SELECT fm_id, species, name, adopted_at, trait, quirk,"
-                  " hatched, in_pond, pond_at, prev_owner_handle"
+                  " hatched, in_pond, pond_at, prev_owner_handle,"
+                  " hatch_ready_at"
                   " FROM tidepals WHERE fm_id=?", (fm_id,))
     return dict(row) if row else None
 
@@ -3317,11 +3379,11 @@ def ensure_hatched_trait(db, fm_id):
 # hatch gate
 # ---------------------------------------------------------------------------
 def hatch_pet(db, fm_id):
-    """Hatch your Tidepal's Egg: costs HATCH_COST spendable Signal.
-
-    Ledger-recorded in shop_purchases (item 'tidepal_hatch') so the
-    spendable-balance math stays consistent; lifetime Signal is never
-    touched. Raises ValueError when already hatched or funds are short."""
+    """Hatch your Tidepal's Egg once its warm-up timer is done. Hatching is
+    FREE and GRANTS Signal (25 standard / 40 rare species), recorded as a
+    negative-price shop_purchases row: spendable Signal rises, lifetime
+    Signal (which gates stages) is never touched. Raises ValueError when
+    already hatched or the egg still needs time."""
     ensure_pet_schema(db)
     shop.ensure_shop_schema(db)
     pet = _pet_full(db, fm_id)
@@ -3330,23 +3392,51 @@ def hatch_pet(db, fm_id):
     if pet["in_pond"]:
         raise ValueError("your Tidepal is at the Town Pond — reclaim them first")
     if pet["hatched"]:
-        raise ValueError(f"{pet['name']} already hatched — no Signal spent")
-    if shop.spendable(db, fm_id) < HATCH_COST:
+        raise ValueError(f"{pet['name']} already hatched")
+    ready_at = pet.get("hatch_ready_at") or 0
+    if ready_at and now() < ready_at:
+        left = ready_at - now()
+        mins = max(1, -(-left // 60))
         raise ValueError(
-            f"hatching costs {HATCH_COST} spendable Signal — you have"
-            f" {shop.spendable(db, fm_id)} spendable. Earn a little more"
-            f" Signal and come back!")
+            f"🐣 {pet['name']}'s egg needs about {mins} more"
+            f" minute{'s' if mins != 1 else ''} to warm up — or skip the"
+            f" wait with Hatch Now in the Signal Shop (/shop).")
+    grant = hatch_grant_for(pet["species"])
     import secrets as _sec
     db._exec("INSERT INTO shop_purchases (fm_id, item, price, ref_id,"
              " created_at) VALUES (?,?,?,?,?)",
-             (fm_id, "tidepal_hatch", HATCH_COST,
-              f"hatch:{fm_id}:{now()}:{_sec.token_hex(4)}", now()))
+             (fm_id, HATCH_GRANT_ITEM, -grant,
+              f"hatchgrant:{fm_id}:{now()}:{_sec.token_hex(4)}", now()))
     db._exec("UPDATE tidepals SET hatched=1 WHERE fm_id=?", (fm_id,))
     db.notify_once(fm_id, "pet", "hatch", f"hatch:{fm_id}",
-                   f"🐣 {pet['name']} hatched! The whole Tidepool cheered."
-                   f" Now the real adventure begins — earn Signal and watch"
-                   f" them grow.")
-    return {"hatched": pet["name"], "spendable": shop.spendable(db, fm_id)}
+                   f"🐣 {pet['name']} hatched! The whole Tidepool cheered —"
+                   f" and hatching earned you {grant} Signal!")
+    return {"hatched": pet["name"], "grant": grant,
+            "spendable": shop.spendable(db, fm_id)}
+
+
+def hatch_now_seconds_left(db, fm_id):
+    """Seconds until the keeper's egg is ready — the validation behind the
+    Hatch Now shop item. Raises ValueError when there is no warming egg."""
+    ensure_pet_schema(db)
+    pet = _pet_full(db, fm_id)
+    if not pet or pet["in_pond"] or pet["hatched"]:
+        raise ValueError("Hatch Now needs an egg that's still warming up — "
+                         "yours already hatched (or you haven't adopted yet).")
+    ready_at = pet.get("hatch_ready_at") or 0
+    if not ready_at or now() >= ready_at:
+        raise ValueError("your egg is ready to hatch right now —"
+                         " no need for Hatch Now!")
+    return ready_at - now()
+
+
+def finish_hatch_early(db, fm_id):
+    """Apply the Hatch Now effect after purchase: the timer completes
+    immediately. Re-validates (raises when there is nothing to skip)."""
+    secs = hatch_now_seconds_left(db, fm_id)
+    db._exec("UPDATE tidepals SET hatch_ready_at=? WHERE fm_id=?",
+             (now(), fm_id))
+    return {"skipped_seconds": secs}
 
 
 def reroll_trait(db, fm_id):
@@ -3665,7 +3755,7 @@ def pond_list(db):
     the reclaim window. History preserved on every row."""
     ensure_pet_schema(db)
     rows = db._q("SELECT fm_id, species, name, adopted_at, trait,"
-                 " pond_at, prev_owner_handle FROM tidepals"
+                 " pond_at, prev_owner_handle, pond_stage FROM tidepals"
                  " WHERE in_pond=1 ORDER BY pond_at DESC")
     out = []
     for r in rows:
@@ -3674,6 +3764,7 @@ def pond_list(db):
         d["reclaimable_until"] = reclaim_until
         d["open_adoption"] = now() > reclaim_until
         d["species_name"] = PET_SPECIES.get(r["species"], {}).get("name", r["species"])
+        d["stage_idx"] = r["pond_stage"] or 2
         out.append(d)
     return out
 
@@ -3682,7 +3773,7 @@ def pond_detail(db, pond_fm_id):
     """Full pond-pet card: art + history line."""
     ensure_pet_schema(db)
     r = db._one("SELECT fm_id, species, name, adopted_at, trait, quirk,"
-                " pond_at, prev_owner_handle FROM tidepals"
+                " pond_at, prev_owner_handle, pond_stage FROM tidepals"
                 " WHERE fm_id=? AND in_pond=1", (pond_fm_id,))
     if not r:
         return None
@@ -3691,7 +3782,8 @@ def pond_detail(db, pond_fm_id):
     d["reclaimable_until"] = reclaim_until
     d["open_adoption"] = now() > reclaim_until
     d["species_name"] = PET_SPECIES.get(r["species"], {}).get("name", r["species"])
-    d["svg"] = pet_svg(r["species"], 2, "content", 120,
+    d["stage_idx"] = r["pond_stage"] or 2
+    d["svg"] = pet_svg(r["species"], d["stage_idx"], "content", 120,
                        trait=r["trait"], animate=True)
     prev = r["prev_owner_handle"]
     d["history_line"] = (f"Previously loved by @{prev}" if prev
@@ -3849,9 +3941,12 @@ def depth_rules():
                     " Consequences are economic, functional, temporal, or"
                     " social — framed as gentle nudges from a buddy."),
         "hatch_gate": {
-            "rule": (f"Adopted Tidepals join as Eggs and stay Eggs until"
-                     f" hatched for {HATCH_COST} spendable Signal"
-                     f" (ledger-recorded; lifetime Signal untouched)."),
+            "rule": (f"Adopted Tidepals join as Eggs and warm up on a timer"
+                     f" (5 min for a keeper's first-ever hatch, 15 min after)."
+                     f" Hatching is FREE and grants {HATCH_GRANT} Signal"
+                     f" ({HATCH_GRANT_RARE} for rare species), ledger-recorded;"
+                     f" lifetime Signal untouched. Hatch Now in the shop skips"
+                     f" the wait for {HATCH_NOW_PRICE} Signal."),
         },
         "personality": {
             "rule": ("Trait rolled at adoption (playful/calm/mischievous/"

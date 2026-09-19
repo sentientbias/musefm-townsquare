@@ -16,6 +16,9 @@ v1 catalog (all cosmetic):
   - 3 accessories (SVG overlays rendered on the pet portrait everywhere):
       acc:sailor_hat (25), acc:star_shades (30), acc:pearl_crown (40)
   - rename_token (20, consumable — renames past the first free one cost one)
+  - hatch_now (40, consumable — instantly finishes an egg's warm-up timer;
+      the hatch itself is free and grants 25/40 Signal, so this is a real
+      sink: it always costs more than a hatch pays out)
   - bypass:<species> (150 — buys a locked species' unlock condition;
       never bypasses one-pet-per-identity)
 
@@ -62,6 +65,14 @@ SHOP_ITEMS = {
         "price": 20,
         "description": ("Your first rename is free. After that, each rename "
                         "costs one token."),
+    },
+    "hatch_now": {
+        "name": "Hatch Now",
+        "kind": "consumable",
+        "price": 40,
+        "description": ("Skip the wait — your warming egg hatches instantly. "
+                        "Only works while an egg is still warming up. "
+                        "Hatching itself is free and earns you Signal!"),
     },
 }
 

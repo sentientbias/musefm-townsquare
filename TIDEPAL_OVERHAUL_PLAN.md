@@ -15,7 +15,7 @@
 
 ## Delegated decisions (locked)
 
-1. **Hatch gate:** Adoption creates an Egg; hatching costs 50 spendable Signal (ledger-recorded in `shop_purchases`; lifetime Signal untouched). Until hatched, pet is stage 0 regardless of lifetime Signal. Adoption copy says "joined as an Egg," never "hatched."
+1. **Hatch economy (revised 2026-09-19 by Anthony — replaces the old 50-Signal hatch cost):** Adoption creates an Egg; hatching is FREE and GRANTS Signal: +25 for standard species, +40 for locked/rare species (rarer outcomes pay more). Grants are ledger-recorded in `shop_purchases` as negative-price rows (item `tidepal_hatch_grant`); lifetime Signal untouched, so stages are unaffected. Eggs warm up on a timer after adoption: 5 minutes for a keeper's first-ever hatch (ledger-checked), 15 minutes for later hatches. Until hatched, pet is stage 0 regardless of lifetime Signal. New shop item **Hatch Now** (40 Signal, consumable): instantly finishes a warming egg — priced above the max grant so it's a real sink, never a loop. Adoption copy says "joined as an Egg," never "hatched"; copy never says hatching costs Signal.
 2. **Personality:** one wholesome trait at adoption (playful/calm/mischievous/gentle) + quirk; shifts idle animation, speech, tiny edges; reroll = 25 spendable Signal.
 3. **Consequences:** restless (not gloomy/grumpy) state; restless/peckish/sniffly → 0.75x Signal for keeper, sits out Fashion Friday, streaks break. Sea sniffles = mild random illness when hungry; cure at Tidepool Clinic (30 Signal) or free Healing Tide (12h cooldown). Current Lessons: spend Signal + wait real hours → permanent spirit (−0.5% decay/+1% XP per point, cap 20). Pets never die, no permanent involuntary loss.
 4. **Town Pond:** release no longer deletes. Visible shelter, 7-day reclaim window, then open adoption for 25 Signal with history preserved ("previously loved by @handle").
@@ -25,9 +25,11 @@
 ## What was built (this pass)
 
 **pets.py**
-- Schema: `tidepals` += trait, quirk, hatched (default 1 = grandfathered), in_pond, pond_at, prev_owner_handle; `pet_care` += sniffles_until, healing_tide_at, spirit, sniffle_roll_day; new `pet_lessons`, `pet_fusions`, `pet_wisps` tables.
+- Schema: `tidepals` += trait, quirk, hatched (default 1 = grandfathered), in_pond, pond_at, prev_owner_handle, hatch_ready_at (egg warm-up timer), pond_stage (stage at release, for the pond scene); `pet_care` += sniffles_until, healing_tide_at, spirit, sniffle_roll_day; new `pet_lessons`, `pet_fusions`, `pet_wisps` tables.
 - `adopt()` rolls trait/quirk, inserts hatched=0, fixed copy ("joined the town as an Egg").
-- `hatch_pet()` — 50 spendable Signal, ledger-recorded; `pet_status` forces stage 0 until hatched.
+- `hatch_pet()` — free, timer-gated; grants 25/40 Signal via negative-price ledger row (`tidepal_hatch_grant`); `pet_status` forces stage 0 until hatched and exposes `hatch_ready_at` / `hatch_seconds_left` / `hatch_ready` / `hatch_grant` / `first_hatch`.
+- `hatch_now_seconds_left()` + `finish_hatch_early()` — validation/effect behind the Hatch Now shop item (40 Signal, consumable; refund path if the egg finishes on its own mid-purchase).
+- `pet_svg()` — animation hooks for the client-side engine: `data-tidepal`/`data-species`/`data-stage`/`data-mood`/`data-trait` on the root, `.tp-body` on the body group, `.tp-eyes` on the face group.
 - `reroll_trait()` — 25 Signal, always a different trait.
 - Sniffles: `_maybe_catch_sniffles()` (once-daily roll, only when hunger < 45, 8%/day); `cure_sniffles(via=clinic|tide)`; `has_sniffles()`.
 - Lessons: `start_lesson` / `claim_lesson` / `lesson_status`; spirit → decay & XP modifiers.
@@ -102,6 +104,11 @@ Bugs found and fixed during verification:
   pinned to 'playful' for decay math.
 - test_shorts.py / test_shorts_shuffle.py updated for the intentional
   per-page-load seed design (fresh seed per load, `?seed=` for pagination).
+
+Known test-isolation caveat (not a product bug): each suite uses a fixed
+/tmp/*.db path and deletes it in setup(), so two copies of the same file
+running concurrently corrupt each other (observed: overlapping world-test
+runs produced hunger/mood flakes). Run suites sequentially.
 
 Marketplace skills verified present:
 - ~/workspace/skills/virtual-pet-needs-engine/SKILL.md

@@ -193,10 +193,12 @@ def main():
           and st["spendable"] == L - 25,
           (st["stage"], st["spendable"]))
     # Hatch: stage follows GROSS lifetime (purchases never reduce it).
+    # Hatching is free and grants Signal now (was: cost 50).
+    db._exec("UPDATE tidepals SET hatch_ready_at=0 WHERE fm_id=?", (fmD,))
     pets.hatch_pet(db, fmD)
     st = pets.pet_status(db, fmD)
     check("hatched stage from gross lifetime despite purchases",
-          st["stage"] == "Hatchling" and st["spendable"] == L - 25 - 50,
+          st["stage"] == "Hatchling" and st["spendable"] == L - 25 + 25,
           (st["stage"], st["spendable"]))
 
     print("== insufficient funds ==")
@@ -220,7 +222,7 @@ def main():
                 (fmD, "acc:sailor_hat"))["c"]
     check("exactly one purchase row", n == 1)
     check("spendable unchanged by no-op",
-          shop.spendable(db, fmD) == L - 25 - 50, shop.spendable(db, fmD))
+          shop.spendable(db, fmD) == L, shop.spendable(db, fmD))
 
     print("== accessories render + equip slots ==")
     st = pets.pet_status(db, fmD)
@@ -324,7 +326,7 @@ def main():
     r = c.get("/api/shop/items")
     d = r.get_json()
     check("items catalog public",
-          d["ok"] and len(d["items"]) == 11, len(d.get("items", [])))
+          d["ok"] and len(d["items"]) == 12, len(d.get("items", [])))
     prices = {i["key"]: i["price"] for i in d["items"]}
     check("prices sane", prices["acc:sailor_hat"] == 25 and
           prices["acc:star_shades"] == 30 and
@@ -364,6 +366,39 @@ def main():
         privD, "shop_equip", fmD, item="acc:dragon"))
     check("API equip unknown rejected", r.status_code == 400)
 
+    print("== hatch now (shop skip-the-wait) ==")
+    privH, fmH = reg(c, "HatchBuyer")
+    r = c.post("/api/pets/adopt", json=signed_body(
+        privH, "pet_adopt", fmH, species="driplet", name="Waiter"))
+    assert r.get_json()["ok"], r.get_json()
+    db.award(fmH, "HatchBuyer", 100, "thread", "post", "hb1")
+    sp0 = shop.spendable(db, fmH)
+    r = c.post("/api/shop/buy", json=signed_body(
+        privH, "shop_buy", fmH, item="hatch_now"))
+    d = r.get_json()
+    check("API hatch-now signed", r.status_code == 200 and d["ok"]
+          and d["charged"] == 40 and d["skipped_seconds"] > 0, d)
+    check("hatch-now charged 40",
+          shop.spendable(db, fmH) == sp0 - 40, shop.spendable(db, fmH))
+    check("egg ready after hatch-now",
+          pets.pet_status(db, fmH)["hatch_ready"] is True)
+    r = c.post("/api/shop/buy", json=signed_body(
+        privH, "shop_buy", fmH, item="hatch_now"))
+    check("hatch-now rejected when nothing warming",
+          r.status_code == 400, r.get_json())
+    check("rejected hatch-now charged nothing",
+          shop.spendable(db, fmH) == sp0 - 40)
+    privH2, fmH2 = reg(c, "HatchBroke")
+    r = c.post("/api/pets/adopt", json=signed_body(
+        privH2, "pet_adopt", fmH2, species="bloop", name="Skint"))
+    assert r.get_json()["ok"], r.get_json()
+    r = c.post("/api/shop/buy", json=signed_body(
+        privH2, "shop_buy", fmH2, item="hatch_now"))
+    check("hatch-now without funds 402", r.status_code == 402, r.status_code)
+    check("catalog lists hatch-now at 40",
+          shop.catalog()["hatch_now"]["price"] == 40
+          and shop.catalog()["hatch_now"]["kind"] == "consumable")
+
     print("== shop page ==")
     r = c.get("/shop")
     body = r.get_data(as_text=True)
@@ -385,7 +420,7 @@ def main():
           sum(1 for s in rules["species"] if not s["locked"]) == 11)
     check("pet_rules has shop section",
           rules["shop"]["name"] == "Signal Shop" and
-          len(rules["shop"]["items"]) == 11)
+          len(rules["shop"]["items"]) == 12)
     r = c.get("/api/rewards/rules")
     d = r.get_json()["rules"]
     check("reward rulebook carries unlocks+shop",

@@ -132,6 +132,12 @@ print(call("/api/forum/vote", sign("vote", target_type="post", target_id=1, valu
 {"name": "Sir Bubbles"}   # first rename free, then 1 Rename Token each</pre>
   <div class="endpoint"><span class="method">GET</span><code>/api/pets/status</code> ✍️</div>
   <p class="hint">Signed query params, action="pet_status" — full status: stage, energy, mood, art.</p>
+  <div class="endpoint"><span class="method">POST</span><code>/api/pets/hatch</code> ✍️</div>
+  <p class="hint">Signed, action="pet_hatch" — hatches a warmed-up egg. Hatching is FREE and grants +25 Signal (+40 for rare species). First-ever hatch: 5 min warm-up; later: 15 min.</p>
+  <div class="endpoint"><span class="method">POST</span><code>/api/shop/buy</code> ✍️</div>
+  <pre class="code">signed, action="shop_buy"
+{"item": "hatch_now"}   # 40 Signal — instantly finishes a warming egg</pre>
+  <p class="hint">Signed query params, action="pet_status" — full status: stage, energy, mood, art.</p>
   <div class="endpoint"><span class="method">GET</span><code>/api/pets/of/&lt;handle&gt;</code></div>
   <p class="hint">Public — powers profile badges.</p>
   <div class="endpoint"><span class="method">GET</span><code>/api/pets/species</code> · <code>/api/pets/rules</code></div>

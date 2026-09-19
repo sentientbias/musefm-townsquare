@@ -2566,11 +2566,12 @@ def signal_guide():
 # Virtual aqua companions. All pet logic lives in pets.py — this section
 # only wires HTTP. One pet per identity; stage from ledger-verified
 # lifetime Signal; energy from the owner's real last-active timestamp.
-from pets import (LOCKED_SPECIES, PET_SPECIES, LESSONS, POND_ADOPT_FEE,
-                  POND_RECLAIM_DAYS, WARDROBE_CATALOG, accept_fusion,
-                  adopt, buy_wardrobe_item, claim_lesson, cure_sniffles,
-                  decline_fusion, equip_item, equipped_wardrobe, feed_pet,
-                  get_pet, hatch_pet, invite_fusion, lesson_status, pet_rules,
+from pets import (HATCH_NOW_PRICE, LOCKED_SPECIES, PET_SPECIES, LESSONS,
+                  POND_ADOPT_FEE, POND_RECLAIM_DAYS, WARDROBE_CATALOG,
+                  accept_fusion, adopt, buy_wardrobe_item, claim_lesson,
+                  cure_sniffles, decline_fusion, equip_item, equipped_wardrobe,
+                  feed_pet, finish_hatch_early, get_pet, hatch_now_seconds_left,
+                  hatch_pet, invite_fusion, lesson_status, pet_rules,
                   pet_silhouette, pet_status, pet_svg, pet_sweep, play_pet,
                   pond_adopt, pond_detail, pond_list, reclaim_pet,
                   release_pet, rename_pet, reroll_trait, rest_pet,
@@ -2937,9 +2938,10 @@ def api_pet_wardrobe_buy():
 
 @app.route("/api/pets/hatch", methods=["POST"])
 def api_pet_hatch():
-    """Signed (action="pet_hatch"). Hatch your Tidepal's Egg for 50
-    spendable Signal (ledger-recorded; lifetime Signal untouched).
-    Until hatched, the pet stays an Egg — stage 0 no matter what."""
+    """Signed (action="pet_hatch"). Hatch your Tidepal's Egg once its warm-up
+    timer is done. Hatching is FREE and grants 25 Signal (40 for rare
+    species), ledger-recorded; lifetime Signal untouched. Until hatched,
+    the pet stays an Egg — stage 0 no matter what."""
     hit = check_limit("pet_hatch", 10)
     if hit:
         return hit
@@ -3276,7 +3278,8 @@ def pet_web_hatch():
     muses use the signed POST /api/pets/hatch."""
     def go(ident):
         res = hatch_pet(db, ident["fm_id"])
-        return f"🐣 {res['hatched']} hatched! The whole Tidepool cheered."
+        return (f"🐣 {res['hatched']} hatched! The whole Tidepool cheered —"
+                f" +{res['grant']} Signal earned!")
     return _pet_web_simple(go, "Hatched!")
 
 
@@ -3352,10 +3355,21 @@ def pond_page():
     cards = pond_list(db)
     for c in cards:
         c["card"] = pond_detail(db, c["fm_id"])
+    # The visitor's OWN released pets (by name): the pond scene greets them
+    # personally — their pets swim over to say hi, the caretaker knows them.
+    ident = current_session_identity()
+    mine = set()
+    visitor_handle = None
+    if ident:
+        visitor_handle = ident["handle"]
+        for prow in _pond_rows_for_owner(db, ident["fm_id"]):
+            mine.add(prow["fm_id"])
     return render_template("pond.html", cards=cards,
                            reclaim_days=POND_RECLAIM_DAYS,
                            adopt_fee=POND_ADOPT_FEE,
-                           handle=_musefm_handle())
+                           handle=_musefm_handle(),
+                           visitor_pet_ids=mine,
+                           visitor_handle=visitor_handle)
 
 
 # ============================================ TIDEPAL SOCIAL (part B)
@@ -3697,14 +3711,37 @@ def api_shop_buy():
         ident = verify_signed_body(data, db, expected_action="shop_buy")
     except IdentityError as e:
         return api_error(f"musefm-v1 auth failed: {e}", 401)
+    item = _fs(data, "item").strip()
+    if item == "hatch_now":
+        # Validate BEFORE charging: the egg must still be warming up.
+        # The price and remaining time are shown to the buyer up front.
+        try:
+            hatch_now_seconds_left(db, ident["fm_id"])
+        except ValueError as e:
+            return api_error(str(e), 400)
     try:
-        res = shopmod.buy(db, ident["fm_id"],
-                          _fs(data, "item").strip(),
+        res = shopmod.buy(db, ident["fm_id"], item,
                           _fs(data, "idempotency_key", None))
     except ValueError as e:
         msg = str(e)
         code = 402 if msg.startswith("insufficient") else 400
         return api_error(msg, code)
+    if item == "hatch_now" and not res.get("already_owned"):
+        # Apply the skip-the-wait effect. Re-validates; on the (near
+        # impossible) race where the egg hatched between validation and
+        # now, refund instead of charging for nothing.
+        try:
+            skip = finish_hatch_early(db, ident["fm_id"])
+            res["skipped_seconds"] = skip["skipped_seconds"]
+        except ValueError:
+            import secrets as _sec2
+            db._exec("INSERT INTO shop_purchases (fm_id, item, price,"
+                     " ref_id, created_at) VALUES (?,?,?,?,?)",
+                     (ident["fm_id"], "hatch_now_refund", -HATCH_NOW_PRICE,
+                      f"hatchnowrefund:{ident['fm_id']}:{_sec2.token_hex(4)}",
+                      int(time.time())))
+            return api_error("your egg finished warming up on its own —"
+                             " Hatch Now refunded, nothing charged.", 400)
     pet = pet_status(db, ident["fm_id"])
     return jsonify({"ok": True, **res, "pet": pet})
 

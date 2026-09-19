@@ -102,6 +102,7 @@ def main():
         db._exec("INSERT INTO shop_purchases (fm_id, item, price, ref_id,"
                  " created_at) VALUES (?,?,?,?,?)",
                  (fm, "test_grant", -200, "tg_" + fm, int(time.time())))
+        db._exec("UPDATE tidepals SET hatch_ready_at=0 WHERE fm_id=?", (fm,))
         pets.hatch_pet(db, fm)
     check("test pets hatched",
           pets.pet_status(db, owner)["hatched"]

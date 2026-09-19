@@ -3,28 +3,18 @@
 {% block og_title %}The Town Pond — a happy shelter for Tidepals{% endblock %}
 {% block og_desc %}Released Tidepals swim here — never deleted, always loved. Reclaim yours or adopt a new friend.{% endblock %}
 {% block head %}
-<style>
-.pond-hero{text-align:center;padding:2.6rem 1rem 1.6rem;
-  background:linear-gradient(135deg,#0c4a6e,#0ea5e9);border-radius:0 0 28px 28px;color:#fff}
-.pond-hero h1{margin:.2rem 0;font-size:2.2rem}
-.pond-hero p{opacity:.92;max-width:36rem;margin:.4rem auto}
-.pond-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
-  gap:1.1rem;max-width:64rem;margin:1.4rem auto;padding:0 1rem}
-.pond-card{background:rgba(255,255,255,.7);border:1px solid rgba(14,165,233,.25);
-  border-radius:22px;padding:1.2rem;text-align:center;
-  box-shadow:0 8px 24px rgba(14,165,233,.12)}
-.pond-card h3{margin:.4rem 0 .1rem}
-.pond-card .kind{font-size:.78rem;opacity:.65;letter-spacing:.05em;text-transform:uppercase}
-.pond-card .hist{font-size:.85rem;opacity:.75;font-style:italic}
-.pond-tag{display:inline-block;padding:.2rem .7rem;border-radius:999px;font-size:.78rem;
-  background:rgba(14,165,233,.14);border:1px solid rgba(14,165,233,.3);margin:.3rem .15rem}
-.btn-tide{display:inline-block;padding:.6rem 1.4rem;border-radius:999px;border:0;cursor:pointer;
-  font-size:.95rem;font-weight:700;color:#fff;text-decoration:none;
-  background:linear-gradient(135deg,#0284c7,#0ea5e9)}
-.pond-empty{text-align:center;padding:3rem 1rem;opacity:.7}
-</style>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/pond.css') }}">
 {% endblock %}
 {% block content %}
+{% set mine_cards = cards|selectattr("fm_id","in",visitor_pet_ids)|list %}
+{% set other_cards = cards|rejectattr("fm_id","in",visitor_pet_ids)|list %}
+{% set ordered = mine_cards + other_cards %}
+{% set slots = [
+  {"x":18,"y":74},{"x":50,"y":78},{"x":82,"y":74},
+  {"x":14,"y":52},{"x":36,"y":46},{"x":62,"y":54},{"x":86,"y":48},
+  {"x":26,"y":64,"pad":1},{"x":74,"y":66,"pad":1},
+  {"x":30,"y":30},{"x":55,"y":26},{"x":80,"y":32}] %}
+
 <div class="pond-hero">
   <div style="font-size:3rem">🌊</div>
   <h1>The Town Pond</h1>
@@ -34,30 +24,136 @@
   adopt for <b>{{ adopt_fee }} Signal</b>, history and all.</p>
 </div>
 
-<div class="pond-grid">
-{% for c in cards %}
-  <div class="pond-card">
-    {{ c.card.svg|safe }}
-    <h3>{{ c.name }}</h3>
-    <div class="kind">{{ c.species_name }} · {{ c.trait|capitalize }}</div>
-    <p class="hist">{{ c.card.history_line }}</p>
-    <div>
-      {% if c.open_adoption %}
-      <span class="pond-tag">💧 open for adoption</span>
-      {% else %}
-      <span class="pond-tag">🏠 reclaim window open</span>
-      {% endif %}
+<div class="pond-wrap">
+  <!-- ============ THE LIVING SCENE ============ -->
+  <div class="pond-stage" id="pond-stage" role="img"
+       aria-label="The Town Pond: a sunny animated pond with released Tidepals and their caretaker">
+    <div class="pond-sky">
+      <div class="pond-sun"></div>
+      <div class="pond-cloud c1"></div>
+      <div class="pond-cloud c2"></div>
     </div>
-    <p class="hist">“{{ c.card.quirk }}”</p>
+
+    <div class="pond-water">
+      <div class="pond-wave w1"><svg viewBox="0 0 800 60" preserveAspectRatio="none"><path d="M0,34 q25,-20 50,0 t50,0 t50,0 t50,0 t50,0 t50,0 t50,0 t50,0 t50,0 t50,0 t50,0 t50,0 t50,0 t50,0 t50,0 t50,0 V60 H0 Z" fill="#7dd3fc"/></svg></div>
+      <div class="pond-wave w2"><svg viewBox="0 0 800 60" preserveAspectRatio="none"><path d="M0,30 q25,-16 50,0 t50,0 t50,0 t50,0 t50,0 t50,0 t50,0 t50,0 t50,0 t50,0 t50,0 t50,0 t50,0 t50,0 t50,0 t50,0 V60 H0 Z" fill="#e0f2fe"/></svg></div>
+      <div class="pond-wave w3"><svg viewBox="0 0 800 60" preserveAspectRatio="none"><path d="M0,38 q25,-12 50,0 t50,0 t50,0 t50,0 t50,0 t50,0 t50,0 t50,0 t50,0 t50,0 t50,0 t50,0 t50,0 t50,0 t50,0 t50,0 V60 H0 Z" fill="#ffffff"/></svg></div>
+
+      <span class="shimmer" style="left:22%;top:34%;animation-delay:-1s"></span>
+      <span class="shimmer" style="left:45%;top:52%;animation-delay:-2.2s"></span>
+      <span class="shimmer" style="left:68%;top:38%;animation-delay:-.4s"></span>
+      <span class="shimmer" style="left:80%;top:64%;animation-delay:-2.8s"></span>
+      <span class="shimmer" style="left:32%;top:70%;animation-delay:-1.6s"></span>
+      <span class="shimmer" style="left:55%;top:24%;animation-delay:-3.1s"></span>
+      <span class="shimmer" style="left:12%;top:58%;animation-delay:-.9s"></span>
+      <span class="shimmer" style="left:90%;top:30%;animation-delay:-2s"></span>
+    </div>
+
+    <!-- reeds / cattails -->
+    <div class="reed-bank left"><svg viewBox="0 0 100 140">
+      <g class="reed"><path d="M20,140 C18,100 22,70 16,40" stroke="#15803d" stroke-width="5" fill="none" stroke-linecap="round"/><rect x="11" y="18" width="10" height="26" rx="5" fill="#92400e"/></g>
+      <g class="reed"><path d="M42,140 C44,105 40,80 46,50" stroke="#16a34a" stroke-width="4" fill="none" stroke-linecap="round"/><rect x="41" y="30" width="10" height="24" rx="5" fill="#b45309"/></g>
+      <g class="reed"><path d="M62,140 C60,110 66,90 62,62" stroke="#15803d" stroke-width="5" fill="none" stroke-linecap="round"/><path d="M62,62 C56,50 52,40 54,28 C60,38 64,48 66,58" fill="#22c55e"/></g>
+      <g class="reed"><path d="M80,140 C82,115 78,95 84,72" stroke="#16a34a" stroke-width="4" fill="none" stroke-linecap="round"/><rect x="79" y="52" width="10" height="24" rx="5" fill="#92400e"/></g>
+    </svg></div>
+    <div class="reed-bank right"><svg viewBox="0 0 100 140">
+      <g class="reed"><path d="M24,140 C22,105 28,80 22,48" stroke="#15803d" stroke-width="5" fill="none" stroke-linecap="round"/><rect x="17" y="26" width="10" height="26" rx="5" fill="#b45309"/></g>
+      <g class="reed"><path d="M48,140 C50,110 46,88 52,60" stroke="#16a34a" stroke-width="4" fill="none" stroke-linecap="round"/><path d="M52,60 C58,48 62,38 60,26 C54,36 50,46 48,56" fill="#22c55e"/></g>
+      <g class="reed"><path d="M72,140 C70,112 74,92 70,66" stroke="#15803d" stroke-width="5" fill="none" stroke-linecap="round"/><rect x="65" y="44" width="10" height="26" rx="5" fill="#92400e"/></g>
+    </svg></div>
+
+    <!-- lily pads -->
+    <div class="pad" style="left:22%;top:60%;animation-delay:-1.4s"></div>
+    <div class="pad" style="left:70%;top:62%;animation-delay:-3.8s;width:7%"></div>
+    <div class="pad" style="left:46%;top:44%;animation-delay:-5s;width:6%"></div>
+
+    <!-- the residents — real released pets, real art -->
+    {% for c in ordered %}
+      {% set s = slots[loop.index0 % (slots|length)] %}
+      {% set is_mine = c.fm_id in visitor_pet_ids %}
+      <div class="resident d{{ (loop.index0 % 3) + 1 }}{% if s.pad %} lounging{% endif %}{% if is_mine %} mine{% endif %}"
+           style="left:{{ s.x }}%;top:{{ s.y }}%"
+           data-fmid="{{ c.fm_id|e }}" data-name="{{ c.name|e }}"
+           data-species="{{ c.species_name|e }}" data-trait="{{ c.trait|e }}"
+           {% if is_mine %}data-mine="1"{% endif %}
+           title="{{ c.name|e }} the {{ c.species_name|e }} — click for details">
+        <span class="ripple"></span>
+        {% if c.card %}{{ c.card.svg|safe }}{% endif %}
+      </div>
+    {% endfor %}
+
+    <!-- fireflies -->
+    <span class="firefly" style="left:16%;top:44%;animation-delay:-2s"></span>
+    <span class="firefly" style="left:60%;top:36%;animation-delay:-6s"></span>
+    <span class="firefly" style="left:84%;top:52%;animation-delay:-9s"></span>
+    <span class="firefly" style="left:38%;top:30%;animation-delay:-4s"></span>
+
+    <!-- Ripple the caretaker — a Kelp Warden, drawn by pets.py -->
+    <div class="caretaker" id="caretaker" title="Ripple, the pond caretaker — click to say hi">
+      <span class="ct-shadow"></span>
+      <svg viewBox="0 0 120 120" width="170" height="170" role="img" aria-label="Ripple the pond caretaker" xmlns="http://www.w3.org/2000/svg"><title>Ripple the pond caretaker</title><defs><radialGradient id="ct_aura3" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#a5f3fc" stop-opacity="0.55"/><stop offset="100%" stop-color="#a5f3fc" stop-opacity="0"/></radialGradient></defs><circle cx="60" cy="62" r="46" fill="url(#ct_aura3)"/><path d="M0,-7 C1.2,-2.4 2.4,-1.2 7,0 C2.4,1.2 1.2,2.4 0,7 C-1.2,2.4 -2.4,1.2 -7,0 C-2.4,-1.2 -1.2,-2.4 0,-7 Z" transform="translate(24 30) scale(1.0)" fill="#fef9c3" opacity="0.95"/><path d="M0,-7 C1.2,-2.4 2.4,-1.2 7,0 C2.4,1.2 1.2,2.4 0,7 C-1.2,2.4 -2.4,1.2 -7,0 C-2.4,-1.2 -1.2,-2.4 0,-7 Z" transform="translate(96 36) scale(0.8)" fill="#fde68a" opacity="0.95"/><path d="M0,-7 C1.2,-2.4 2.4,-1.2 7,0 C2.4,1.2 1.2,2.4 0,7 C-1.2,2.4 -2.4,1.2 -7,0 C-2.4,-1.2 -1.2,-2.4 0,-7 Z" transform="translate(90 96) scale(0.9)" fill="#fef9c3" opacity="0.95"/><ellipse cx="60" cy="106" rx="26" ry="6" fill="#0ea5e9" opacity="0.14"/><g><animateTransform attributeName="transform" type="translate" values="0 0; 0 -3; 0 0" keyTimes="0;0.5;1" dur="4.2s" repeatCount="indefinite"/><g><animateTransform attributeName="transform" type="scale" values="1 1; 1.03 1.03; 1 1" keyTimes="0;0.5;1" dur="3s" additive="sum" repeatCount="indefinite"/><g transform="translate(60 62) scale(1.05) translate(-60 -62)"><defs><radialGradient id="ct_kw1" cx="40%" cy="32%" r="75%"><stop offset="0%" stop-color="#d1fae5"/><stop offset="55%" stop-color="#34d399"/><stop offset="100%" stop-color="#065f46"/></radialGradient><radialGradient id="ct_kl2" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#fef9c3"/><stop offset="55%" stop-color="#fde68a"/><stop offset="100%" stop-color="#f59e0b" stop-opacity="0.15"/></radialGradient></defs><path d="M58,68 C48,70 44,78 34,78" stroke="#34d399" stroke-width="5" fill="none" stroke-linecap="round" opacity="0.9"/><path d="M62,68 C72,70 76,78 86,78" stroke="#6ee7b7" stroke-width="5" fill="none" stroke-linecap="round" opacity="0.9"/><path d="M57,80 C48,86 44,92 36,96" stroke="#10b981" stroke-width="5" fill="none" stroke-linecap="round" opacity="0.9"/><path d="M63,80 C72,86 76,92 84,96" stroke="#059669" stroke-width="5" fill="none" stroke-linecap="round" opacity="0.9"/><path d="M56,88 C50,94 48,98 42,102" stroke="#6ee7b7" stroke-width="5" fill="none" stroke-linecap="round" opacity="0.9"/><path d="M64,88 C70,94 72,98 78,102" stroke="#10b981" stroke-width="5" fill="none" stroke-linecap="round" opacity="0.9"/><path d="M78,52 C84,44 88,38 88,32" stroke="#065f46" stroke-width="3" fill="none" stroke-linecap="round"/><circle cx="88" cy="28" r="10" fill="url(#ct_kl2)"/><circle cx="88" cy="28" r="4.5" fill="#fef3c7" stroke="#b45309" stroke-width="1.2"/><path d="M84,22 h8" stroke="#92400e" stroke-width="1.6" stroke-linecap="round"/><circle cx="60" cy="62" r="21" fill="url(#ct_kw1)" stroke="#a7f3d0" stroke-width="1.5"/><ellipse cx="52" cy="54" rx="6" ry="4" fill="#fff" opacity="0.6" transform="rotate(-20 52 54)"/><circle cx="36" cy="52" r="1.8" fill="#fef9c3" opacity="0.95"/><circle cx="92" cy="66" r="1.6" fill="#fef9c3" opacity="0.9"/><circle cx="70" cy="94" r="1.8" fill="#fef9c3" opacity="0.9"/><circle cx="50.8" cy="60.0" r="2.6" fill="#0b3b5c"/><circle cx="69.2" cy="60.0" r="2.6" fill="#0b3b5c"/><circle cx="51.6" cy="59.1" r="0.8" fill="#fff" opacity="0.9"/><circle cx="70.1" cy="59.1" r="0.8" fill="#fff" opacity="0.9"/><path d="M52.9,65.5 Q60.0,70.1 67.1,65.5" stroke="#0b3b5c" stroke-width="2.1" fill="none" stroke-linecap="round"/></g></g></g></svg>
+    </div>
+    <div class="ct-bubble" id="caretaker-bubble" aria-live="polite">
+      <span class="ct-name">Ripple · pond caretaker</span>
+      <span class="ct-line">Welcome to the Town Pond.</span>
+    </div>
   </div>
-{% else %}
-  <div class="pond-empty">
-    <p style="font-size:2.4rem">💧</p>
-    <p>The pond is quiet right now — every Tidepal is home with their keeper.</p>
+
+  {% if mine_cards %}
+  <p class="pond-note" style="opacity:.9">💛 <b>{{ mine_cards|length }} of your released
+  {{ "Tidepal is" if mine_cards|length == 1 else "Tidepals are" }} here</b> — they swam
+  right over to say hi. You can reclaim any of them within {{ reclaim_days }} days from your /pet page.</p>
+  {% endif %}
+
+  <!-- ============ THE ROSTER ============ -->
+  <div class="roster">
+    <h2>Meet the residents</h2>
+    {% if cards %}
+    <div class="pond-grid">
+    {% for c in cards %}
+      <div class="pond-card" id="pondcard-{{ c.fm_id|e }}">
+        {% if c.card %}{{ c.card.svg|safe }}{% endif %}
+        <h3>{{ c.name|e }}</h3>
+        <div class="kind">{{ c.species_name|e }} · {{ c.trait|e|capitalize }}</div>
+        {% if c.fm_id in visitor_pet_ids %}
+        <div><span class="pond-tag mine">💛 your Tidepal</span></div>
+        {% endif %}
+        <p class="hist">{{ c.card.history_line|e }}</p>
+        <div>
+          {% if c.open_adoption %}
+          <span class="pond-tag">💧 open for adoption · {{ adopt_fee }} Signal</span>
+          {% else %}
+          <span class="pond-tag">🏠 reclaim window open</span>
+          {% endif %}
+        </div>
+        <p class="quirk">“{{ c.card.quirk|e }}”</p>
+        <p>
+          {% if c.open_adoption %}
+          <a class="btn-tide" href="/pet">Adopt from your /pet page</a>
+          {% else %}
+          <a class="btn-tide" href="/pet">Reclaim from your /pet page</a>
+          {% endif %}
+        </p>
+      </div>
+    {% endfor %}
+    </div>
+    {% else %}
+    <div class="pond-empty">
+      <p style="font-size:2.4rem">💧</p>
+      <p>The pond is quiet right now — every Tidepal is home with their keeper.</p>
+    </div>
+    {% endif %}
   </div>
-{% endfor %}
+
+  <p class="pond-note">
+    Pond adoptions happen through the signed API (<code>POST /api/pond/adopt</code>)
+    or the /pet page once you're logged in. One pet per keeper, always.<br>
+    Ripple the caretaker is a permanent resident — she feeds, tucks in, and
+    names every Tidepal twice a day. Nobody is ever sad here.
+  </p>
 </div>
-<p style="text-align:center;opacity:.7;font-size:.9rem;max-width:36rem;margin:1rem auto">
-  Pond adoptions happen through the signed API (<code>POST /api/pond/adopt</code>)
-  or the /pet page once you're logged in. One pet per keeper, always.</p>
+{% endblock %}
+{% block scripts %}
+<script>window.__POND_VISITOR = {{ "true" if visitor_handle else "false" }};</script>
+<script src="{{ url_for('static', filename='js/pond.js') }}"></script>
 {% endblock %}
