@@ -378,6 +378,9 @@ def main():
     check("care needs a pet",
           _raises(lambda: pets.feed_pet(db, fmB)))
     pets.adopt(db, fmB, "CareMuse", "bloop", "Bubbles")
+    # Pin a neutral trait: decay math below assumes the base 12/day rate
+    # (a random "calm" trait would soften it and break the numbers).
+    db._exec("UPDATE tidepals SET trait='playful' WHERE fm_id=?", (fmB,))
     r = pets.feed_pet(db, fmB)
     check("feed: +25 hunger (cap), +5 happiness",
           r["hunger"] == 100 and r["happiness"] == 85 and
@@ -430,14 +433,14 @@ def main():
              " WHERE fm_id=?",
              (int(time.time()), int(time.time()) - 6 * 86400, fmB))
     st = pets.pet_status(db, fmB)
-    check("low happiness -> grumpy", st["mood"] == "grumpy",
+    check("low happiness -> restless", st["mood"] == "restless",
           (st["mood"], st["hunger"], st["happiness"]))
-    check("grumpy face renders", "grumpy" in st["svg"] or
+    check("restless face renders", "restless" in st["svg"] or
           'Q' in st["svg"])
     # both low: hunger wins
     db._exec("UPDATE pet_care SET hunger=20, last_fed=? WHERE fm_id=?",
              (int(time.time()) - 6 * 86400, fmB))
-    check("peckish outranks grumpy",
+    check("peckish outranks restless",
           pets.pet_status(db, fmB)["mood"] == "peckish")
 
     print("== feed streak auto-earns wardrobe ==")
@@ -504,20 +507,35 @@ def main():
     pets.adopt(db, fmH, "OpenGate", "squiddy", "Inky")
     check("adopt squiddy", pets.get_pet(db, fmH)["species"] == "squiddy")
 
-    print("== release frees the slot, streak survives ==")
+    print("== release -> Town Pond (no delete), slot frees, streak survives ==")
     privI, fmI = reg(c, "Releaser")
     pets.adopt(db, fmI, "Releaser", "driplet", "Drippy2")
     db._exec("UPDATE pet_care SET feed_streak=10 WHERE fm_id=?", (fmI,))
     res = pets.release_pet(db, fmI)
-    check("release ok", res["released"] == "Drippy2", res)
-    check("pet gone", pets.get_pet(db, fmI) is None)
-    check("streak survives release",
+    check("release ok", res["released"] == "Drippy2" and res["pond"], res)
+    check("pet row re-keyed to pond (not deleted)",
+          pets.get_pet(db, fmI) is None
+          and pets._pond_row_for_owner(db, fmI)["name"] == "Drippy2")
+    check("pond lists the pet",
+          any(p["name"] == "Drippy2" for p in pets.pond_list(db)))
+    check("streak survives release (keeper's record)",
           pets.feed_streak_days(db, fmI) == 10)
+    check("reclaim works",
+          pets.reclaim_pet(db, fmI)["reclaimed"] == "Drippy2")
+    check("reclaimed pet is home",
+          pets.get_pet(db, fmI)["name"] == "Drippy2"
+          and not pets.get_pet(db, fmI)["in_pond"])
+    # Release again, then adopt fresh: slot is free, streak survives.
+    pets.release_pet(db, fmI)
     pet = pets.adopt(db, fmI, "Releaser", "kelpwarden", "Bri2")
     check("adopt care-gated species after release",
           pet["species"] == "kelpwarden", pet)
     check("new pet gets fresh stats",
           pets.care_status(db, fmI)["hunger"] == 80)
+    check("streak still the keeper's",
+          pets.feed_streak_days(db, fmI) == 10)
+    check("old pet still safe in pond",
+          pets._pond_row_for_owner(db, fmI)["name"] == "Drippy2")
     check("release without pet rejected",
           _raises(lambda: pets.release_pet(db, "fm_nobody")))
     r = c.post("/api/pets/release", json=signed_body(
@@ -533,6 +551,11 @@ def main():
     pets.adopt(db, fmJ, "Evolver", "puffish", "Pip2")
     st = pets.pet_status(db, fmJ)
     check("no glow at adoption", st["stage_up_glow"] is False, st)
+    # Hatch gate: award spendable, hatch, then the stage follows Signal.
+    db._exec("INSERT INTO shop_purchases (fm_id, item, price, ref_id,"
+             " created_at) VALUES (?,?,?,?,?)",
+             (fmJ, "test_grant", -200, "tg_" + fmJ, int(time.time())))
+    pets.hatch_pet(db, fmJ)
     db.award(fmJ, "Evolver", 60, "thread", "post", "ev1")
     st = pets.pet_status(db, fmJ)
     check("stage-up detected", st["stage"] == "Hatchling" and
@@ -590,7 +613,8 @@ def main():
           "$" not in wtxt and "never usd" in wtxt.lower())
     check("moods documented",
           "peckish" in rules["energy"]["moods"] and
-          "grumpy" in rules["energy"]["moods"])
+          "restless" in rules["energy"]["moods"] and
+          "grumpy" not in rules["energy"]["moods"])
 
     print("== web care routes (logged-in human) ==")
     r = c.post("/signup", data={"handle": "CareHuman",

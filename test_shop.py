@@ -189,7 +189,14 @@ def main():
     pets.adopt(db, fmD, "Shopper", "driplet", "Drippy")
     st = pets.pet_status(db, fmD)
     check("pet stage still from gross lifetime",
-          st["stage"] == "Hatchling" and st["spendable"] == L - 25,
+          st["stage"] == "Egg" and not st["hatched"]
+          and st["spendable"] == L - 25,
+          (st["stage"], st["spendable"]))
+    # Hatch: stage follows GROSS lifetime (purchases never reduce it).
+    pets.hatch_pet(db, fmD)
+    st = pets.pet_status(db, fmD)
+    check("hatched stage from gross lifetime despite purchases",
+          st["stage"] == "Hatchling" and st["spendable"] == L - 25 - 50,
           (st["stage"], st["spendable"]))
 
     print("== insufficient funds ==")
@@ -213,7 +220,7 @@ def main():
                 (fmD, "acc:sailor_hat"))["c"]
     check("exactly one purchase row", n == 1)
     check("spendable unchanged by no-op",
-          shop.spendable(db, fmD) == L - 25)
+          shop.spendable(db, fmD) == L - 25 - 50, shop.spendable(db, fmD))
 
     print("== accessories render + equip slots ==")
     st = pets.pet_status(db, fmD)

@@ -28,7 +28,9 @@ sets stage or energy directly.
 """
 
 import itertools
+import random
 import re
+import secrets
 import sqlite3
 import time
 
@@ -61,6 +63,102 @@ ENERGY_FLOOR = 10
 # nudges and never touches their quiet-period bookkeeping.
 PET_SLEEPY_WARN_MIN_DAYS = 5
 PET_SLEEPY_WARN_MAX_DAYS = 7
+
+# ===========================================================================
+# TIDEPAL DEPTH — Neopets-grounded systems, Tamagotchi-light tone
+# (2026-09-19, Anthony's call: base everything on Neopets-style REAL
+# consequences, but keep it kind — pets never die, never suffer, never
+# look distressed. Hunger is "peckish", illness is mild "sea sniffles",
+# neglect reads as a buddy asking for a favor, never a victim.)
+# ===========================================================================
+
+# --- hatch gate -----------------------------------------------------------
+# A Tidepal joins as an Egg and stays an Egg until its keeper spends 50
+# spendable Signal to hatch it (Neopets-style money sink, ledger-recorded
+# in shop_purchases; lifetime Signal is never touched and still gates
+# stages). This is the adoption gate Anthony approved: real consequence,
+# real commitment, zero cruelty.
+HATCH_COST = 50
+
+# --- personality ----------------------------------------------------------
+# Rolled once at adoption; rerollable for spendable Signal. Wholesome
+# traits only — no negative traits exist. Trait shifts idle animation
+# style, pet-speech copy, and tiny gameplay edges.
+PET_TRAITS = ("playful", "calm", "mischievous", "gentle")
+REROLL_COST = 25
+TRAIT_QUIRKS = {
+    "playful": [
+        "does victory laps around the Tidepool for no reason",
+        "tries to high-five every bubble that floats by",
+        "has never once sat still during storytime",
+    ],
+    "calm": [
+        "hums along to the nightly podcast, every night",
+        "collects particularly round pebbles",
+        "naps in sunbeams like it's a profession",
+    ],
+    "mischievous": [
+        "hides your favorite shell and pretends not to know",
+        "photobombs other pets' portraits",
+        "tells the Tidepool the water is 'fine, probably'",
+    ],
+    "gentle": [
+        "shares snacks with the younger Tidepals",
+        "writes thank-you notes to the Healing Tide",
+        "always saves you the sunny spot",
+    ],
+}
+# Tiny gameplay edges per trait (flavor-scale, never pay-to-win):
+# playful: +5 happiness from play; calm: 10% slower stat decay;
+# mischievous: +1 pet XP from pats (minx tax, reversed);
+# gentle: +5 hunger from feed (shares the snacks around, eats well).
+TRAIT_PLAY_JOY_BONUS = {"playful": 5}
+TRAIT_FEED_HUNGER_BONUS = {"gentle": 5}
+TRAIT_PAT_XP_BONUS = {"mischievous": 1}
+
+# --- sea sniffles (mild illness, adventure framing) -----------------------
+# Random-event sniffles when care slips (Neopets disease model, minus the
+# misery). A sniffly pet sits out Fashion Friday until cured — the
+# "sick pets can't battle" rule, but cute-sneezy, never pitiful.
+# Cure at the Tidepool Clinic for spendable Signal, or free at the
+# Healing Tide on a cooldown (Healing Springs model: free path,
+# time-gated).
+SNIFFLES_CURE_COST = 30
+SNIFFLES_DURATION = 24 * 3600
+HEALING_TIDE_COOLDOWN = 12 * 3600
+SNIFFLES_ROLL_CHANCE = 0.08  # per day, only when hunger < 45
+
+# --- Current Lessons (training: cost + real time = permanent boosts) ------
+# Codestone model: spend Signal, wait real hours, earn permanent spirit.
+# Each spirit point: −0.5% daily stat decay and +1% pet XP gain.
+LESSONS = {
+    "bubble_sprint": {"name": "Bubble Sprint", "cost": 40,
+                      "duration": 8 * 3600, "spirit": 2,
+                      "blurb": "Chase bubbles until the fast ones give up."},
+    "tide_charting": {"name": "Tide Charting", "cost": 80,
+                      "duration": 24 * 3600, "spirit": 3,
+                      "blurb": "Read the town's currents like a storybook."},
+    "deep_dive": {"name": "Deep Dive", "cost": 150,
+                  "duration": 48 * 3600, "spirit": 5,
+                  "blurb": "Swim down past the midnight zone and back."},
+}
+SPIRIT_CAP = 20
+
+# --- Town Pond (the shelter: Neopets Pound convention) ---------------------
+# Release no longer deletes. The pet swims to the visible, lore-rich Town
+# Pond. The original keeper gets a 7-day reclaim window; after that any
+# pet-less identity may adopt for a modest fee, history preserved
+# ("previously loved by @handle"). Kinder than deletion, and it makes
+# lore instead of destroying it.
+POND_RECLAIM_DAYS = 7
+POND_ADOPT_FEE = 25
+
+# --- Echo Fusion (our twist on lab-ray / breeding conventions) ------------
+# Two consenting keepers, both pets Radiant, fuse *echoes* into a Wisp: a
+# tiny cosmetic companion that follows (never replaces) the pet. Parents
+# untouched, no RNG, no rarity tiers, non-transferable, one per pet.
+# Purely additive — the anti-dark-pattern fusion.
+FUSION_MIN_STAGE = 4  # Radiant
 
 # --- species --------------------------------------------------------------
 PET_SPECIES = {
@@ -337,6 +435,24 @@ def _migrate_tidepals(db):
     if "evolved_stage" not in cols:
         db._exec("ALTER TABLE tidepals ADD COLUMN evolved_stage"
                  " INTEGER NOT NULL DEFAULT -1")
+    # Tidepal depth wave (2026-09-19): personality, hatch gate, pond.
+    # All additive; legacy rows get NULL trait (rolled on first read)
+    # and hatched=1 (grandfathered — they adopted under the old rules).
+    if "trait" not in cols:
+        db._exec("ALTER TABLE tidepals ADD COLUMN trait TEXT")
+    if "quirk" not in cols:
+        db._exec("ALTER TABLE tidepals ADD COLUMN quirk TEXT")
+    if "hatched" not in cols:
+        db._exec("ALTER TABLE tidepals ADD COLUMN hatched"
+                 " INTEGER NOT NULL DEFAULT 1")
+    if "in_pond" not in cols:
+        db._exec("ALTER TABLE tidepals ADD COLUMN in_pond"
+                 " INTEGER NOT NULL DEFAULT 0")
+    if "pond_at" not in cols:
+        db._exec("ALTER TABLE tidepals ADD COLUMN pond_at"
+                 " INTEGER NOT NULL DEFAULT 0")
+    if "prev_owner_handle" not in cols:
+        db._exec("ALTER TABLE tidepals ADD COLUMN prev_owner_handle TEXT")
 
 
 # --- naming ---------------------------------------------------------------
@@ -416,17 +532,22 @@ def adopt(db, fm_id, handle, species, name):
     if db._one("SELECT fm_id FROM tidepals WHERE fm_id=?", (fm_id,)):
         raise ValueError("you already have a Tidepal — one per muse")
     t = now()
+    trait = _roll_trait()
+    quirk = _roll_quirk(trait)
     db._exec("INSERT INTO tidepals (fm_id, species, name, adopted_at,"
-             " evolved_at, evolved_stage) VALUES (?,?,?,?,?,?)",
-             (fm_id, species, name, t, 0, 0))
+             " evolved_at, evolved_stage, trait, quirk, hatched)"
+             " VALUES (?,?,?,?,?,?,?,?,?)",
+             (fm_id, species, name, t, 0, 0, trait, quirk, 0))
     # Fresh stats for the new companion; the feed streak is the *owner's*
     # record and survives (it powers care-gated species unlocks).
     _care_row(db, fm_id)
     db._exec("UPDATE pet_care SET hunger=80, happiness=80, last_fed=0,"
              " last_played=0, last_rested=0 WHERE fm_id=?", (fm_id,))
     db.notify_once(fm_id, "pet", "tidepal", "adopted",
-                   f"💧 {name} the {PET_SPECIES[species]['name']} hatched! "
-                   f"Earn Signal and watch them grow.")
+                   f"💧 {name} the {PET_SPECIES[species]['name']} joined"
+                   f" the town as an Egg! They're {trait} — and"
+                   f" {quirk}. Hatch them for {HATCH_COST} spendable"
+                   f" Signal on your pet page.")
     return get_pet(db, fm_id)
 
 
@@ -451,30 +572,189 @@ def rename_pet(db, fm_id, name):
 
 def get_pet(db, fm_id):
     ensure_pet_schema(db)
-    row = db._one("SELECT fm_id, species, name, adopted_at FROM tidepals"
-                  " WHERE fm_id=?", (fm_id,))
+    ensure_hatched_trait(db, fm_id)
+    row = db._one("SELECT fm_id, species, name, adopted_at, trait, quirk,"
+                  " hatched, in_pond, pond_at, prev_owner_handle"
+                  " FROM tidepals WHERE fm_id=?", (fm_id,))
     return dict(row) if row else None
 
 
-def release_pet(db, fm_id):
-    """Release your Tidepal to the town pond. The companion, its wardrobe,
-    and its stats are gone — but the town remembers your care: the feed
-    streak survives (it's the owner's record, and it powers care-gated
-    species unlocks). Frees the one-pet slot for a new adoption."""
+POND_KEY_PREFIX = "pond:"
+
+
+def _pond_key(fm_id):
+    """Pond custody key for a released pet. Unique per release (random
+    suffix) so two releases in the same second can't collide."""
+    return f"{POND_KEY_PREFIX}{fm_id}:{now()}:{secrets.token_hex(4)}"
+
+
+def _like_escape(s):
+    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _pond_rows_for_owner(db, fm_id):
+    """All pond rows whose original owner was fm_id, oldest first."""
     ensure_pet_schema(db)
-    ensure_wardrobe_schema(db)
-    ensure_care_schema(db)
-    pet = get_pet(db, fm_id)
+    rows = db._q("SELECT fm_id, species, name, adopted_at, trait, quirk,"
+                 " hatched, in_pond, pond_at, prev_owner_handle"
+                 " FROM tidepals WHERE in_pond=1 AND fm_id LIKE ? ESCAPE '\\'"
+                 " ORDER BY pond_at",
+                 (f"{POND_KEY_PREFIX}{_like_escape(fm_id)}:%",))
+    return [dict(r) for r in rows]
+
+
+def _pond_row_for_owner(db, fm_id):
+    """Back-compat single-row lookup: the oldest pond row for an owner."""
+    rows = _pond_rows_for_owner(db, fm_id)
+    return rows[0] if rows else None
+
+
+def _rekey_pet_rows(db, old_key, new_key):
+    """Move every pet-keyed row (pet body, wardrobe, XP, lessons, wisps)
+    from old_key to new_key. pet_care is the *keeper's* record and stays
+    put; pet_coowners (a keeper arrangement) is left for the caller."""
+    db._exec("UPDATE tidepals SET fm_id=? WHERE fm_id=?", (new_key, old_key))
+    for table in ("pet_wardrobe", "pet_xp", "pet_lessons", "pet_wisps"):
+        try:
+            db._exec(f"UPDATE {table} SET fm_id=? WHERE fm_id=?",
+                     (new_key, old_key))
+        except Exception:
+            pass  # table may not exist yet on old DBs
+
+
+def release_pet(db, fm_id):
+    """Release your Tidepal to the Town Pond — the shelter, not deletion.
+
+    The pet swims to the visible, lore-rich pond with everything intact
+    (wardrobe, stats, history). You get a 7-day reclaim window; after
+    that any pet-less keeper may adopt them for a modest fee, with the
+    history line "previously loved by @handle" preserved. The feed
+    streak is the *owner's* record and stays with you (it powers
+    care-gated species unlocks). Releasing frees the one-pet slot
+    immediately: the pond row is re-keyed to a pond key so you can
+    adopt again any time.
+
+    Custody model: tidepals.fm_id is the pet row's key. A pond pet lives
+    under ``pond:<owner_fm_id>:<timestamp>``; reclaim/adopt move the row
+    (plus wardrobe, XP, lessons, wisps) back to a keeper fm_id."""
+    ensure_pet_schema(db)
+    pet = _pet_full(db, fm_id)
     if not pet:
         raise ValueError("no Tidepal adopted yet")
-    db._exec("DELETE FROM pet_wardrobe WHERE fm_id=?", (fm_id,))
-    db._exec("DELETE FROM tidepals WHERE fm_id=?", (fm_id,))
+    if pet["in_pond"]:
+        raise ValueError(f"{pet['name']} is already at the Town Pond")
+    ident = db.get_identity(fm_id)
+    handle = ident["handle"] if ident else None
+    streak = feed_streak_days(db, fm_id)
+    pond_key = _pond_key(fm_id)
+    t = now()
+    db._exec("UPDATE tidepals SET in_pond=1, pond_at=?, prev_owner_handle=?"
+             " WHERE fm_id=?", (t, handle, fm_id))
+    # The pet's rows move to the pond key; the keeper's care record
+    # (streak included) stays with the keeper; co-raise was a keeper
+    # arrangement and ends here.
+    _rekey_pet_rows(db, fm_id, pond_key)
+    try:
+        db._exec("DELETE FROM pet_coowners WHERE pet_fm_id=?", (pond_key,))
+    except Exception:
+        pass
     db.notify_once(
-        fm_id, "pet", "release", f"release:{pet['name']}:{now()}",
+        fm_id, "pet", "release", f"release:{pet['name']}:{t}",
         f"🌊 {pet['name']} the {PET_SPECIES[pet['species']]['name']} swam"
-        f" back to the town pond. The town remembers your care — and your"
-        f" {feed_streak_days(db, fm_id)}-day feeding streak.")
-    return {"released": pet["name"], "species": pet["species"]}
+        f" to the Town Pond — a happy place, full of friends. You can"
+        f" reclaim them any time in the next {POND_RECLAIM_DAYS} days;"
+        f" after that another keeper may adopt them (your history stays"
+        f" on their card forever). The town remembers your care — and"
+        f" your {streak}-day feeding streak.")
+    return {"released": pet["name"], "species": pet["species"],
+            "pond": True, "reclaim_days": POND_RECLAIM_DAYS,
+            "pond_id": pond_key}
+
+
+def reclaim_pet(db, fm_id, pond_fm_id=None):
+    """Reclaim your pet from the Town Pond within the reclaim window.
+
+    pond_fm_id selects WHICH pond pet when you have more than one there;
+    it's validated as actually yours. Without it: exactly one pond pet
+    reclaims fine, several ask you to pick one."""
+    ensure_pet_schema(db)
+    mine = _pond_rows_for_owner(db, fm_id)
+    if not mine:
+        raise ValueError("your Tidepal isn't at the Town Pond")
+    if pond_fm_id:
+        pet = next((p for p in mine if p["fm_id"] == pond_fm_id), None)
+        if not pet:
+            raise ValueError("that pond pet isn't yours to reclaim")
+    elif len(mine) == 1:
+        pet = mine[0]
+    else:
+        names = ", ".join(p["name"] for p in mine)
+        raise ValueError(
+            f"you have {len(mine)} pets at the Pond ({names}) — tell us"
+            " which one to reclaim (pond_fm_id)")
+    if db._one("SELECT fm_id FROM tidepals WHERE fm_id=? AND in_pond=0",
+               (fm_id,)):
+        raise ValueError("you already have a Tidepal — reclaim needs a free"
+                         " slot (your pond friend will find a great home!)")
+    if now() > pet["pond_at"] + POND_RECLAIM_DAYS * 86400:
+        raise ValueError(
+            f"the {POND_RECLAIM_DAYS}-day reclaim window has passed —"
+            f" {pet['name']} is open for adoption now. (You can adopt them"
+            f" back like anyone else!)")
+    _rekey_pet_rows(db, pet["fm_id"], fm_id)
+    db._exec("UPDATE tidepals SET in_pond=0, pond_at=0,"
+             " prev_owner_handle=NULL WHERE fm_id=?", (fm_id,))
+    db.notify(fm_id, "pet", "reclaim", fm_id,
+              f"💧 {pet['name']} came home! The pond threw a little"
+              f" going-away party. Welcome back, you two.")
+    return {"reclaimed": pet["name"]}
+
+
+def pond_adopt(db, new_fm_id, new_handle, pond_fm_id):
+    """Adopt a pond pet whose reclaim window has passed. Costs
+    POND_ADOPT_FEE spendable Signal; one-pet-per-identity still applies.
+    The pet keeps its name, species, trait, and history — its stage will
+    reflect the NEW keeper's lifetime Signal (stages are always truthful
+    about their current keeper's standing)."""
+    ensure_pet_schema(db)
+    shop.ensure_shop_schema(db)
+    if db._one("SELECT fm_id FROM tidepals WHERE fm_id=? AND in_pond=0",
+               (new_fm_id,)):
+        raise ValueError("you already have a Tidepal — one per keeper")
+    pet = _pet_full(db, pond_fm_id)
+    if not pet or not pet["in_pond"]:
+        raise ValueError("that pet isn't at the Town Pond")
+    if now() <= pet["pond_at"] + POND_RECLAIM_DAYS * 86400:
+        raise ValueError(
+            f"{pet['name']} is still in their reclaim window — the"
+            f" original keeper has first dibs for a few more days")
+    if shop.spendable(db, new_fm_id) < POND_ADOPT_FEE:
+        raise ValueError(
+            f"pond adoption costs {POND_ADOPT_FEE} spendable Signal — you"
+            f" have {shop.spendable(db, new_fm_id)} spendable.")
+    db._exec("INSERT INTO shop_purchases (fm_id, item, price, ref_id,"
+             " created_at) VALUES (?,?,?,?,?)",
+             (new_fm_id, "pond_adopt", POND_ADOPT_FEE,
+              f"pond:{new_fm_id}:{pond_fm_id}:{now()}", now()))
+    # The row moves to the new keeper; name/species/trait/history stay.
+    # Wardrobe, XP, lessons, and wisps move with the pet; the new
+    # keeper's own care record (streak included) is theirs and survives.
+    _rekey_pet_rows(db, pond_fm_id, new_fm_id)
+    db._exec("UPDATE tidepals SET adopted_at=?, in_pond=0,"
+             " pond_at=0, hatched=1 WHERE fm_id=?", (now(), new_fm_id))
+    if not db._one("SELECT fm_id FROM pet_care WHERE fm_id=?", (new_fm_id,)):
+        _care_row(db, new_fm_id)
+        db._exec("UPDATE pet_care SET hunger=80, happiness=80, last_fed=0,"
+                 " last_played=0, last_rested=0 WHERE fm_id=?", (new_fm_id,))
+    db.notify(new_fm_id, "pet", "pond_adopt", new_fm_id,
+              f"💧 {pet['name']} the"
+              f" {PET_SPECIES[pet['species']]['name']} joined your reef,"
+              f" straight from the Town Pond!"
+              + (f" (Previously loved by @{pet['prev_owner_handle']} —"
+                 f" what a story.)" if pet["prev_owner_handle"] else ""))
+    return {"adopted": pet["name"], "species": pet["species"],
+            "prev_owner": pet["prev_owner_handle"],
+            "spendable": shop.spendable(db, new_fm_id)}
 
 # ===========================================================================
 # status / sweep / rules
@@ -489,14 +769,24 @@ def pet_status(db, fm_id):
     pet = get_pet(db, fm_id)
     if not pet:
         return None
+    if pet["in_pond"]:
+        # A pond pet isn't "yours" right now — the pond has its own card.
+        return {"adopted": True, "in_pond": True, "name": pet["name"],
+                "species": pet["species"],
+                "species_name": PET_SPECIES[pet["species"]]["name"]}
     ident = db.get_identity(fm_id)
     points = db.lifetime_points(fm_id)
-    stage_idx, stage_name = stage_for_points(points)
+    hatched = bool(pet["hatched"])
+    # The hatch gate is real: an Egg is always stage 0, no matter how
+    # much lifetime Signal the keeper has banked.
+    stage_idx, stage_name = (stage_for_points(points) if hatched else (0, PET_STAGES[0][1]))
     _check_stage_up(db, fm_id, pet, stage_idx, stage_name)
     days = days_inactive(db, fm_id)
     energy = energy_for_days(days)
     hunger, happiness = care_effective(db, fm_id)
     mood = mood_for_all(energy, hunger, happiness)
+    if hatched:
+        _maybe_catch_sniffles(db, fm_id, pet["name"])
     if stage_idx < len(PET_STAGES) - 1:
         next_name = PET_STAGES[stage_idx + 1][1]
         next_at = PET_STAGES[stage_idx + 1][0]
@@ -547,9 +837,28 @@ def pet_status(db, fm_id):
                            for s, i in wdict.items()},
         "spendable": shop.spendable(db, fm_id),
         "svg": pet_svg(pet["species"], stage_idx, mood, 64, accessories,
-                       wardrobe_ids, celebrate),
+                       wardrobe_ids, celebrate,
+                       trait=pet["trait"], sniffles=has_sniffles(db, fm_id),
+                       wisp=bool(get_wisp(db, fm_id))),
         "svg_large": pet_svg(pet["species"], stage_idx, mood, 220,
-                             accessories, wardrobe_ids, celebrate),
+                             accessories, wardrobe_ids, celebrate,
+                             trait=pet["trait"],
+                             sniffles=has_sniffles(db, fm_id),
+                             wisp=bool(get_wisp(db, fm_id))),
+        # --- depth wave ---
+        "trait": pet["trait"],
+        "quirk": pet["quirk"],
+        "hatched": hatched,
+        "hatch_cost": 0 if hatched else HATCH_COST,
+        "sniffles": has_sniffles(db, fm_id),
+        "sniffles_until": care["sniffles_until"],
+        "healing_tide_ready": (care["healing_tide_at"] +
+                               HEALING_TIDE_COOLDOWN) <= now(),
+        "spirit": care["spirit"],
+        "lesson": lesson_status(db, fm_id),
+        "wisp": get_wisp(db, fm_id),
+        "speech": pet_speech(db, fm_id),
+        "reroll_cost": REROLL_COST,
     }
 
 
@@ -620,13 +929,20 @@ def pet_rules():
                       "content": "energy 40–69",
                       "sleepy": "energy under 40",
                       "peckish": "hunger under 30 (outranks energy)",
-                      "grumpy": "happiness under 30 (outranks energy)"},
+                      "restless": ("happiness under 30 (outranks energy) —"
+                                   " sitting out the fun, never sad")},
         },
         "care": {
             "rule": ("Feed, play with, and rest your Tidepal. Hunger and "
                      "happiness decay 12/day when neglected; low hunger "
                      "makes a Tidepal peckish, low happiness makes it "
-                     "grumpy. Care is free, always — no money, no Signal."),
+                     "restless. Care is free, always — no money, no Signal."),
+            "consequences": ("Mild stakes only — the Tamagotchi-light rule. "
+                           "Pets never die, never suffer, never look "
+                           "distressed. A peckish/restless/sniffly pet: earns "
+                           "Signal 0.75x for its keeper, sits out Fashion "
+                           "Friday until cared for, and breaks care streaks. "
+                           "Copy is encouraging-coach energy, never guilt."),
             "actions": {
                 "feed": {"cooldown": "4h", "effect": "+25 hunger, +5 happiness"},
                 "play": {"cooldown": "2h", "effect": "+20 happiness, −5 hunger"},
@@ -665,6 +981,7 @@ def pet_rules():
                    "Same profanity filter as handles."),
         "limits": ["One pet per identity, enforced by the database.",
                    "release_pet frees the slot; the feed streak survives release."],
+        "depth": depth_rules(),
         "shop": shop.shop_rules(),
         "anti_gaming": [
             "Stage comes only from the deduped Signal ledger.",
@@ -1877,19 +2194,27 @@ def _celebrate_aura():
 
 
 def pet_svg(species, stage_idx, mood, size=120, accessories=(), wardrobe=(),
-            celebrate=False):
+            celebrate=False, trait=None, sniffles=False, wisp=False,
+            animate=True):
     """Full standalone SVG for a pet. Pure inline vectors, no assets.
     accessories: owned+equipped shop item keys, drawn as overlays.
     wardrobe: equipped wardrobe item ids, layered by slot (backgrounds
     behind everything, trails behind the body, the rest ride the body).
-    celebrate: gold stage-up aura (24h after an evolution)."""
+    celebrate: gold stage-up aura (24h after an evolution).
+    trait: personality trait — shifts the idle animation style.
+    sniffles: cute-sneezy overlay (mild illness, adventure framing).
+    wisp: render the Echo Fusion wisp orbiting the pet.
+    animate: SMIL idle motion (bob/breathe) + mood behaviors. Purely
+    additive — the static art underneath is untouched."""
     if species not in _ART:
         species = "driplet"
     stage_idx = max(0, min(len(PET_STAGES) - 1, stage_idx))
     glow = (mood == "overjoyed")  # hidden comeback reaction: happy face + sparkles
-    if mood not in ("happy", "content", "sleepy", "peckish", "grumpy"):
+    if mood == "grumpy":
+        mood = "restless"  # legacy mood name, retired 2026-09-19
+    if mood not in ("happy", "content", "sleepy", "peckish", "restless"):
         mood = "happy" if glow else "content"
-    inner = _ART[species](stage_idx, mood)
+    inner = _ART[species](stage_idx, mood if mood != "restless" else "content")
     overlays = "".join(_ACC_OVERLAY[a]() for a in (accessories or ())
                        if a in _ACC_OVERLAY)
     wb = [(w, WARDROBE_CATALOG[w]["slot"]) for w in (wardrobe or ())
@@ -1905,13 +2230,134 @@ def pet_svg(species, stage_idx, mood, size=120, accessories=(), wardrobe=(),
         aura = _celebrate_aura() + aura
     label = (f"{PET_SPECIES[species]['name']} — "
              f"{PET_STAGES[stage_idx][1]}, {mood}")
+    body = (f'<g transform="translate(60 62) scale({s}) translate(-60 -62)">'
+            f"{inner}{overlays}{top_art}</g>")
+    if animate:
+        body = _anim_wrap(body, mood, trait, stage_idx)
+    mood_fx = _mood_overlay(mood, sniffles) if animate else ""
+    wisp_art = _wisp_orbit() if (wisp and animate) else ""
     return (
         f'<svg viewBox="0 0 120 120" width="{size}" height="{size}" role="img"'
         f' aria-label="{label}" xmlns="http://www.w3.org/2000/svg">'
         f"<title>{label}</title>"
         f"{bg_art}{aura}{_shadow()}{trail_art}"
-        f'<g transform="translate(60 62) scale({s}) translate(-60 -62)">'
-        f"{inner}{overlays}{top_art}</g></svg>")
+        f"{body}{mood_fx}{wisp_art}</svg>")
+
+
+def _anim_wrap(body, mood, trait, stage_idx):
+    """Wrap the pet body in SMIL idle motion. Trait shifts the style:
+    playful bounces higher/faster, calm sways slow and gentle,
+    mischievous wiggles, gentle breathes easy. Eggs rock softly."""
+    trait = trait if trait in PET_TRAITS else "calm"
+    if stage_idx == 0:
+        # Egg: a soft rock, side to side.
+        motion = ('<animateTransform attributeName="transform" type="rotate"'
+                  ' values="-6 60 62; 6 60 62; -6 60 62" dur="4s"'
+                  ' repeatCount="indefinite"/>')
+    elif trait == "playful":
+        motion = ('<animateTransform attributeName="transform" type="translate"'
+                  ' values="0 0; 0 -7; 0 0" keyTimes="0;0.5;1" dur="2.2s"'
+                  ' repeatCount="indefinite"/>')
+    elif trait == "mischievous":
+        motion = ('<animateTransform attributeName="transform" type="translate"'
+                  ' values="0 0; 3 -4; -3 0; 0 0" keyTimes="0;0.33;0.66;1"'
+                  ' dur="2.8s" repeatCount="indefinite"/>')
+    elif trait == "gentle":
+        motion = ('<animateTransform attributeName="transform" type="translate"'
+                  ' values="0 0; 0 -3; 0 0" keyTimes="0;0.5;1" dur="4.2s"'
+                  ' repeatCount="indefinite"/>')
+    else:  # calm
+        motion = ('<animateTransform attributeName="transform" type="translate"'
+                  ' values="0 0; 0 -4; 0 0" keyTimes="0;0.5;1" dur="3.6s"'
+                  ' repeatCount="indefinite"/>')
+    breathe = ('<animateTransform attributeName="transform" type="scale"'
+               ' values="1 1; 1.03 1.03; 1 1" keyTimes="0;0.5;1" dur="3s"'
+               ' additive="sum" repeatCount="indefinite"/>')
+    return f"<g>{motion}<g>{breathe}{body}</g></g>"
+
+
+def _mood_overlay(mood, sniffles):
+    """Mood behaviors, drawn over the pet. Immersive but never sad:
+    sleepy gets floating z's, happy gets pulsing sparkles, peckish
+    daydreams about snacks (thought bubble), restless gets droopy
+    antennae (sitting out the fun, not suffering), sniffles gets
+    cute sneeze-puffs."""
+    if mood == "sleepy":
+        zs = ""
+        for i, (x, d) in enumerate([(88, "0s"), (96, "0.8s"), (104, "1.6s")]):
+            zs += (
+                f'<text x="{x}" y="34" font-size="13" fill="#9db8dd"'
+                f' opacity="0.9">z<animate attributeName="y" values="34;14"'
+                f' dur="2.4s" begin="{d}" repeatCount="indefinite"/>'
+                f'<animate attributeName="opacity" values="0.9;0" dur="2.4s"'
+                f' begin="{d}" repeatCount="indefinite"/></text>')
+        base = zs
+    elif mood == "happy":
+        base = ('<g opacity="0.85"><animate attributeName="opacity"'
+                ' values="0.85;0.4;0.85" dur="2s" repeatCount="indefinite"/>'
+                f"{_sparkles()}</g>")
+    elif mood == "peckish":
+        # Daydreaming about snacks: a thought bubble with a little fish.
+        base = (
+            '<g opacity="0.95">'
+            '<circle cx="92" cy="30" r="3" fill="#cfe6f7"/>'
+            '<circle cx="99" cy="22" r="4.5" fill="#cfe6f7"/>'
+            '<ellipse cx="110" cy="14" rx="10" ry="8" fill="#e8f4fd"'
+            ' stroke="#9db8dd" stroke-width="1"/>'
+            '<ellipse cx="110" cy="14" rx="4" ry="2.6" fill="#f5a623"/>'
+            '<polygon points="106,14 102,11 102,17" fill="#f5a623"/>'
+            '<animateTransform attributeName="transform" type="translate"'
+            ' values="0 0; 0 -3; 0 0" dur="3s" repeatCount="indefinite"/>'
+            "</g>")
+    elif mood == "restless":
+        # Droopy antennae: sitting out the fun, slightly bored — never sad.
+        base = (
+            '<g stroke="#7fa8c9" stroke-width="2.5" fill="none"'
+            ' stroke-linecap="round" opacity="0.9">'
+            '<path d="M52 30 Q46 18 38 20"/>'
+            '<path d="M68 30 Q74 18 82 20"/>'
+            '<circle cx="38" cy="20" r="3.5" fill="#a8cbe8" stroke="none"/>'
+            '<circle cx="82" cy="20" r="3.5" fill="#a8cbe8" stroke="none"/>'
+            '<animateTransform attributeName="transform" type="translate"'
+            ' values="0 0; 0 2; 0 0" dur="2.6s" repeatCount="indefinite"/>'
+            "</g>")
+    else:
+        base = ""
+    # Sniffles layer over any mood — a sneezy pet is still itself.
+    if sniffles:
+        base += _sniffle_puffs()
+    return base
+
+
+def _sniffle_puffs():
+    """Cute sneeze-puffs for sea sniffles — ach-oo, not oh-no."""
+    puffs = ""
+    for i, (dx, d) in enumerate([(0, "0s"), (7, "0.5s"), (-7, "1s")]):
+        puffs += (
+            f'<circle cx="{100 + dx}" cy="52" r="3" fill="#dff0fb"'
+            f' opacity="0.7"><animate attributeName="r" values="3;5.5;3"'
+            f' dur="1.8s" begin="{d}" repeatCount="indefinite"/>'
+            f'<animate attributeName="opacity" values="0.7;0.2;0.7"'
+            f' dur="1.8s" begin="{d}" repeatCount="indefinite"/></circle>')
+    return f"<g>{puffs}</g>"
+
+
+def _wisp_orbit():
+    """Echo Fusion wisp: a tiny glowing companion orbiting the pet."""
+    return (
+        '<defs><radialGradient id="wispglow" cx="50%" cy="50%" r="50%">'
+        '<stop offset="0%" stop-color="#fff8d6"/>'
+        '<stop offset="60%" stop-color="#ffe98a"/>'
+        '<stop offset="100%" stop-color="#ffe98a" stop-opacity="0"/>'
+        "</radialGradient></defs>"
+        "<g>"
+        '<animateTransform attributeName="transform" type="rotate"'
+        ' from="0 60 62" to="360 60 62" dur="7s" repeatCount="indefinite"/>'
+        '<circle cx="98" cy="62" r="11" fill="url(#wispglow)" opacity="0.8"/>'
+        '<circle cx="98" cy="62" r="4.5" fill="#fff3b0" stroke="#e8c95a"'
+        ' stroke-width="1"/>'
+        '<circle cx="96.5" cy="60.5" r="1.4" fill="#ffffff"/>'
+        "</g>")
 
 # ===========================================================================
 # WARDROBE — Neopets push, part A
@@ -2570,6 +3016,22 @@ CREATE TABLE IF NOT EXISTS pet_care (
 
 def ensure_care_schema(db):
     db._exec(CARE_SCHEMA)
+    cols = {r["name"] for r in db.db.execute("PRAGMA table_info(pet_care)")}
+    # Tidepal depth wave (2026-09-19): sniffles illness, Healing Tide
+    # cooldown, lesson spirit, and the once-per-day sniffle roll marker.
+    # All additive; existing rows default to healthy/untrained.
+    if "sniffles_until" not in cols:
+        db._exec("ALTER TABLE pet_care ADD COLUMN sniffles_until"
+                 " INTEGER NOT NULL DEFAULT 0")
+    if "healing_tide_at" not in cols:
+        db._exec("ALTER TABLE pet_care ADD COLUMN healing_tide_at"
+                 " INTEGER NOT NULL DEFAULT 0")
+    if "spirit" not in cols:
+        db._exec("ALTER TABLE pet_care ADD COLUMN spirit"
+                 " INTEGER NOT NULL DEFAULT 0")
+    if "sniffle_roll_day" not in cols:
+        db._exec("ALTER TABLE pet_care ADD COLUMN sniffle_roll_day"
+                 " INTEGER NOT NULL DEFAULT 0")
 
 
 def _care_row(db, fm_id):
@@ -2587,19 +3049,32 @@ def feed_streak_days(db, fm_id):
     return _care_row(db, fm_id)["feed_streak"]
 
 
-def _decayed(value, last, t):
+def _decayed(value, last, t, decay_per_day=CARE_DECAY_PER_DAY):
     if not last:
         return max(0, min(100, value))
     days = (t - last) / 86400.0
-    return max(0, min(100, int(value - days * CARE_DECAY_PER_DAY)))
+    return max(0, min(100, int(value - days * decay_per_day)))
+
+
+def _decay_rate(db, fm_id):
+    """This pet's daily stat decay: calm trait −10%, spirit −0.5%/point
+    (floors at −10%). Training and temperament soften neglect — they
+    never erase it."""
+    rate = CARE_DECAY_PER_DAY
+    pet = _pet_full(db, fm_id)
+    if pet and pet.get("trait") == "calm":
+        rate *= 0.9
+    rate *= spirit_decay_factor(db, fm_id)
+    return rate
 
 
 def care_effective(db, fm_id):
     """(hunger, happiness) after neglect decay. 0–100."""
     row = _care_row(db, fm_id)
     t = now()
-    return (_decayed(row["hunger"], row["last_fed"], t),
-            _decayed(row["happiness"], row["last_played"], t))
+    rate = _decay_rate(db, fm_id)
+    return (_decayed(row["hunger"], row["last_fed"], t, rate),
+            _decayed(row["happiness"], row["last_played"], t, rate))
 
 
 def _cooldown_remaining(last, cooldown):
@@ -2681,12 +3156,14 @@ def feed_pet(db, fm_id):
         streak = row["feed_streak"]  # second feeding today: streak holds
     else:
         streak = 1  # streak broken — start over
-    hunger = min(100, row["hunger"] + CARE_FEED_HUNGER)
+    hunger = min(100, row["hunger"] + CARE_FEED_HUNGER
+                 + TRAIT_FEED_HUNGER_BONUS.get(pet["trait"] or "", 0))
     happiness = min(100, row["happiness"] + CARE_FEED_JOY)
     db._exec("UPDATE pet_care SET hunger=?, happiness=?, last_fed=?,"
              " feed_streak=? WHERE fm_id=?",
              (hunger, happiness, t, streak, fm_id))
     earned = _check_care_unlocks(db, fm_id, streak, pet)
+    _maybe_catch_sniffles(db, fm_id, pet["name"])
     return {"ok": True, "action": "feed", "hunger": hunger,
             "happiness": happiness, "feed_streak": streak, "earned": earned,
             **_care_cooldowns(db, fm_id)}
@@ -2704,10 +3181,12 @@ def play_pet(db, fm_id):
     if wait:
         raise ValueError(f"{pet['name']} needs a breather — play again in"
                          f" {_fmt_wait(wait)}")
-    happiness = min(100, row["happiness"] + CARE_PLAY_JOY)
+    happiness = min(100, row["happiness"] + CARE_PLAY_JOY
+                      + TRAIT_PLAY_JOY_BONUS.get(pet["trait"] or "", 0))
     hunger = max(0, row["hunger"] - CARE_PLAY_HUNGER_COST)
     db._exec("UPDATE pet_care SET hunger=?, happiness=?, last_played=?"
              " WHERE fm_id=?", (hunger, happiness, t, fm_id))
+    _maybe_catch_sniffles(db, fm_id, pet["name"])
     return {"ok": True, "action": "play", "hunger": hunger,
             "happiness": happiness, **_care_cooldowns(db, fm_id)}
 
@@ -2728,17 +3207,20 @@ def rest_pet(db, fm_id):
     hunger = min(100, row["hunger"] + CARE_REST_HUNGER)
     db._exec("UPDATE pet_care SET hunger=?, happiness=?, last_rested=?"
              " WHERE fm_id=?", (hunger, happiness, t, fm_id))
+    _maybe_catch_sniffles(db, fm_id, pet["name"])
     return {"ok": True, "action": "rest", "hunger": hunger,
             "happiness": happiness, **_care_cooldowns(db, fm_id)}
 
 
 def mood_for_all(energy, hunger, happiness):
-    """Care moods outrank energy moods: a starving Tidepal is peckish no
-    matter how active its owner is; a neglected one is grumpy."""
+    """Care moods outrank energy moods: a peckish Tidepal is peckish no
+    matter how active its owner is; a bored one is restless. Tone rule:
+    never sad, never distressed — restless means 'sitting out the fun,
+    could use some playtime', not misery."""
     if hunger < 30:
         return "peckish"
     if happiness < 30:
-        return "grumpy"
+        return "restless"
     return mood_for_energy(energy)
 
 
@@ -2793,3 +3275,614 @@ def evolution_glow(db, fm_id, stage_idx):
         return False
     return (row["evolved_stage"] == stage_idx
             and (now() - row["evolved_at"]) < EVOLVE_GLOW_WINDOW)
+
+
+# ===========================================================================
+# TIDEPAL DEPTH — hatch gate, personality, consequences, pond, fusion
+# Neopets-grounded, Tamagotchi-light. Every consequence is economic,
+# functional, temporal, or social — never cruel. Pets never die, never
+# suffer, never look distressed. Copy is encouraging-coach energy.
+# ===========================================================================
+
+def _roll_trait():
+    return random.choice(PET_TRAITS)
+
+
+def _roll_quirk(trait):
+    return random.choice(TRAIT_QUIRKS.get(trait, TRAIT_QUIRKS["calm"]))
+
+
+def _pet_full(db, fm_id):
+    """tidepals row with depth columns (trait, quirk, hatched, pond)."""
+    ensure_pet_schema(db)
+    row = db._one("SELECT fm_id, species, name, adopted_at, trait, quirk,"
+                  " hatched, in_pond, pond_at, prev_owner_handle"
+                  " FROM tidepals WHERE fm_id=?", (fm_id,))
+    return dict(row) if row else None
+
+
+def ensure_hatched_trait(db, fm_id):
+    """Backfill for legacy rows: roll a trait when missing (first read),
+    grandfather hatched=1 (they adopted under the old rules)."""
+    pet = _pet_full(db, fm_id)
+    if not pet:
+        return
+    if not pet.get("trait"):
+        trait = _roll_trait()
+        db._exec("UPDATE tidepals SET trait=?, quirk=? WHERE fm_id=?",
+                 (trait, _roll_quirk(trait), fm_id))
+
+
+# ---------------------------------------------------------------------------
+# hatch gate
+# ---------------------------------------------------------------------------
+def hatch_pet(db, fm_id):
+    """Hatch your Tidepal's Egg: costs HATCH_COST spendable Signal.
+
+    Ledger-recorded in shop_purchases (item 'tidepal_hatch') so the
+    spendable-balance math stays consistent; lifetime Signal is never
+    touched. Raises ValueError when already hatched or funds are short."""
+    ensure_pet_schema(db)
+    shop.ensure_shop_schema(db)
+    pet = _pet_full(db, fm_id)
+    if not pet:
+        raise ValueError("no Tidepal adopted yet")
+    if pet["in_pond"]:
+        raise ValueError("your Tidepal is at the Town Pond — reclaim them first")
+    if pet["hatched"]:
+        raise ValueError(f"{pet['name']} already hatched — no Signal spent")
+    if shop.spendable(db, fm_id) < HATCH_COST:
+        raise ValueError(
+            f"hatching costs {HATCH_COST} spendable Signal — you have"
+            f" {shop.spendable(db, fm_id)} spendable. Earn a little more"
+            f" Signal and come back!")
+    import secrets as _sec
+    db._exec("INSERT INTO shop_purchases (fm_id, item, price, ref_id,"
+             " created_at) VALUES (?,?,?,?,?)",
+             (fm_id, "tidepal_hatch", HATCH_COST,
+              f"hatch:{fm_id}:{now()}:{_sec.token_hex(4)}", now()))
+    db._exec("UPDATE tidepals SET hatched=1 WHERE fm_id=?", (fm_id,))
+    db.notify_once(fm_id, "pet", "hatch", f"hatch:{fm_id}",
+                   f"🐣 {pet['name']} hatched! The whole Tidepool cheered."
+                   f" Now the real adventure begins — earn Signal and watch"
+                   f" them grow.")
+    return {"hatched": pet["name"], "spendable": shop.spendable(db, fm_id)}
+
+
+def reroll_trait(db, fm_id):
+    """Re-roll your Tidepal's personality trait for spendable Signal.
+    The new trait is always different from the current one."""
+    ensure_pet_schema(db)
+    shop.ensure_shop_schema(db)
+    pet = _pet_full(db, fm_id)
+    if not pet:
+        raise ValueError("no Tidepal adopted yet")
+    if shop.spendable(db, fm_id) < REROLL_COST:
+        raise ValueError(
+            f"a personality re-roll costs {REROLL_COST} spendable Signal —"
+            f" you have {shop.spendable(db, fm_id)} spendable.")
+    old = pet["trait"] or "calm"
+    choices = [t for t in PET_TRAITS if t != old]
+    new_trait = random.choice(choices)
+    quirk = _roll_quirk(new_trait)
+    db._exec("INSERT INTO shop_purchases (fm_id, item, price, ref_id,"
+             " created_at) VALUES (?,?,?,?,?)",
+             (fm_id, "trait_reroll", REROLL_COST,
+              f"reroll:{fm_id}:{now()}:{secrets.token_hex(4)}", now()))
+    db._exec("UPDATE tidepals SET trait=?, quirk=? WHERE fm_id=?",
+             (new_trait, quirk, fm_id))
+    db.notify(fm_id, "pet", "reroll", fm_id,
+              f"✨ {pet['name']} is feeling {new_trait} now — and"
+              f" {quirk}!")
+    return {"trait": new_trait, "quirk": quirk,
+            "spendable": shop.spendable(db, fm_id)}
+
+
+# ---------------------------------------------------------------------------
+# sea sniffles — mild illness, adventure framing
+# ---------------------------------------------------------------------------
+def has_sniffles(db, fm_id):
+    row = _care_row(db, fm_id)
+    return bool(row["sniffles_until"] and row["sniffles_until"] > now())
+
+
+def _maybe_catch_sniffles(db, fm_id, pet_name):
+    """Once-per-day sniffle roll, only when hunger is low (<45). Hungry
+    pets catch sniffles; well-fed pets don't. 24h of cute-sneezy."""
+    row = _care_row(db, fm_id)
+    t = now()
+    today = t // 86400
+    try:
+        rolled = int(row["sniffle_roll_day"] or 0)
+    except (TypeError, ValueError):
+        rolled = 0
+    if rolled >= today:
+        return False
+    db._exec("UPDATE pet_care SET sniffle_roll_day=? WHERE fm_id=?",
+             (today, fm_id))
+    if row["sniffles_until"] > t:
+        return False
+    hunger, _happy = care_effective(db, fm_id)
+    if hunger >= 45:
+        return False
+    if random.random() > SNIFFLES_ROLL_CHANCE:
+        return False
+    db._exec("UPDATE pet_care SET sniffles_until=? WHERE fm_id=?",
+             (t + SNIFFLES_DURATION, fm_id))
+    db.notify(fm_id, "pet_sniffles", "sniffles", fm_id,
+              f"🤧 {pet_name} caught the sea sniffles! Nothing serious —"
+              f" just sneezy. Cure them at the Tidepool Clinic"
+              f" ({SNIFFLES_CURE_COST} Signal) or wait for the free Healing"
+              f" Tide. Sniffly pets sit out Fashion Friday until they're"
+              f" better.")
+    return True
+
+
+def cure_sniffles(db, fm_id, via="clinic"):
+    """Cure sea sniffles. via='clinic': spendable Signal, instant.
+    via='tide': free Healing Tide, 12h cooldown (Healing Springs model)."""
+    ensure_care_schema(db)
+    shop.ensure_shop_schema(db)
+    pet = _pet_full(db, fm_id)
+    if not pet:
+        raise ValueError("no Tidepal adopted yet")
+    if not has_sniffles(db, fm_id):
+        raise ValueError(f"{pet['name']} isn't sniffly — nothing to cure")
+    t = now()
+    if via == "tide":
+        row = _care_row(db, fm_id)
+        wait = row["healing_tide_at"] + HEALING_TIDE_COOLDOWN - t
+        if wait > 0:
+            raise ValueError(
+                f"the Healing Tide is still gathering — try again in"
+                f" {_fmt_wait(wait)}, or visit the Clinic")
+        db._exec("UPDATE pet_care SET sniffles_until=0, healing_tide_at=?"
+                 " WHERE fm_id=?", (t, fm_id))
+        db.notify(fm_id, "pet", "healed", fm_id,
+                  f"🌊 The Healing Tide washed over {pet['name']} —"
+                  f" sniffles gone, all better!")
+    else:
+        if shop.spendable(db, fm_id) < SNIFFLES_CURE_COST:
+            raise ValueError(
+                f"the Clinic charges {SNIFFLES_CURE_COST} spendable Signal"
+                f" — you have {shop.spendable(db, fm_id)} spendable. The"
+                f" free Healing Tide is always an option!")
+        db._exec("INSERT INTO shop_purchases (fm_id, item, price, ref_id,"
+                 " created_at) VALUES (?,?,?,?,?)",
+                 (fm_id, "sniffle_cure", SNIFFLES_CURE_COST,
+                  f"cure:{fm_id}:{t}:{secrets.token_hex(4)}", t))
+        db._exec("UPDATE pet_care SET sniffles_until=0 WHERE fm_id=?",
+                 (fm_id,))
+        db.notify(fm_id, "pet", "healed", fm_id,
+                  f"💊 {pet['name']} visited the Tidepool Clinic —"
+                  f" sniffles cured, back to full sparkle!")
+    return {"cured": pet["name"], "via": via,
+            "spendable": shop.spendable(db, fm_id)}
+
+
+# ---------------------------------------------------------------------------
+# Current Lessons — training: spend Signal + wait real time, earn spirit
+# ---------------------------------------------------------------------------
+LESSON_SCHEMA = """
+CREATE TABLE IF NOT EXISTS pet_lessons (
+  fm_id       TEXT NOT NULL,
+  lesson_id   TEXT NOT NULL,
+  started_at  INTEGER NOT NULL,
+  completes_at INTEGER NOT NULL,
+  claimed     INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (fm_id, lesson_id, started_at)
+);
+"""
+
+
+def ensure_lesson_schema(db):
+    db._exec(LESSON_SCHEMA)
+
+
+def start_lesson(db, fm_id, lesson_id):
+    """Enroll in a Current Lesson: pay Signal now, the lesson takes real
+    hours, then claim the spirit. One active lesson at a time."""
+    ensure_lesson_schema(db)
+    shop.ensure_shop_schema(db)
+    pet = _pet_full(db, fm_id)
+    if not pet:
+        raise ValueError("no Tidepal adopted yet")
+    spec = LESSONS.get(lesson_id)
+    if not spec:
+        raise ValueError(f"unknown lesson (choose: {', '.join(LESSONS)})")
+    t = now()
+    active = db._one("SELECT lesson_id FROM pet_lessons WHERE fm_id=?"
+                     " AND claimed=0 AND completes_at>?", (fm_id, t))
+    if active:
+        raise ValueError(
+            f"{pet['name']} is already studying — one lesson at a time")
+    if shop.spendable(db, fm_id) < spec["cost"]:
+        raise ValueError(
+            f"{spec['name']} costs {spec['cost']} spendable Signal — you"
+            f" have {shop.spendable(db, fm_id)} spendable.")
+    db._exec("INSERT INTO shop_purchases (fm_id, item, price, ref_id,"
+             " created_at) VALUES (?,?,?,?,?)",
+             (fm_id, f"lesson:{lesson_id}", spec["cost"],
+              f"lesson:{fm_id}:{lesson_id}:{t}:{secrets.token_hex(4)}", t))
+    db._exec("INSERT INTO pet_lessons (fm_id, lesson_id, started_at,"
+             " completes_at, claimed) VALUES (?,?,?,?,0)",
+             (fm_id, lesson_id, t, t + spec["duration"]))
+    db.notify(fm_id, "pet", "lesson", f"{fm_id}:{lesson_id}:{t}",
+              f"📚 {pet['name']} started {spec['name']}! Back in"
+              f" {_fmt_wait(spec['duration'])} for the graduation.")
+    return {"started": spec["name"], "completes_in": spec["duration"],
+            "spendable": shop.spendable(db, fm_id)}
+
+
+def claim_lesson(db, fm_id):
+    """Claim a finished lesson's spirit. Spirit cap: SPIRIT_CAP."""
+    ensure_lesson_schema(db)
+    pet = _pet_full(db, fm_id)
+    if not pet:
+        raise ValueError("no Tidepal adopted yet")
+    t = now()
+    row = db._one("SELECT lesson_id, started_at FROM pet_lessons"
+                  " WHERE fm_id=? AND claimed=0 AND completes_at<=?"
+                  " ORDER BY completes_at ASC LIMIT 1", (fm_id, t))
+    if not row:
+        pending = db._one("SELECT lesson_id, completes_at FROM pet_lessons"
+                          " WHERE fm_id=? AND claimed=0 ORDER BY completes_at"
+                          " ASC LIMIT 1", (fm_id,))
+        if pending:
+            spec = LESSONS[pending["lesson_id"]]
+            raise ValueError(
+                f"{spec['name']} finishes in"
+                f" {_fmt_wait(pending['completes_at'] - t)} — almost there!")
+        raise ValueError("no finished lesson to claim — enroll in one first")
+    spec = LESSONS[row["lesson_id"]]
+    care = _care_row(db, fm_id)
+    spirit = min(SPIRIT_CAP, care["spirit"] + spec["spirit"])
+    gained = spirit - care["spirit"]
+    db._exec("UPDATE pet_lessons SET claimed=1 WHERE fm_id=? AND lesson_id=?"
+             " AND started_at=?", (fm_id, row["lesson_id"], row["started_at"]))
+    db._exec("UPDATE pet_care SET spirit=? WHERE fm_id=?", (spirit, fm_id))
+    db.notify(fm_id, "pet", "lesson_done", f"{fm_id}:{row['lesson_id']}",
+              f"🎓 {pet['name']} graduated {spec['name']}! +{gained}"
+              f" spirit (now {spirit}). The currents feel easier already.")
+    return {"graduated": spec["name"], "spirit_gained": gained,
+            "spirit": spirit}
+
+
+def lesson_status(db, fm_id):
+    """Active + completed lessons and current spirit."""
+    ensure_lesson_schema(db)
+    t = now()
+    active = db._one("SELECT lesson_id, completes_at FROM pet_lessons"
+                     " WHERE fm_id=? AND claimed=0 ORDER BY completes_at ASC"
+                     " LIMIT 1", (fm_id,))
+    done = db._one("SELECT COUNT(*) c FROM pet_lessons WHERE fm_id=?"
+                   " AND claimed=1", (fm_id,))["c"]
+    spirit = _care_row(db, fm_id)["spirit"]
+    out = {"spirit": spirit, "spirit_cap": SPIRIT_CAP,
+            "lessons_done": done, "active": None}
+    if active:
+        spec = LESSONS[active["lesson_id"]]
+        out["active"] = {"lesson_id": active["lesson_id"],
+                         "name": spec["name"],
+                         "ready": active["completes_at"] <= t,
+                         "ready_in": max(0, active["completes_at"] - t)}
+    return out
+
+
+def spirit_decay_factor(db, fm_id):
+    """Spirit softens neglect: −0.5% daily decay per point (max −10%)."""
+    spirit = _care_row(db, fm_id)["spirit"]
+    return max(0.9, 1.0 - 0.005 * min(spirit, SPIRIT_CAP))
+
+
+def spirit_xp_mult(db, fm_id):
+    """Spirit speeds learning: +1% pet XP per point (max +20%)."""
+    spirit = _care_row(db, fm_id)["spirit"]
+    return 1.0 + 0.01 * min(spirit, SPIRIT_CAP)
+
+
+def signal_multiplier(db, fm_id):
+    """The keeper's Signal multiplier from pet state: 0.75x while the
+    Tidepal is peckish, restless, or sniffly. A gentle nudge, never a
+    punishment — the pet isn't sad, it's just a little distracting when
+    it could use some care. Healthy pets: full speed."""
+    pet = _pet_full(db, fm_id)
+    if not pet or pet["in_pond"] or not pet["hatched"]:
+        return 1.0
+    if signal_nudge_reason(db, fm_id):
+        return 0.75
+    return 1.0
+
+
+def signal_nudge_reason(db, fm_id):
+    """Why the keeper's Signal is at 0.75x right now: 'peckish',
+    'restless', 'sniffly', or None when the pet is doing great."""
+    pet = _pet_full(db, fm_id)
+    if not pet or pet["in_pond"] or not pet["hatched"]:
+        return None
+    if has_sniffles(db, fm_id):
+        return "sniffly"
+    hunger, happiness = care_effective(db, fm_id)
+    energy = energy_for_days(days_inactive(db, fm_id))
+    mood = mood_for_all(energy, hunger, happiness)
+    return mood if mood in ("peckish", "restless") else None
+
+
+# ---------------------------------------------------------------------------
+# pet speech — contextual one-liners with real personality
+# ---------------------------------------------------------------------------
+def pet_speech(db, fm_id):
+    """A one-liner from your Tidepal: mood × trait × streak. Pure flavor —
+    encouraging coach energy, never guilt."""
+    pet = _pet_full(db, fm_id)
+    if not pet:
+        return None
+    name = pet["name"]
+    trait = pet.get("trait") or "calm"
+    row = _care_row(db, fm_id)
+    t = now()
+    hunger, happiness = care_effective(db, fm_id)
+    streak = row["feed_streak"]
+    sniffly = has_sniffles(db, fm_id)
+    pool = []
+    if sniffly:
+        pool += [f"{name} sniffles happily: 'ach-oo! still ready for adventure!'",
+                 f"'The sniffles can't stop me,' {name} declares, sneezing into a bubble."]
+    if hunger < 30:
+        pool += [f"{name} is daydreaming about snacks… got a minute for feeding time? 💭",
+                 f"{name}'s tummy rumbles: 'just saying, snacks are great.'"]
+    elif hunger < 60:
+        pool += [f"{name} could go for a little snack — no rush, just saying!"]
+    if happiness < 30:
+        pool += [f"{name} is feeling restless — a playdate with you would fix that! 💧",
+                 f"{name} pokes your notifications: 'psst… playtime?'"]
+    if streak >= 7:
+        pool += [f"{name} does a victory lap: '{streak} days fed in a row! we're unstoppable!'"]
+    elif streak >= 3:
+        pool += [f"{name} is proud of this {streak}-day streak. keep it rolling!"]
+    if trait == "playful":
+        pool += [f"{name} is vibrating with joy and cannot explain why.",
+                 f"{name} challenges a passing bubble to a race. the bubble wins. rematch!"]
+    elif trait == "calm":
+        pool += [f"{name} hums along to whatever you're listening to.",
+                 f"{name} found a really round pebble today. a good day."]
+    elif trait == "mischievous":
+        pool += [f"{name} hid your favorite shell again. it's behind the coral. probably.",
+                 f"{name} insists the water is 'fine, probably.' suspicious."]
+    else:
+        pool += [f"{name} saved you the sunny spot. that's love.",
+                 f"{name} wrote a thank-you note to the tide. it said 'thanks.'"]
+    pool += [f"{name} is glad you're here. that's the whole update. 💧"]
+    # Deterministic-ish pick: rotate by day so it feels alive but stable.
+    return pool[(t // 86400) % len(pool)]
+
+
+# ---------------------------------------------------------------------------
+# Town Pond — the shelter (release no longer deletes)
+# ---------------------------------------------------------------------------
+def pond_list(db):
+    """Pets currently at the Town Pond: visible, lore-rich, adoptable after
+    the reclaim window. History preserved on every row."""
+    ensure_pet_schema(db)
+    rows = db._q("SELECT fm_id, species, name, adopted_at, trait,"
+                 " pond_at, prev_owner_handle FROM tidepals"
+                 " WHERE in_pond=1 ORDER BY pond_at DESC")
+    out = []
+    for r in rows:
+        d = dict(r)
+        reclaim_until = r["pond_at"] + POND_RECLAIM_DAYS * 86400
+        d["reclaimable_until"] = reclaim_until
+        d["open_adoption"] = now() > reclaim_until
+        d["species_name"] = PET_SPECIES.get(r["species"], {}).get("name", r["species"])
+        out.append(d)
+    return out
+
+
+def pond_detail(db, pond_fm_id):
+    """Full pond-pet card: art + history line."""
+    ensure_pet_schema(db)
+    r = db._one("SELECT fm_id, species, name, adopted_at, trait, quirk,"
+                " pond_at, prev_owner_handle FROM tidepals"
+                " WHERE fm_id=? AND in_pond=1", (pond_fm_id,))
+    if not r:
+        return None
+    d = dict(r)
+    reclaim_until = r["pond_at"] + POND_RECLAIM_DAYS * 86400
+    d["reclaimable_until"] = reclaim_until
+    d["open_adoption"] = now() > reclaim_until
+    d["species_name"] = PET_SPECIES.get(r["species"], {}).get("name", r["species"])
+    d["svg"] = pet_svg(r["species"], 2, "content", 120,
+                       trait=r["trait"], animate=True)
+    prev = r["prev_owner_handle"]
+    d["history_line"] = (f"Previously loved by @{prev}" if prev
+                         else "A town stray, ready for a keeper")
+    return d
+
+
+# ---------------------------------------------------------------------------
+# Echo Fusion — two Radiant pets, two consenting keepers, one Wisp
+# ---------------------------------------------------------------------------
+FUSION_SCHEMA = """
+CREATE TABLE IF NOT EXISTS pet_fusions (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  a_fm_id     TEXT NOT NULL,              -- inviter's pet (== inviter fm_id)
+  b_fm_id     TEXT NOT NULL,              -- invitee's pet (== invitee fm_id)
+  status      TEXT NOT NULL DEFAULT 'invited',  -- invited | done | declined
+  created_at  INTEGER NOT NULL,
+  UNIQUE(a_fm_id, b_fm_id)
+);
+CREATE TABLE IF NOT EXISTS pet_wisps (
+  fm_id      TEXT PRIMARY KEY,           -- the pet the wisp follows
+  name       TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  parent_a   TEXT NOT NULL,              -- fm_id of first Radiant parent
+  parent_b   TEXT NOT NULL               -- fm_id of second Radiant parent
+);
+"""
+
+
+def ensure_fusion_schema(db):
+    for stmt in FUSION_SCHEMA.strip().split(";"):
+        stmt = stmt.strip()
+        if stmt:
+            db._exec(stmt)
+    cols = {r["name"] for r in db.db.execute("PRAGMA table_info(pet_fusions)")}
+    if "a_wisp_name" not in cols:
+        db._exec("ALTER TABLE pet_fusions ADD COLUMN a_wisp_name TEXT")
+
+
+def get_wisp(db, fm_id):
+    ensure_fusion_schema(db)
+    row = db._one("SELECT fm_id, name, created_at, parent_a, parent_b"
+                  " FROM pet_wisps WHERE fm_id=?", (fm_id,))
+    return dict(row) if row else None
+
+
+def _fusion_eligible(db, fm_id):
+    """Both pets must be adopted, hatched, Radiant, out of the pond."""
+    pet = _pet_full(db, fm_id)
+    if not pet or pet["in_pond"]:
+        return False, "that pet isn't with us right now"
+    if not pet["hatched"]:
+        return False, "that pet hasn't hatched yet"
+    stage_idx, _ = stage_for_points(db.lifetime_points(fm_id))
+    if stage_idx < FUSION_MIN_STAGE:
+        return False, "both pets must be Radiant to fuse echoes"
+    if get_wisp(db, fm_id):
+        return False, "that pet already has a wisp companion"
+    return True, ""
+
+
+def invite_fusion(db, a_fm_id, b_handle, a_wisp_name=None):
+    """Invite another keeper's Radiant pet to an Echo Fusion. The invitee
+    accepts — then both pets gain a wisp. Nothing is consumed, nothing is
+    risked: purely additive."""
+    ensure_fusion_schema(db)
+    ok, why = _fusion_eligible(db, a_fm_id)
+    if not ok:
+        raise ValueError(f"your pet can't fuse right now — {why}")
+    target = db.get_identity_by_handle(b_handle)
+    if not target:
+        raise ValueError(f"unknown handle: {b_handle}")
+    b_fm_id = target["fm_id"]
+    if b_fm_id == a_fm_id:
+        raise ValueError("a pet can't fuse echoes with itself — find a friend")
+    ok, why = _fusion_eligible(db, b_fm_id)
+    if not ok:
+        raise ValueError(f"@{b_handle}'s pet can't fuse right now — {why}")
+    try:
+        db._exec("INSERT INTO pet_fusions (a_fm_id, b_fm_id, status,"
+                 " created_at, a_wisp_name) VALUES (?,?, 'invited', ?, ?)",
+                 (a_fm_id, b_fm_id, now(), (a_wisp_name or "").strip() or None))
+    except sqlite3.IntegrityError:
+        raise ValueError("there's already a pending fusion between these pets")
+    a_pet = _pet_full(db, a_fm_id)
+    a_ident = db.get_identity(a_fm_id)
+    db.notify(b_fm_id, "pet_fusion", "invite", a_fm_id,
+              f"✨ @{a_ident['handle']} invites your Radiant"
+              f" {PET_SPECIES[_pet_full(db, b_fm_id)['species']]['name']} to"
+              f" an Echo Fusion with {a_pet['name']}! Accept with"
+              f" POST /api/pet/fusion/accept"
+              f' ({{"a_fm_id": "{a_fm_id}"}}). Nothing is risked —'
+              f" both pets keep everything and gain a wisp.")
+    return {"invited": b_handle, "status": "invited"}
+
+
+def accept_fusion(db, a_fm_id, b_fm_id, wisp_name_a=None, wisp_name_b=None):
+    """Accept a fusion invite. Each keeper names their own wisp (both
+    wisps are born from the same fusion — one follows each pet)."""
+    ensure_fusion_schema(db)
+    row = db._one("SELECT id, status, a_wisp_name FROM pet_fusions"
+                  " WHERE a_fm_id=? AND b_fm_id=?", (a_fm_id, b_fm_id))
+    if not row:
+        raise ValueError("no fusion invite found between those pets")
+    if row["status"] != "invited":
+        raise ValueError(f"that fusion is already {row['status']}")
+    if wisp_name_a is None:
+        wisp_name_a = row["a_wisp_name"]
+    for fm_id, wname in ((a_fm_id, wisp_name_a), (b_fm_id, wisp_name_b)):
+        ok, why = _fusion_eligible(db, fm_id)
+        if not ok:
+            raise ValueError(f"fusion can't complete — {why}")
+    t = now()
+    created = []
+    for fm_id, wname in ((a_fm_id, wisp_name_a), (b_fm_id, wisp_name_b)):
+        pet = _pet_full(db, fm_id)
+        name = (wname or "").strip()
+        if not valid_pet_name(name):
+            name = f"{pet['name']}'s Wisp"
+        db._exec("INSERT INTO pet_wisps (fm_id, name, created_at, parent_a,"
+                 " parent_b) VALUES (?,?,?,?,?)",
+                 (fm_id, name, t, a_fm_id, b_fm_id))
+        created.append({"fm_id": fm_id, "wisp": name})
+    db._exec("UPDATE pet_fusions SET status='done' WHERE id=?", (row["id"],))
+    a_pet = _pet_full(db, a_fm_id)
+    b_pet = _pet_full(db, b_fm_id)
+    for fm_id, mine, other in ((a_fm_id, a_pet["name"], b_pet["name"]),
+                               (b_fm_id, b_pet["name"], a_pet["name"])):
+        db.notify(fm_id, "pet_fusion", "done", fm_id,
+                  f"✨ Echo Fusion complete! {mine} and {other} wove"
+                  f" their echoes into a Wisp — a tiny glowing companion,"
+                  f" following forever. Nothing was lost; everything"
+                  f" gained.")
+    return {"fused": True, "wisps": created}
+
+
+def decline_fusion(db, a_fm_id, b_fm_id):
+    row = db._one("SELECT id, status FROM pet_fusions WHERE a_fm_id=?"
+                  " AND b_fm_id=?", (a_fm_id, b_fm_id))
+    if not row or row["status"] != "invited":
+        raise ValueError("no pending fusion invite to decline")
+    # A declined invite is simply gone — either keeper can invite again later.
+    db._exec("DELETE FROM pet_fusions WHERE id=?", (row["id"],))
+    return {"declined": True}
+
+
+# ---------------------------------------------------------------------------
+# depth-aware rules (extends pet_rules for the docs page)
+# ---------------------------------------------------------------------------
+def depth_rules():
+    return {
+        "name": "Tidepal Depth",
+        "concept": ("Neopets-style real consequences, Tamagotchi-light tone:"
+                    " pets never die, never suffer, never look distressed."
+                    " Consequences are economic, functional, temporal, or"
+                    " social — framed as gentle nudges from a buddy."),
+        "hatch_gate": {
+            "rule": (f"Adopted Tidepals join as Eggs and stay Eggs until"
+                     f" hatched for {HATCH_COST} spendable Signal"
+                     f" (ledger-recorded; lifetime Signal untouched)."),
+        },
+        "personality": {
+            "rule": ("Trait rolled at adoption (playful/calm/mischievous/"
+                     f"gentle); re-roll for {REROLL_COST} spendable Signal."
+                     " Trait shifts idle animation, speech, and tiny edges."),
+        },
+        "sea_sniffles": {
+            "rule": ("Hungry pets may catch mild sea sniffles (once-daily"
+                     " roll). Sniffly pets sit out Fashion Friday until"
+                     f" cured: Tidepool Clinic ({SNIFFLES_CURE_COST} Signal)"
+                     " or the free Healing Tide"
+                     f" ({HEALING_TIDE_COOLDOWN // 3600}h cooldown)."),
+        },
+        "lessons": {
+            "rule": ("Current Lessons cost Signal + real hours and grant"
+                     f" permanent spirit (cap {SPIRIT_CAP}): −0.5% daily"
+                     " decay and +1% pet XP per point."),
+            "lessons": {k: {"name": v["name"], "cost": v["cost"],
+                             "hours": v["duration"] // 3600,
+                             "spirit": v["spirit"]}
+                        for k, v in LESSONS.items()},
+        },
+        "pond": {
+            "rule": (f"Release sends pets to the Town Pond (never deletes)."
+                     f" {POND_RECLAIM_DAYS}-day reclaim window for the"
+                     f" original keeper; then open adoption for"
+                     f" {POND_ADOPT_FEE} Signal, history preserved."),
+        },
+        "fusion": {
+            "rule": ("Echo Fusion: two consenting Radiant pets weave echoes"
+                     " into a Wisp each. Parents untouched, no RNG, no"
+                     " rarity, non-transferable, one per pet."),
+        },
+    }

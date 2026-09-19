@@ -214,12 +214,12 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
           it["watch_url"] == "/watch/%d" % uid_short and
           it["ai_generated"] is True and it["duration_secs"] == 60, str(it))
 
-    # paging: page-based over the visitor's shuffled deck
+    # paging: page-based over one page-load's shuffled deck (seed pinned)
     r = client.get("/api/shorts?limit=1")
     d1 = r.get_json()
     check("limit=1 returns one", len(d1["items"]) == 1, str(d1))
     check("next_page cursor", d1["next_page"] == 1, str(d1))
-    r = client.get("/api/shorts?limit=1&page=1")
+    r = client.get("/api/shorts?limit=1&page=1&seed=" + d1["seed"])
     d2 = r.get_json()
     check("page=1 returns the next card, no repeat",
           len(d2["items"]) == 1 and
@@ -356,12 +356,19 @@ CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER,
         r = post_video(client, priv_a, fm_a, make_mp4(), duration="15")
         assert r.status_code == 200, r.get_data(as_text=True)[:200]
         anchor_ids.append(r.get_json()["id"])
-    # With the shuffled deck, find clips on/off the first page via the API
-    # (same client = same session seed, so the deck order matches /shorts).
-    deck0 = client.get("/api/shorts?limit=10&page=0").get_json()["items"]
-    deck1 = client.get("/api/shorts?limit=10&page=1").get_json()["items"]
+    # With the shuffled deck, find clips on/off the first page via the API.
+    # The /shorts page mints the seed; the API reuses it via ?seed=.
+    import re as _re
+    html0 = client.get("/shorts").get_data(as_text=True)
+    m = _re.search(r'let shortsSeed = "([0-9a-f]+)"', html0)
+    assert m, "seed not embedded in /shorts"
+    page_seed = m.group(1)
+    deck0 = client.get("/api/shorts?limit=10&page=0&seed=" + page_seed
+                       ).get_json()["items"]
+    deck1 = client.get("/api/shorts?limit=10&page=1&seed=" + page_seed
+                       ).get_json()["items"]
     onpage, offpage = deck0[0]["id"], deck1[0]["id"]
-    html = client.get("/shorts").get_data(as_text=True)
+    html = html0
     check("off-page clip falls outside initial render",
           'data-id="%d"' % offpage not in html and
           'data-id="%d"' % onpage in html)

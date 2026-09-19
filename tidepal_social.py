@@ -295,6 +295,13 @@ def award_pet_xp(db, pet_fm_id, xp):
     ensure_tidepal_social_schema(db)
     if xp <= 0:
         raise ValueError("xp must be positive")
+    import pets as _pets
+    try:
+        _pet = _pets.get_pet(db, pet_fm_id)
+        if _pet and not _pet["in_pond"]:
+            xp = max(1, int(round(xp * _pets.spirit_xp_mult(db, pet_fm_id))))
+    except Exception:
+        pass  # spirit bonus is best-effort; XP must always land
     before = pet_xp_total(db, pet_fm_id)
     db._exec("INSERT INTO pet_xp (fm_id, xp) VALUES (?,?)"
              " ON CONFLICT(fm_id) DO UPDATE SET xp=xp+excluded.xp",
@@ -422,23 +429,42 @@ def current_ritual(db, ts=None):
 
 
 def fashion_friday_entries(db):
-    """Auto-entry: every adopted pet with ≥1 wardrobe item equipped.
-    Returns pet fm_ids (the route builds status/art)."""
+    """Auto-entry: every hatched, pond-free pet with ≥1 wardrobe item
+    equipped. Sniffly, peckish, or restless pets sit this one out —
+    they'll be back next week! (Gentle nudge, not a punishment: the pet
+    just needs a little care first.) Returns pet fm_ids (the route
+    builds status/art)."""
     ensure_tidepal_social_schema(db)
-    import shop
-    shop.ensure_shop_schema(db)
-    rows = db._q("SELECT fm_id, equipped FROM pet_cosmetics")
-    entered = []
-    for r in rows:
+    import pets as _pets
+    _pets.ensure_wardrobe_schema(db)
+    import shop as _shop
+    _shop.ensure_shop_schema(db)
+    # Wardrobe lives in two places: the shop wardrobe (pet_cosmetics) and
+    # the Tidepal wardrobe (pet_wardrobe). Either one counts for entry.
+    wardrobed = {r["fm_id"] for r in
+                 db._q("SELECT DISTINCT fm_id FROM pet_wardrobe"
+                       " WHERE equipped=1")}
+    for r in db._q("SELECT fm_id, equipped FROM pet_cosmetics"):
         try:
             import json as _json
             eq = _json.loads(r["equipped"] or "{}")
         except (ValueError, TypeError):
             eq = {}
-        if not eq:
+        if eq:
+            wardrobed.add(r["fm_id"])
+    entered = []
+    for fm_id in wardrobed:
+        pet = _pets.get_pet(db, fm_id)
+        if not pet or pet["in_pond"] or not pet["hatched"]:
             continue
-        if db._one("SELECT fm_id FROM tidepals WHERE fm_id=?", (r["fm_id"],)):
-            entered.append(r["fm_id"])
+        if _pets.has_sniffles(db, fm_id):
+            continue
+        hunger, happiness = _pets.care_effective(db, fm_id)
+        energy = _pets.energy_for_days(_pets.days_inactive(db, fm_id))
+        mood = _pets.mood_for_all(energy, hunger, happiness)
+        if mood in ("peckish", "restless"):
+            continue
+        entered.append(fm_id)
     return entered
 
 

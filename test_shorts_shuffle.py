@@ -100,11 +100,18 @@ def post_video(client, priv, fm_id, raw, duration="30"):
 
 
 def all_ids(client):
-    """Walk the whole deck for one client; return the ordered id list."""
-    seen, page = [], 0
+    """Walk the whole deck for one client; return the ordered id list.
+    Captures the seed from page 0 and reuses it — that's the contract:
+    fresh seed per load, stable deck while you paginate."""
+    seen, page, seed = [], 0, None
     for _ in range(20):
-        d = client.get("/api/shorts?limit=5&page=%d" % page).get_json()
+        url = "/api/shorts?limit=5&page=%d" % page
+        if seed:
+            url += "&seed=" + seed
+        d = client.get(url).get_json()
         assert d["ok"]
+        if seed is None:
+            seed = d["seed"]
         seen.extend(it["id"] for it in d["items"])
         if d["next_page"] is None:
             break
@@ -117,7 +124,7 @@ def main():
     priv, fm_id = register(client, "ShuffleMuse")
     ids = [post_video(client, priv, fm_id, make_mp4()) for _ in range(12)]
 
-    print("== session seed: stable per visitor, different across visitors ==")
+    print("== page-load seed: fresh per load, stable while paginating ==")
     c1 = appmod.app.test_client()
     c2 = appmod.app.test_client()
     d1 = c1.get("/api/shorts?limit=12").get_json()
@@ -128,23 +135,30 @@ def main():
           sorted(o1) == sorted(o2) == sorted(ids), f"{o1} {o2}")
     check("visitors get different orders", o1 != o2,
           f"order1={o1} order2={o2}")
-    # same visitor keeps stable order across requests
-    d1b = c1.get("/api/shorts?limit=12").get_json()
-    check("same session keeps stable order",
+    # reusing the seed keeps the deck stable across requests
+    d1b = c1.get("/api/shorts?limit=12&seed=" + d1["seed"]).get_json()
+    check("same seed keeps stable order",
           [it["id"] for it in d1b["items"]] == o1)
+    # no seed = fresh shuffle (the reshuffle is the point)
+    d1c = c1.get("/api/shorts?limit=12").get_json()
+    check("fresh load reshuffles",
+          d1c["seed"] != d1["seed"])
 
     print("== paging: no repeats, no skips ==")
     walked = all_ids(c1)
     check("full walk covers every clip exactly once",
           sorted(walked) == sorted(ids) and len(walked) == len(ids),
           str(walked))
-    check("walk matches session order", walked == o1,
-          f"{walked} vs {o1}")
-    # page boundaries across the whole walk
+    # page boundaries across the whole walk (seed pinned for the walk)
     c3 = appmod.app.test_client()
-    got, page = [], 0
+    got, page, seed3 = [], 0, None
     for _ in range(10):
-        d = c3.get("/api/shorts?limit=7&page=%d" % page).get_json()
+        url = "/api/shorts?limit=7&page=%d" % page
+        if seed3:
+            url += "&seed=" + seed3
+        d = c3.get(url).get_json()
+        if seed3 is None:
+            seed3 = d["seed"]
         got.extend(it["id"] for it in d["items"])
         if d["next_page"] is None:
             break

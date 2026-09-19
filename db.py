@@ -1641,7 +1641,20 @@ class Database:
         TRIGGER_REASONS are genuine town activity: they also run the
         streak bonus, achievement, tier-milestone, and referral checks.
         Payout reasons (streak_bonus, achievement, tier_milestone, referral,
-        comeback, challenge_win) never re-trigger, so the chain terminates."""
+        comeback, challenge_win) never re-trigger, so the chain terminates.
+
+        Tidepal nudge: while your pet is peckish, restless, or sniffly,
+        genuine activity earns 0.75x Signal (rounded, min 1) — the pet
+        isn't sad, it's just a little distracting when it needs care.
+        Payouts are never reduced. Pet-system failures can never break
+        Signal: the multiplier is best-effort."""
+        try:
+            import pets as _pets
+            _mult = _pets.signal_multiplier(self, fm_id)
+        except Exception:
+            _mult = 1.0
+        if points > 0 and _mult != 1.0 and reason in TRIGGER_REASONS:
+            points = max(1, int(round(points * _mult)))
         try:
             self._exec(
                 "INSERT INTO rewards (fm_id, handle, points, reason, ref_type,"

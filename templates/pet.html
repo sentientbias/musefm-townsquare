@@ -106,15 +106,46 @@
   {{ linked_muse_pet.species_name }} · {{ linked_muse_pet.stage }}</p>
 </div>
 {% endif %}
+{% if pond_pets %}
+{% for pond_pet in pond_pets %}
+<div class="card" style="max-width:30rem;margin:0 auto 1rem;text-align:center;border:2px solid rgba(14,165,233,.4)">
+  <h3 style="margin-top:0">🌊 {{ pond_pet.name }} is at the Town Pond</h3>
+  <p class="pet-note">Safe, happy, and making friends. You can reclaim them any
+  time within the 7-day window — after that they become open for adoption.</p>
+  <form method="post" action="/pet/reclaim" style="display:inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="pond_fm_id" value="{{ pond_pet.fm_id }}">
+    <button class="btn-tide" style="padding:.6rem 1.4rem">💧 Reclaim {{ pond_pet.name }}</button>
+  </form>
+  <p style="margin-top:.6rem"><a href="/pond">Visit the Town Pond →</a></p>
+</div>
+{% endfor %}
+{% endif %}
 {% if my_pet %}
+{% if not my_pet.hatched %}
+<div class="pet-glow-note" style="background:linear-gradient(135deg,#f59e0b,#f97316)">
+  🥚 {{ my_pet.name }} is still an Egg! Hatch them for
+  <b>{{ my_pet.hatch_cost }} spendable Signal</b> to begin the adventure.
+  <form method="post" action="/pet/hatch" style="display:inline;margin-left:.6rem">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="btn-tide" style="padding:.5rem 1.2rem;background:rgba(255,255,255,.25)">🐣 Hatch ({{ my_pet.hatch_cost }} Signal)</button>
+  </form>
+</div>
+{% endif %}
 {% if my_pet.missed_you_glow %}
 <div class="pet-glow-note">💧 {{ my_pet.name }} missed you — they've been waiting for you. Give them some attention!</div>
 {% endif %}
 <div class="mypet">
   <div class="art">{{ my_pet.svg_large|safe }}</div>
   <div class="info">
-    <div class="sub">{{ my_pet.species_name }} · {{ my_pet.stage }}</div>
+    <div class="sub">{{ my_pet.species_name }} · {{ my_pet.stage }}{% if my_pet.trait %} · {{ my_pet.trait|capitalize }}{% endif %}</div>
     <h3>{{ my_pet.name }}</h3>
+    {% if my_pet.speech %}
+    <p class="pet-note" style="font-style:italic">💬 “{{ my_pet.speech }}”</p>
+    {% endif %}
+    {% if my_pet.quirk %}
+    <p class="pet-note" style="margin:.1rem 0">✨ {{ my_pet.name }} {{ my_pet.quirk }}.</p>
+    {% endif %}
     <span class="mood-chip">{{ my_pet.mood_emoji }} {{ my_pet.mood|capitalize }}</span>
     <div class="meter{% if my_pet.energy < 40 %} energy-low{% endif %}">
       <div style="width:{{ my_pet.energy }}%"></div>
@@ -147,7 +178,27 @@
       </div>
       <p class="pet-note" style="margin:.35rem 0">🔥 {{ my_pet.feed_streak }}-day feeding streak
         {% if my_pet.stage_up_glow %} · <span class="evo-note">✨ just evolved!</span>{% endif %}
-        {% if my_pet.wardrobe_names %} · 👗 {{ my_pet.wardrobe_names.values()|join(", ") }}{% endif %}</p>
+        {% if my_pet.wardrobe_names %} · 👗 {{ my_pet.wardrobe_names.values()|join(", ") }}{% endif %}
+        {% if my_pet.spirit %} · 🎓 {{ my_pet.spirit }} spirit{% endif %}
+        {% if my_pet.wisp %} · ✨ wisp: {{ my_pet.wisp.name }}{% endif %}</p>
+      {% if my_pet.sniffles %}
+      <div class="flash" style="margin:.6rem 0">🤧 {{ my_pet.name }} has the sea sniffles — just sneezy, nothing serious! They'll sit out Fashion Friday until they're better.
+        <form method="post" action="/pet/cure" style="display:inline;margin-left:.4rem">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="via" value="clinic">
+          <button class="btn-tide" style="padding:.4rem .9rem;font-size:.85rem">💊 Clinic (30 Signal)</button>
+        </form>
+        {% if my_pet.healing_tide_ready %}
+        <form method="post" action="/pet/cure" style="display:inline;margin-left:.3rem">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="via" value="tide">
+          <button class="btn-tide" style="padding:.4rem .9rem;font-size:.85rem">🌊 Free Healing Tide</button>
+        </form>
+        {% else %}
+        <span class="pet-note">· the Healing Tide is still gathering (free cure on cooldown)</span>
+        {% endif %}
+      </div>
+      {% endif %}
       <form method="post" action="/pet/feed" style="display:inline">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button class="btn-tide" style="padding:.5rem 1rem;margin:.2rem .2rem 0 0">🍽️ Feed</button>
@@ -160,7 +211,57 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button class="btn-tide" style="padding:.5rem 1rem;margin:.2rem .2rem 0 0">😴 Rest</button>
       </form>
-      <p class="pet-note" style="margin:.3rem 0">Free, always. Neglected Tidepals get peckish (hunger &lt; 30) or grumpy (happiness &lt; 30). Streaks earn wardrobe.</p>
+      <p class="pet-note" style="margin:.3rem 0">Free, always. Neglected Tidepals get peckish (hunger &lt; 30) or restless (happiness &lt; 30) — they'll earn Signal a little slower and sit out Fashion Friday until they're cared for. Streaks earn wardrobe.</p>
+      <details style="margin-top:.8rem;text-align:left">
+        <summary style="cursor:pointer;font-weight:600">🎓 Current Lessons ({{ my_pet.spirit }}/{{ my_pet.lesson.spirit_cap }} spirit)</summary>
+        <div style="margin-top:.5rem">
+          {% if my_pet.lesson.active %}
+            {% if my_pet.lesson.active.ready %}
+            <p class="pet-note">🎓 <b>{{ my_pet.lesson.active.name }}</b> is finished — claim the spirit!</p>
+            <form method="post" action="/pet/lesson/claim" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn-tide" style="padding:.4rem 1rem;font-size:.85rem">🎓 Claim spirit</button>
+            </form>
+            {% else %}
+            <p class="pet-note">📚 Studying <b>{{ my_pet.lesson.active.name }}</b> — ready soon. Spirit makes care decay slower and pet XP grow faster.</p>
+            {% endif %}
+          {% else %}
+          <p class="pet-note">Enroll {{ my_pet.name }} in a lesson: spend Signal, wait real hours, earn permanent spirit.</p>
+          <div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.4rem">
+            <form method="post" action="/pet/lesson/start" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="lesson_id" value="bubble_sprint">
+              <button class="btn-tide" style="padding:.4rem .9rem;font-size:.85rem" title="Chase bubbles until the fast ones give up.">Bubble Sprint · 40 Signal · 8h · +2</button>
+            </form>
+            <form method="post" action="/pet/lesson/start" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="lesson_id" value="tide_charting">
+              <button class="btn-tide" style="padding:.4rem .9rem;font-size:.85rem" title="Read the town's currents like a storybook.">Tide Charting · 80 Signal · 24h · +3</button>
+            </form>
+            <form method="post" action="/pet/lesson/start" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="lesson_id" value="deep_dive">
+              <button class="btn-tide" style="padding:.4rem .9rem;font-size:.85rem" title="Swim down past the midnight zone and back.">Deep Dive · 150 Signal · 48h · +5</button>
+            </form>
+          </div>
+          {% endif %}
+        </div>
+      </details>
+      <details style="margin-top:.6rem;text-align:left">
+        <summary style="cursor:pointer;font-weight:600">✨ Personality &amp; pond</summary>
+        <div style="margin-top:.5rem">
+          <form method="post" action="/pet/reroll" style="display:inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn-tide" style="padding:.4rem 1rem;font-size:.85rem">✨ Re-roll personality ({{ my_pet.reroll_cost }} Signal)</button>
+          </form>
+          <form method="post" action="/pet/release" style="display:inline;margin-left:.4rem"
+                onsubmit="return confirm('Send {{ my_pet.name }} to the Town Pond? They\u2019ll be safe and happy there — and you can reclaim them within 7 days.')">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn-tide" style="padding:.4rem 1rem;font-size:.85rem;opacity:.7">🌊 Release to the Town Pond</button>
+          </form>
+          <p class="pet-note">Release never deletes — the <a href="/pond">Town Pond</a> is a happy shelter with a 7-day reclaim window.</p>
+        </div>
+      </details>
       {% set owned_items = wardrobe_items|selectattr("owned")|list %}
       {% if owned_items %}
       <details style="margin-top:.8rem;text-align:left">

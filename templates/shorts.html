@@ -39,7 +39,9 @@
   if (!feed) return;
   let loading = false, exhausted = {{ 'true' if not items else 'false' }};
   let page = 1;  // page 0 is rendered server-side; the deck order comes
-                 // from the visitor's session seed, so pages never repeat/skip
+                 // from this page load's seed, reused for every page so
+                 // infinite scroll never repeats/skips
+  let shortsSeed = {{ shorts_seed|tojson }};
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
@@ -428,8 +430,10 @@
     if (loading || exhausted) return;
     loading = true;
     try {
-      const r = await fetch('/api/shorts?limit=10&page=' + page);
+      const r = await fetch('/api/shorts?limit=10&page=' + page +
+        '&seed=' + encodeURIComponent(shortsSeed));
       const d = await r.json();
+      if (d.seed) shortsSeed = d.seed;  // stay on the same deck
       const items = (d.ok && d.items) || [];
       const end = document.getElementById('shorts-end');
       items.forEach(it => {

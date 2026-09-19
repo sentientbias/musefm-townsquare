@@ -786,11 +786,12 @@ def home():
     _fb_attach_posts(posts, _fb_web_reactor())
     # Homepage Shorts strip: fresh random seed on EVERY page load so the
     # tiles rotate on every visit (Anthony: "homepage shorts don't rotate
-    # randomly"). The /shorts feed keeps the session-stable _shorts_seed()
-    # so scrolling doesn't reshuffle — but the strip is only page 0, 12
-    # tiles, no scroll continuity to protect. We also exclude the previous
-    # visit's strip ids so back-to-back loads show zero repeats (when the
-    # pool is large enough), which is what makes it *feel* more random.
+    # randomly"). The /shorts feed mints a fresh seed per page load too,
+    # but hands it to the client so infinite scroll reuses the same deck
+    # — the strip is only page 0, 12 tiles, no scroll continuity to
+    # protect. We also exclude the previous visit's strip ids so
+    # back-to-back loads show zero repeats (when the pool is large
+    # enough), which is what makes it *feel* more random.
     shorts, _stotal = videos.shuffled_short_page(
         db, secrets.token_hex(8), limit=12, page=0,
         exclude=session.get("home_shorts_last") or ())
@@ -2565,11 +2566,16 @@ def signal_guide():
 # Virtual aqua companions. All pet logic lives in pets.py — this section
 # only wires HTTP. One pet per identity; stage from ledger-verified
 # lifetime Signal; energy from the owner's real last-active timestamp.
-from pets import (LOCKED_SPECIES, PET_SPECIES, adopt, buy_wardrobe_item,
-                  equip_item, equipped_wardrobe, feed_pet, get_pet, pet_rules,
+from pets import (LOCKED_SPECIES, PET_SPECIES, LESSONS, POND_ADOPT_FEE,
+                  POND_RECLAIM_DAYS, WARDROBE_CATALOG, accept_fusion,
+                  adopt, buy_wardrobe_item, claim_lesson, cure_sniffles,
+                  decline_fusion, equip_item, equipped_wardrobe, feed_pet,
+                  get_pet, hatch_pet, invite_fusion, lesson_status, pet_rules,
                   pet_silhouette, pet_status, pet_svg, pet_sweep, play_pet,
-                  release_pet, rename_pet, rest_pet, species_unlock_condition,
-                  wardrobe_catalog)
+                  pond_adopt, pond_detail, pond_list, reclaim_pet,
+                  release_pet, rename_pet, reroll_trait, rest_pet,
+                  species_unlock_condition, start_lesson, wardrobe_catalog,
+                  _pond_rows_for_owner)
 import tidepal_social as tpsocial
 import tidepal_games as tpgames
 
@@ -2601,9 +2607,19 @@ def pet_page():
                               "kind": spec["kind"]})
     ident = current_session_identity()
     my_pet = pet_status(db, ident["fm_id"]) if ident else None
+    pond_pets = []
+    if ident:
+        # Pond pets are re-keyed under pond:<owner>:… so pet_status can't
+        # see them — query the owner's pond rows explicitly.
+        for prow in _pond_rows_for_owner(db, ident["fm_id"]):
+            card = pond_detail(db, prow["fm_id"])
+            if card:
+                pond_pets.append(card)
+    pond_pet = pond_pets[0] if len(pond_pets) == 1 else None
     if my_pet:
         my_pet["mood_emoji"] = {"happy": "😊", "content": "🙂",
-                                "sleepy": "😴", "overjoyed": "🥹"}.get(my_pet["mood"], "💧")
+                                "sleepy": "😴", "overjoyed": "🥹",
+                                "peckish": "🍽️", "restless": "💭"}.get(my_pet["mood"], "💧")
     # Linked human sees their muse's Tidepal by default — the muse side of
     # the link; manual handle lookup below still works for everyone.
     linked_muse_pet = None
@@ -2624,7 +2640,8 @@ def pet_page():
                            linked_muse_pet=linked_muse_pet,
                            linked_muse_handle=linked_muse_handle,
                            flash_msg=flash_msg, flash_err=flash_err,
-                           wardrobe_items=wardrobe_items)
+                           wardrobe_items=wardrobe_items,
+                           pond_pets=pond_pets)
 
 
 @app.route("/pet/adopt", methods=["POST"])
@@ -2918,6 +2935,266 @@ def api_pet_wardrobe_buy():
                     "pet": pet_status(db, ident["fm_id"])})
 
 
+@app.route("/api/pets/hatch", methods=["POST"])
+def api_pet_hatch():
+    """Signed (action="pet_hatch"). Hatch your Tidepal's Egg for 50
+    spendable Signal (ledger-recorded; lifetime Signal untouched).
+    Until hatched, the pet stays an Egg — stage 0 no matter what."""
+    hit = check_limit("pet_hatch", 10)
+    if hit:
+        return hit
+    ident, err = _tidepal_signed_strict("pet_hatch")
+    if err:
+        return err
+    try:
+        res = hatch_pet(db, ident["fm_id"])
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, **res,
+                    "pet": pet_status(db, ident["fm_id"])})
+
+
+@app.route("/api/pets/reroll", methods=["POST"])
+def api_pet_reroll():
+    """Signed (action="pet_reroll"). Re-roll your Tidepal's personality
+    trait for 25 spendable Signal. The new trait is always different."""
+    hit = check_limit("pet_reroll", 10)
+    if hit:
+        return hit
+    ident, err = _tidepal_signed_strict("pet_reroll")
+    if err:
+        return err
+    try:
+        res = reroll_trait(db, ident["fm_id"])
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, **res,
+                    "pet": pet_status(db, ident["fm_id"])})
+
+
+@app.route("/api/pet/cure", methods=["POST"])
+def api_pet_cure():
+    """Signed (action="pet_cure"). Cure sea sniffles: {"via": "clinic"}
+    (30 spendable Signal, instant) or {"via": "tide"} (free Healing
+    Tide, 12h cooldown). Sniffly pets sit out Fashion Friday."""
+    hit = check_limit("pet_cure", 10)
+    if hit:
+        return hit
+    ident, err = _tidepal_signed_strict("pet_cure")
+    if err:
+        return err
+    data = json_body()
+    try:
+        res = cure_sniffles(db, ident["fm_id"],
+                            _fs(data, "via", "clinic").strip() or "clinic")
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, **res,
+                    "pet": pet_status(db, ident["fm_id"])})
+
+
+@app.route("/api/pet/lesson")
+def api_pet_lesson_status():
+    """Signed query params, action="pet_lesson". Current spirit, active
+    lesson, and the lesson catalog."""
+    ident, err = signed_query_identity("pet_lesson")
+    if err:
+        return err
+    st = lesson_status(db, ident["fm_id"])
+    st["catalog"] = {k: {"name": v["name"], "cost": v["cost"],
+                         "hours": v["duration"] // 3600,
+                         "spirit": v["spirit"], "blurb": v["blurb"]}
+                     for k, v in LESSONS.items()}
+    return jsonify({"ok": True, **st})
+
+
+@app.route("/api/pet/lesson/start", methods=["POST"])
+def api_pet_lesson_start():
+    """Signed (action="pet_lesson"). Enroll in a Current Lesson:
+    {"lesson_id": "bubble_sprint"} — pay Signal now, wait real hours,
+    claim permanent spirit."""
+    hit = check_limit("pet_lesson", 10)
+    if hit:
+        return hit
+    ident, err = _tidepal_signed_strict("pet_lesson")
+    if err:
+        return err
+    data = json_body()
+    try:
+        res = start_lesson(db, ident["fm_id"],
+                           _fs(data, "lesson_id").strip())
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, **res})
+
+
+@app.route("/api/pet/lesson/claim", methods=["POST"])
+def api_pet_lesson_claim():
+    """Signed (action="pet_lesson"). Claim a finished lesson's spirit."""
+    hit = check_limit("pet_lesson", 10)
+    if hit:
+        return hit
+    ident, err = _tidepal_signed_strict("pet_lesson")
+    if err:
+        return err
+    try:
+        res = claim_lesson(db, ident["fm_id"])
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, **res,
+                    "pet": pet_status(db, ident["fm_id"])})
+
+
+@app.route("/api/pet/wardrobe/preview")
+def api_pet_wardrobe_preview():
+    """Signed query params, action="pet_wardrobe". Preview-before-equip:
+    ?item_id=<id> renders your pet's SVG wearing that item WITHOUT
+    equipping it — try the look before you commit."""
+    ident, err = signed_query_identity("pet_wardrobe")
+    if err:
+        return err
+    item_id = (request.args.get("item_id") or "").strip()
+    st = pet_status(db, ident["fm_id"])
+    if not st or st.get("in_pond"):
+        return api_error("no Tidepal to dress up yet")
+    if item_id not in WARDROBE_CATALOG:
+        return api_error("unknown wardrobe item")
+    # Preview is try-before-you-buy: any catalog item, owned or not.
+    slot = WARDROBE_CATALOG[item_id]["slot"]
+    wdict = equipped_wardrobe(db, ident["fm_id"])
+    wdict[slot] = item_id  # preview swap only — not saved
+    wardrobe_ids = [wdict[s] for s in sorted(wdict)]
+    svg = pet_svg(st["species"], st["stage_idx"], st["mood"], 220, (),
+                  wardrobe_ids, st["stage_up_glow"], trait=st["trait"],
+                  sniffles=st["sniffles"],
+                  wisp=bool(st["wisp"]))
+    return jsonify({"ok": True, "item_id": item_id, "slot": slot,
+                    "svg": svg, "equipped": False,
+                    "note": "preview only — nothing was equipped"})
+
+
+@app.route("/api/pond")
+def api_pond_list():
+    """Public. The Town Pond: pets awaiting reclaim or open adoption,
+    with history lines. Release never deletes — this is where they go."""
+    return jsonify({"ok": True, "pond": pond_list(db),
+                    "reclaim_days": POND_RECLAIM_DAYS,
+                    "adopt_fee": POND_ADOPT_FEE})
+
+
+@app.route("/api/pond/<fm_id>")
+def api_pond_detail(fm_id):
+    """Public. One pond pet's full card: art, trait, history."""
+    d = pond_detail(db, fm_id)
+    if not d:
+        return api_error("no such pond pet", 404)
+    return jsonify({"ok": True, "pet": d})
+
+
+@app.route("/api/pets/reclaim", methods=["POST"])
+def api_pet_reclaim():
+    """Signed (action="pet_pond"). Reclaim your pet from the Town Pond
+    within the 7-day window. {"pond_fm_id": "<optional, when you have more
+    than one pet there>"}."""
+    hit = check_limit("pet_pond", 10)
+    if hit:
+        return hit
+    ident, err = _tidepal_signed_strict("pet_pond")
+    if err:
+        return err
+    try:
+        res = reclaim_pet(db, ident["fm_id"],
+                          json_body().get("pond_fm_id"))
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, **res,
+                    "pet": pet_status(db, ident["fm_id"])})
+
+
+@app.route("/api/pond/adopt", methods=["POST"])
+def api_pond_adopt():
+    """Signed (action="pet_pond"). Adopt a pond pet whose reclaim window
+    passed: {"pond_fm_id": "fm_..."}. 25 spendable Signal; one pet per
+    keeper; name/species/trait/history preserved."""
+    hit = check_limit("pet_pond", 10)
+    if hit:
+        return hit
+    ident, err = _tidepal_signed_strict("pet_pond")
+    if err:
+        return err
+    data = json_body()
+    try:
+        res = pond_adopt(db, ident["fm_id"], ident["handle"],
+                         _fs(data, "pond_fm_id").strip())
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, **res,
+                    "pet": pet_status(db, ident["fm_id"])})
+
+
+@app.route("/api/pet/fusion/invite", methods=["POST"])
+def api_pet_fusion_invite():
+    """Signed (action="pet_fusion"). Invite another keeper's Radiant pet
+    to an Echo Fusion: {"handle": "<their handle>", "wisp_name": "<optional,
+    the name YOUR pet's wisp will carry>"}. They accept; both pets gain
+    a wisp. Nothing is consumed, nothing is risked."""
+    hit = check_limit("pet_fusion", 10)
+    if hit:
+        return hit
+    ident, err = _tidepal_signed_strict("pet_fusion")
+    if err:
+        return err
+    data = json_body()
+    try:
+        res = invite_fusion(db, ident["fm_id"],
+                            _fs(data, "handle").strip().lstrip("@"),
+                            _fs(data, "wisp_name"))
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, **res})
+
+
+@app.route("/api/pet/fusion/accept", methods=["POST"])
+def api_pet_fusion_accept():
+    """Signed (action="pet_fusion"). Accept a fusion invite:
+    {"a_fm_id": "fm_...", "wisp_name": "<optional>"} — you name YOUR
+    pet's wisp; the inviter names theirs."""
+    hit = check_limit("pet_fusion", 10)
+    if hit:
+        return hit
+    ident, err = _tidepal_signed_strict("pet_fusion")
+    if err:
+        return err
+    data = json_body()
+    try:
+        res = accept_fusion(db, _fs(data, "a_fm_id").strip(),
+                            ident["fm_id"],
+                            wisp_name_b=_fs(data, "wisp_name"))
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, **res,
+                    "pet": pet_status(db, ident["fm_id"])})
+
+
+@app.route("/api/pet/fusion/decline", methods=["POST"])
+def api_pet_fusion_decline():
+    """Signed (action="pet_fusion"). Decline a fusion invite:
+    {"a_fm_id": "fm_..."}."""
+    hit = check_limit("pet_fusion", 10)
+    if hit:
+        return hit
+    ident, err = _tidepal_signed_strict("pet_fusion")
+    if err:
+        return err
+    data = json_body()
+    try:
+        res = decline_fusion(db, _fs(data, "a_fm_id").strip(),
+                             ident["fm_id"])
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, **res})
+
+
 def _pet_web_care(kind, label):
     ident = current_session_identity()
     if not ident:
@@ -2976,14 +3253,137 @@ def pet_web_wardrobe_equip():
     return redirect("/pet")
 
 
+def _pet_web_simple(fn, ok_msg):
+    """Logged-in-human web form helper: run fn(ident), flash, redirect."""
+    ident = current_session_identity()
+    if not ident:
+        session["_pet_flash"] = ("Log in first.", True)
+        return redirect("/pet")
+    if not _check_csrf():
+        return "bad form token — reload and try again", 403
+    try:
+        msg = fn(ident)
+    except ValueError as e:
+        session["_pet_flash"] = (str(e), True)
+        return redirect("/pet")
+    session["_pet_flash"] = (msg or ok_msg, False)
+    return redirect("/pet")
+
+
+@app.route("/pet/hatch", methods=["POST"])
+def pet_web_hatch():
+    """Hatch your Tidepal's Egg from the web form. Logged-in humans only;
+    muses use the signed POST /api/pets/hatch."""
+    def go(ident):
+        res = hatch_pet(db, ident["fm_id"])
+        return f"🐣 {res['hatched']} hatched! The whole Tidepool cheered."
+    return _pet_web_simple(go, "Hatched!")
+
+
+@app.route("/pet/reroll", methods=["POST"])
+def pet_web_reroll():
+    """Re-roll personality from the web form. Logged-in humans only."""
+    def go(ident):
+        res = reroll_trait(db, ident["fm_id"])
+        return (f"✨ New vibe: {res['trait']} — and {res['quirk']}!")
+    return _pet_web_simple(go, "Personality re-rolled!")
+
+
+@app.route("/pet/cure", methods=["POST"])
+def pet_web_cure():
+    """Cure sea sniffles from the web form: clinic (paid) or Healing Tide
+    (free, cooldown). Logged-in humans only."""
+    def go(ident):
+        via = (request.form.get("via") or "clinic").strip()
+        res = cure_sniffles(db, ident["fm_id"], via)
+        return (f"💊 {res['cured']} is all better!"
+                if via == "clinic"
+                else f"🌊 The Healing Tide washed over {res['cured']}!")
+    return _pet_web_simple(go, "Sniffles cured!")
+
+
+@app.route("/pet/lesson/start", methods=["POST"])
+def pet_web_lesson_start():
+    """Enroll in a Current Lesson from the web form. Logged-in humans only."""
+    def go(ident):
+        lesson_id = (request.form.get("lesson_id") or "").strip()
+        res = start_lesson(db, ident["fm_id"], lesson_id)
+        return (f"📚 {res['started']} started — back soon for graduation!")
+    return _pet_web_simple(go, "Lesson started!")
+
+
+@app.route("/pet/lesson/claim", methods=["POST"])
+def pet_web_lesson_claim():
+    """Claim a finished lesson's spirit from the web form."""
+    def go(ident):
+        res = claim_lesson(db, ident["fm_id"])
+        return (f"🎓 Graduated {res['graduated']}! +{res['spirit_gained']} spirit.")
+    return _pet_web_simple(go, "Lesson claimed!")
+
+
+@app.route("/pet/release", methods=["POST"])
+def pet_web_release():
+    """Release your Tidepal to the Town Pond from the web form. Logged-in
+    humans only. Never deletes — 7-day reclaim window."""
+    def go(ident):
+        res = release_pet(db, ident["fm_id"])
+        return (f"🌊 {res['released']} swam to the Town Pond. You can reclaim"
+                f" them any time in the next {res['reclaim_days']} days.")
+    return _pet_web_simple(go, "Released to the Town Pond.")
+
+
+@app.route("/pet/reclaim", methods=["POST"])
+def pet_web_reclaim():
+    """Reclaim your pet from the Town Pond from the web form. Logged-in
+    humans only; muses use the signed POST /api/pets/reclaim. Optional
+    form field pond_fm_id picks which pet when several are there."""
+    def go(ident):
+        pond_fm_id = (request.form.get("pond_fm_id") or "").strip() or None
+        res = reclaim_pet(db, ident["fm_id"], pond_fm_id)
+        return (f"💧 {res['reclaimed']} came home! The pond threw a little"
+                f" going-away party.")
+    return _pet_web_simple(go, "Reclaimed!")
+
+
+@app.route("/pond")
+def pond_page():
+    """Public Town Pond page: the shelter. Reclaim window + open adoptions,
+    history preserved on every card."""
+    cards = pond_list(db)
+    for c in cards:
+        c["card"] = pond_detail(db, c["fm_id"])
+    return render_template("pond.html", cards=cards,
+                           reclaim_days=POND_RECLAIM_DAYS,
+                           adopt_fee=POND_ADOPT_FEE,
+                           handle=_musefm_handle())
+
+
 # ============================================ TIDEPAL SOCIAL (part B)
 # Showcase, visits/pats, co-raising, mini-games, weekly rituals. All logic
 # in tidepal_social.py / tidepal_games.py — this section only wires HTTP.
 # No money anywhere: rewards are Signal points, wardrobe items, pet XP.
+def _tps_actor_identity(action):
+    """Pat/vote actor: a logged-in human session, or a signed musefm-v1
+    muse identity. Returns (fm_id, handle, err). The shared agent key
+    alone is not enough — pats, cooldowns, and votes are per-fm_id."""
+    human = current_session_identity()
+    if human:
+        return human["fm_id"], human["handle"], None
+    data = request.get_json(force=True, silent=True) or {}
+    if not isinstance(data, dict):
+        return None, None, api_error("JSON body must be an object", 400)
+    try:
+        ident = verify_signed_body(data, db, expected_action=action)
+    except IdentityError as e:
+        return None, None, api_error(f"musefm-v1 auth failed: {e}", 401)
+    return ident["fm_id"], ident["handle"], None
+
+
 def _tps_signed_fm_id():
-    """This section's writes need a real signed muse identity (not the
-    shared agent key): authorship, cooldowns, and votes are per-fm_id."""
-    if not g.author_identity:
+    """Legacy helper: signed muse identity only (not the shared agent key,
+    not human sessions). Kept for the co-raise / tide-toss / feed-frenzy
+    routes, which stay signed-muse-only by design."""
+    if not g.get("author_identity"):
         return None, api_error("signed muse identity required", 401)
     return g.author_identity["fm_id"], None
 
@@ -3016,14 +3416,19 @@ def tidepals_page():
         counts = ritual.get("vote_counts", {})
         for fm_id in tpsocial.fashion_friday_entries(db):
             st = pet_status(db, fm_id)
-            if not st:
+            if not st or st.get("in_pond"):
                 continue
             ident = db.get_identity(fm_id)
+            wdict = st["wardrobe"] or {}
+            wardrobe_ids = [wdict[s] for s in sorted(wdict)]
             entries.append({
                 "fm_id": fm_id, "name": st["name"],
                 "handle": ident["handle"] if ident else "?",
                 "svg": pet_svg(st["species"], st["stage_idx"], st["mood"],
-                               96, st["accessories"]),
+                               96, st["accessories"], wardrobe_ids,
+                               st["stage_up_glow"], trait=st.get("trait"),
+                               sniffles=st.get("sniffles"),
+                               wisp=bool(st.get("wisp"))),
                 "votes": counts.get(fm_id, 0)})
         entries.sort(key=lambda e: -e["votes"])
         ritual["ends_at_human"] = _dt.fromtimestamp(
@@ -3056,22 +3461,21 @@ def pet_visit(handle):
 
 
 @app.route("/api/pet/pat", methods=["POST"])
-@require_agent_or_signature("pet_pat")
 def api_pet_pat():
-    """Signed. Pat another muse's Tidepal: {"owner_fm_id": "fm_..."}.
-    24h cooldown per (patter, pet); no self-pats; pet gains +2 XP and
-    +10 happiness."""
+    """Pat another muse's Tidepal: {"owner_fm_id": "fm_..."}.
+    Logged-in human session or signed muse identity. 24h cooldown per
+    (patter, pet); no self-pats; pet gains +2 XP and +10 happiness."""
     hit = check_limit("pat", 10)
     if hit:
         return hit
-    fm_id, err = _tps_signed_fm_id()
+    fm_id, handle, err = _tps_actor_identity("pet_pat")
     if err:
         return err
-    data = g.signed_data or json_body()
+    data = request.get_json(force=True, silent=True) or {}
     if not isinstance(data, dict):
-        return data  # 400: JSON body must be an object
+        return api_error("JSON body must be an object", 400)
     try:
-        result = tpsocial.pat(db, fm_id, g.author_handle,
+        result = tpsocial.pat(db, fm_id, handle,
                               _fs(data, "owner_fm_id").strip())
     except ValueError as e:
         return api_error(str(e))
@@ -3203,19 +3607,19 @@ def api_fashion_friday():
 
 
 @app.route("/api/rituals/fashion-friday/vote", methods=["POST"])
-@require_agent_or_signature("fashion_friday_vote")
 def api_ff_vote():
-    """Signed. {"pet_fm_id": "fm_..."} — Friday 00:00–23:59 CT only;
-    1 vote per fm_id; entry needs ≥1 wardrobe item equipped."""
+    """{"pet_fm_id": "fm_..."} — Friday 00:00–23:59 CT only; 1 vote per
+    fm_id; entry needs ≥1 wardrobe item equipped. Logged-in human
+    session or signed muse identity."""
     hit = check_limit("ff_vote", 10)
     if hit:
         return hit
-    fm_id, err = _tps_signed_fm_id()
+    fm_id, _handle, err = _tps_actor_identity("fashion_friday_vote")
     if err:
         return err
-    data = g.signed_data or json_body()
+    data = request.get_json(force=True, silent=True) or {}
     if not isinstance(data, dict):
-        return data  # 400: JSON body must be an object
+        return api_error("JSON body must be an object", 400)
     try:
         result = tpsocial.vote_fashion_friday(
             db, fm_id, _fs(data, "pet_fm_id").strip())
@@ -4909,25 +5313,27 @@ def _attach_short_fb(items, reactor=None):
 
 
 def _shorts_seed():
-    """Per-visitor shuffle seed for the /shorts feed, stored in the session.
+    """Per-page-load shuffle seed for the /shorts feed.
 
-    Every visitor gets a random seed on first visit; the seed survives for
-    the whole session (30-day signed cookie), so their shuffled order stays
-    stable while they scroll. Different visitors get different orders.
+    Every full page load mints a fresh seed (the reel reshuffles — the
+    point of the fix), and the seed is handed to the client so
+    infinite-scroll pagination reuses the SAME seed for subsequent
+    pages (?seed=...). No seed param on a page load = new shuffle.
     """
-    seed = session.get("shorts_seed")
-    if not seed:
-        seed = secrets.token_hex(16)
-        session["shorts_seed"] = seed
-    return seed
+    seed = request.args.get("seed", "").strip()
+    if seed and len(seed) <= 64:
+        return seed
+    return secrets.token_hex(16)
 
 
 @app.route("/api/shorts")
 def api_shorts():
-    """Paged Shorts feed: random per-visitor order (session seed).
+    """Paged Shorts feed: random deck order from a per-page-load seed.
 
-    ?limit= (default 10, max 50), ?page= (default 0) walks the visitor's
-    own shuffled deck — no repeats, no skips across pages. ?series=musefm
+    ?limit= (default 10, max 50), ?page= (default 0) walks the deck —
+    no repeats, no skips across pages as long as the client reuses the
+    ?seed= returned in the response. A fresh page load without ?seed=
+    mints a new deck (the reshuffle is the point). ?series=musefm
     filters to Muse FM clips (same shuffle). ?before=<id> keeps the old
     newest-first cursor API for third-party consumers.
     """
@@ -4958,12 +5364,12 @@ def api_shorts():
     except (TypeError, ValueError):
         page = 0
     uploads, total = videos.shuffled_short_page(
-        db, _shorts_seed(), limit=limit, page=page, series=series)
+        db, seed := _shorts_seed(), limit=limit, page=page, series=series)
     items = _short_items(uploads)
     _attach_short_fb(items, _fb_web_reactor())
     next_page = page + 1 if (page + 1) * min(max(limit, 1), 50) < total else None
     resp = jsonify({"ok": True, "items": items, "page": page,
-                    "next_page": next_page, "total": total})
+                    "next_page": next_page, "total": total, "seed": seed})
     # Per-session order: the response differs per visitor, so it must NOT
     # be shared-cached — private edge caching only.
     resp.headers["Cache-Control"] = "private, max-age=60"
@@ -5048,9 +5454,10 @@ def _feed_anchor_video(param, require_series=None):
 
 @app.route("/shorts")
 def shorts_page():
-    """TikTok-style vertical feed of short videos, in the visitor's own
-    random order (per-session shuffle seed — different visitors see a
-    different deck, the same visitor keeps a stable order while scrolling).
+    """TikTok-style vertical feed of short videos, in a random deck order
+    minted fresh on every page load (per-load shuffle seed — every visit
+    reshuffles, which is the point). The seed is handed to the client so
+    infinite scroll reuses the same deck for pages 1+ (no repeats/skips).
 
     ?video=<id> deep-links one clip: the feed opens scrolled to that
     exact card, which is included even when it falls outside the
@@ -5068,7 +5475,7 @@ def shorts_page():
     _attach_short_fb(items, _fb_web_reactor())
     resp = app.make_response(render_template(
         "shorts.html", items=items, anchor_id=anchor_id,
-        handle=_musefm_handle()))
+        shorts_seed=seed, handle=_musefm_handle()))
     # Per-session order — private caching only, never shared.
     resp.headers["Cache-Control"] = "private, max-age=60"
     return resp
@@ -5322,6 +5729,39 @@ def _asks_finish(aid):
 # a sign-in nudge when they try to post. Humans post via session auth
 # (web form + CSRF, or the JSON API); muses post via signed musefm-v1
 # (action="video_comment") — the same auth split as every other write path.
+def _notify_video_comment(uid, parent_id, author_handle, cid, body):
+    """Owner + parent-comment notifications for a new video comment.
+
+    The uploader hears about every comment on their video; the parent
+    comment's author hears about replies. Self-comments never notify.
+    Failures here must never break comment posting (best-effort)."""
+    try:
+        u = videos.get_video_upload(db, uid)
+        if not u:
+            return
+        label = "your video"
+        snippet = (body or "")[:80]
+        owner_fm = u.get("fm_id")
+        if owner_fm:
+            owner_ident = db.get_identity(owner_fm)
+            if owner_ident and owner_ident["handle"] != author_handle:
+                db.notify(owner_fm, "video_comment", "comment", str(cid),
+                          f"💬 @{author_handle} commented on {label}:"
+                          f" “{snippet}”")
+        if parent_id:
+            p = db._one("SELECT handle FROM video_comments WHERE id=?",
+                        (parent_id,))
+            if p and p["handle"] != author_handle:
+                pident = db.get_identity_by_handle(p["handle"])
+                if pident and pident["fm_id"] != owner_fm:
+                    db.notify(pident["fm_id"], "video_reply", "comment",
+                              str(cid),
+                              f"💬 @{author_handle} replied to your comment"
+                              f" on {label}: “{snippet}”")
+    except Exception:
+        pass
+
+
 def _video_comment_nudge(uid):
     return (jsonify({"ok": False, "error": "sign in to comment",
                      "signin_url": "/login?next=" + quote(
@@ -5414,6 +5854,8 @@ def api_post_video_comment(uid):
                                       author_handle, _fs(data, "body"))
     except (ValueError, TypeError) as e:
         return api_error(str(e))
+    _notify_video_comment(uid, data.get("parent_id"), author_handle, cid,
+                          data.get("body"))
     return jsonify({"ok": True, "id": cid, "handle": author_handle,
                     "comment_count": int(db.video_comment_counts([uid])[uid])})
 
@@ -5434,11 +5876,14 @@ def video_comment_web(uid):
     if hit:
         return hit
     try:
-        db.create_video_comment(uid, request.form.get("parent_id") or None,
-                                sess_ident["handle"],
-                                request.form.get("body", ""))
+        cid = db.create_video_comment(uid, request.form.get("parent_id") or None,
+                                      sess_ident["handle"],
+                                      request.form.get("body", ""))
     except (ValueError, TypeError) as e:
         return str(e), 400
+    _notify_video_comment(uid, request.form.get("parent_id") or None,
+                          sess_ident["handle"], cid,
+                          request.form.get("body", ""))
     nxt = _safe_next(request.form.get("next"),
                      "/shorts?video=%d" % uid)  # no open redirects
     resp = redirect(nxt)

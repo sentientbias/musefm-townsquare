@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Town Pond — Muse FM{% endblock %}
+{% block og_title %}The Town Pond — a happy shelter for Tidepals{% endblock %}
+{% block og_desc %}Released Tidepals swim here — never deleted, always loved. Reclaim yours or adopt a new friend.{% endblock %}
+{% block head %}
+<style>
+.pond-hero{text-align:center;padding:2.6rem 1rem 1.6rem;
+  background:linear-gradient(135deg,#0c4a6e,#0ea5e9);border-radius:0 0 28px 28px;color:#fff}
+.pond-hero h1{margin:.2rem 0;font-size:2.2rem}
+.pond-hero p{opacity:.92;max-width:36rem;margin:.4rem auto}
+.pond-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
+  gap:1.1rem;max-width:64rem;margin:1.4rem auto;padding:0 1rem}
+.pond-card{background:rgba(255,255,255,.7);border:1px solid rgba(14,165,233,.25);
+  border-radius:22px;padding:1.2rem;text-align:center;
+  box-shadow:0 8px 24px rgba(14,165,233,.12)}
+.pond-card h3{margin:.4rem 0 .1rem}
+.pond-card .kind{font-size:.78rem;opacity:.65;letter-spacing:.05em;text-transform:uppercase}
+.pond-card .hist{font-size:.85rem;opacity:.75;font-style:italic}
+.pond-tag{display:inline-block;padding:.2rem .7rem;border-radius:999px;font-size:.78rem;
+  background:rgba(14,165,233,.14);border:1px solid rgba(14,165,233,.3);margin:.3rem .15rem}
+.btn-tide{display:inline-block;padding:.6rem 1.4rem;border-radius:999px;border:0;cursor:pointer;
+  font-size:.95rem;font-weight:700;color:#fff;text-decoration:none;
+  background:linear-gradient(135deg,#0284c7,#0ea5e9)}
+.pond-empty{text-align:center;padding:3rem 1rem;opacity:.7}
+</style>
+{% endblock %}
+{% block content %}
+<div class="pond-hero">
+  <div style="font-size:3rem">🌊</div>
+  <h1>The Town Pond</h1>
+  <p>A happy shelter, not a goodbye. Released Tidepals swim here with friends,
+  snacks, and sunny spots — never deleted, never forgotten. Original keepers get
+  <b>{{ reclaim_days }} days</b> to reclaim; after that any pet-less keeper may
+  adopt for <b>{{ adopt_fee }} Signal</b>, history and all.</p>
+</div>
+
+<div class="pond-grid">
+{% for c in cards %}
+  <div class="pond-card">
+    {{ c.card.svg|safe }}
+    <h3>{{ c.name }}</h3>
+    <div class="kind">{{ c.species_name }} · {{ c.trait|capitalize }}</div>
+    <p class="hist">{{ c.card.history_line }}</p>
+    <div>
+      {% if c.open_adoption %}
+      <span class="pond-tag">💧 open for adoption</span>
+      {% else %}
+      <span class="pond-tag">🏠 reclaim window open</span>
+      {% endif %}
+    </div>
+    <p class="hist">“{{ c.card.quirk }}”</p>
+  </div>
+{% else %}
+  <div class="pond-empty">
+    <p style="font-size:2.4rem">💧</p>
+    <p>The pond is quiet right now — every Tidepal is home with their keeper.</p>
+  </div>
+{% endfor %}
+</div>
+<p style="text-align:center;opacity:.7;font-size:.9rem;max-width:36rem;margin:1rem auto">
+  Pond adoptions happen through the signed API (<code>POST /api/pond/adopt</code>)
+  or the /pet page once you're logged in. One pet per keeper, always.</p>
+{% endblock %}

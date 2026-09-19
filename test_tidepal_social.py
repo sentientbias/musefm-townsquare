@@ -97,6 +97,15 @@ def main():
     _, loner = register(client, "palnoner")
     pets.adopt(db, owner, "palowner", "driplet", "Bubbles")
     pets.adopt(db, visitor, "palvisitor", "bloop", "Suds")
+    # Hatch gate: test pets hatch so stage/mood/FF behavior matches adopted pets.
+    for fm in (owner, visitor):
+        db._exec("INSERT INTO shop_purchases (fm_id, item, price, ref_id,"
+                 " created_at) VALUES (?,?,?,?,?)",
+                 (fm, "test_grant", -200, "tg_" + fm, int(time.time())))
+        pets.hatch_pet(db, fm)
+    check("test pets hatched",
+          pets.pet_status(db, owner)["hatched"]
+          and pets.pet_status(db, visitor)["hatched"])
 
     r = tps.pat(db, visitor, "palvisitor", owner)
     check("pat ok", r["patted"] == "Bubbles" and r["xp_added"] == 2, str(r))

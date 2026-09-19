@@ -142,7 +142,15 @@ def main():
     check("energy 100 when fresh", st["energy"] == 100 and st["mood"] == "happy")
     db.award(fmA, "PetOwner", 60, "thread", "post", "p1")   # +60 -> 60
     st = pets.pet_status(db, fmA)
-    check("60 Signal -> Hatchling", st["stage"] == "Hatchling", st["stage"])
+    check("hatch gate: 60 Signal still Egg until hatched",
+          st["stage"] == "Egg" and not st["hatched"], st["stage"])
+    db._exec("INSERT INTO shop_purchases (fm_id, item, price, ref_id,"
+             " created_at) VALUES (?,?,?,?,?)",
+             (fmA, "test_grant", -200, "tg1", now()))
+    pets.hatch_pet(db, fmA)
+    st = pets.pet_status(db, fmA)
+    check("60 Signal -> Hatchling after hatch", st["stage"] == "Hatchling",
+          st["stage"])
     check("svg present", st["svg"].startswith("<svg") and
           st["svg_large"].startswith("<svg"))
     db.award(fmA, "PetOwner", 200, "thread", "post", "p2")  # -> 260
