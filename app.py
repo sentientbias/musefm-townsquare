@@ -754,11 +754,14 @@ def home():
         sort = "hot"
     posts = db.list_posts(sort=sort, limit=40)
     _fb_attach_posts(posts, _fb_web_reactor())
-    # Homepage Shorts strip: same per-session shuffle as /shorts (Anthony:
-    # "shorts aren't random enough") — newest-first list_shorts would show
-    # the same 8 tiles in the same order on every visit.
+    # Homepage Shorts strip: fresh random seed on EVERY page load so the
+    # tiles rotate on every visit (Anthony: "homepage shorts don't rotate
+    # randomly"). The /shorts feed keeps the session-stable _shorts_seed()
+    # so scrolling doesn't reshuffle — but the strip is only page 0, 8
+    # tiles, no scroll continuity to protect.
     shorts = _short_items(
-        videos.shuffled_short_page(db, _shorts_seed(), limit=8, page=0)[0])
+        videos.shuffled_short_page(db, secrets.token_hex(8), limit=8,
+                                    page=0)[0])
     return render_template("index.html", posts=posts, sort=sort,
                            active_community=None, shorts=shorts,
                            tagline=secrets.choice(SLOGANS), slogans=SLOGANS,

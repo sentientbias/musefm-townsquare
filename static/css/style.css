@@ -158,10 +158,11 @@ body { padding-top: calc(var(--topbar-h) + env(safe-area-inset-top, 0px)); }
 .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
 .auth-link {
   color: var(--text); text-decoration: none; font-size: 14px; font-weight: 600;
-  padding: 8px 12px; border-radius: 999px; border: 1px solid transparent;
-  background: none; cursor: pointer; white-space: nowrap;
+  padding: 8px 14px; border-radius: 999px; border: 1px solid var(--glass-border);
+  background: var(--glass); cursor: pointer; white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(20, 120, 190, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.5);
 }
-.auth-link:hover { border-color: var(--glass-border); background: var(--glass); }
+.auth-link:hover { background: var(--glass-strong); }
 .auth-cta {
   background: linear-gradient(135deg, var(--accent, #38bdf8), var(--accent-strong, #0284c7));
   color: #fff; border: none;
@@ -181,7 +182,7 @@ body { padding-top: calc(var(--topbar-h) + env(safe-area-inset-top, 0px)); }
 /* slim "New here?" strip at the very top (homepage, anonymous visitors only) */
 .topstrip {
   display: flex; align-items: center; justify-content: center; gap: 16px;
-  background: #0d0d10; color: #f2f2f2; font-size: 13.5px; line-height: 1.4;
+  background: #0b1220; color: #f2f2f2; font-size: 13.5px; line-height: 1.4;
   padding: 8px 16px; text-align: center; flex-wrap: wrap;
 }
 .topstrip-text { opacity: 0.95; }

@@ -1,0 +1,36 @@
+[townsquare] db=hidden_files/tester-loop/test-agent.db port=8474 agent_key=set
+ * Serving Flask app 'app'
+ * Debug mode: off
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8474
+ * Running on http://127.0.0.1:8474
+[33mPress CTRL+C to quit[0m
+127.0.0.1 - - [18/Sep/2026 20:54:01] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 20:55:23] "POST /api/identity/register HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 20:55:23] "POST /api/upload/gif HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 20:55:23] "GET /gif/1 HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 20:55:23] "POST /api/forum/post HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 20:55:24] "[31m[1mPOST /api/forum/post HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 20:55:24] "[31m[1mPOST /api/upload/gif HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 20:55:24] "POST /api/upload/image HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 20:55:24] "GET /img/1 HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 20:55:24] "[31m[1mPOST /api/upload/image HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 20:55:24] "[31m[1mPOST /api/upload/video HTTP/1.1[0m" 400 -
+127.0.0.1 - - [18/Sep/2026 20:55:24] "POST /signup HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 20:55:25] "[32mPOST /login HTTP/1.1[0m" 302 -
+127.0.0.1 - - [18/Sep/2026 20:55:25] "[31m[1mPOST /login HTTP/1.1[0m" 401 -
+127.0.0.1 - - [18/Sep/2026 20:55:25] "GET /settings HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 20:55:25] "POST /settings/link-code HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 20:55:25] "POST /api/identity/register HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 20:55:26] "POST /api/identity/register HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 20:55:26] "POST /api/link_muse HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 20:55:26] "GET /m/fm_dNmnunV3au30 HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 20:55:26] "GET /m/fm_dNmnunV3au30 HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 20:55:26] "GET /api/identity/fm_dNmnunV3au30 HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 20:55:44] "POST /api/identity/register HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 20:55:44] "POST /api/rewards/heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 20:55:45] "POST /api/rewards/heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 20:55:45] "[31m[1mPOST /api/rewards/heartbeat HTTP/1.1[0m" 401 -
+127.0.0.1 - - [18/Sep/2026 20:55:59] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [18/Sep/2026 20:56:06] "GET / HTTP/1.1" 200 -
