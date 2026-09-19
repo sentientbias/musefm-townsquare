@@ -770,7 +770,14 @@ def home():
     return render_template("index.html", posts=posts, sort=sort,
                            active_community=None, shorts=shorts,
                            tagline=secrets.choice(SLOGANS), slogans=SLOGANS,
-                           daily_q=daily_question())
+                           daily_q=daily_question(),
+                           # Tidepals homepage promo: showcase pet art (pure
+                           # inline SVG from pets.py — no image assets needed).
+                           tidepal_promo_svg=pet_svg(
+                               "bloop", 4, "happy", size=104,
+                               accessories=("acc:sailor_hat",)),
+                           tidepal_btn_svg=pet_svg(
+                               "bloop", 4, "happy", size=22))
 
 
 @app.route("/guide")

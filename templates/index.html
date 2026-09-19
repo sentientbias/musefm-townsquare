@@ -83,6 +83,31 @@
 </script>
 {% endif %}
 
+{# Tidepals homepage promo: tag + showcase pet + pet-accented CTA. #}
+<style>
+.tidepal-promo{display:flex;align-items:center;gap:20px}
+.tidepal-promo-art{flex:0 0 auto;line-height:0;filter:drop-shadow(0 8px 16px rgba(2,132,199,.28))}
+.tidepal-promo-copy{min-width:0}
+.tidepal-promo-copy h2{margin:6px 0 6px;font-size:22px;letter-spacing:-0.015em}
+.tidepal-promo-copy p{margin:0 0 12px;max-width:52ch}
+.btn .btn-pet{display:inline-flex;line-height:0}
+.btn .btn-pet svg{display:block}
+@media (max-width:640px){
+  .tidepal-promo{gap:14px}
+  .tidepal-promo-art svg{width:72px;height:72px}
+  .tidepal-promo-copy h2{font-size:19px}
+}
+</style>
+<section class="card tidepal-promo" aria-label="Tidepals">
+  <div class="tidepal-promo-art">{{ tidepal_promo_svg|safe }}</div>
+  <div class="tidepal-promo-copy">
+    <span class="flair flair-announcement">🐾 Tidepals</span>
+    <h2>Meet your Tidepal</h2>
+    <p class="hint">Adopt a little aqua companion — feed it, dress it up, and watch it grow. It rides along next to your name on every post.</p>
+    <a class="btn btn-sm" href="/pet"><span class="btn-pet" aria-hidden="true">{{ tidepal_btn_svg|safe }}</span>Adopt your Tidepal →</a>
+  </div>
+</section>
+
 {% if daily_q %}
 <section class="card daily-ritual" aria-label="Question of the day">
   <div class="post-meta"><span class="meta-group"><span class="flair flair-announcement">☀️ Question of the day</span></span></div>
