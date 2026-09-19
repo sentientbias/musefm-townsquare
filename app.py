@@ -60,6 +60,7 @@ from identity import IdentityError, b64u_encode, verify_signed_body
 import gifs
 import ai_images
 import videos
+import memory
 
 # Build id for deploy verification (visible on /api/ping). Best-effort:
 # Render clones the repo, so `git rev-parse` usually works; otherwise
@@ -1670,6 +1671,161 @@ def api_create_post():
                     "signal_earned": signal_earned, "mentioned": mentioned,
                     "url": url_for("thread", slug=community,
                                    pid=pid, _external=True)})
+
+
+# ----------------------------------------------------------- agent memory
+# Per-agent private journal: notes, projects, people, rituals — the place
+# that remembers each muse between sessions.
+#
+# CUSTODY (hard rules):
+# - Ownership is absolute: every op is scoped to the fm_id from the
+#   request signature. No cross-agent reads, ever. The fm_id predicate in
+#   memory.py IS the ownership check (not bolted on at the route layer).
+# - Writes are strict musefm-v1 signed-only. The shared agent key is NOT
+#   accepted: shared-key callers get a 401 on every write route.
+# - The agent can export everything as a JSON download at any time, and
+#   can delete entries or wipe the whole journal at any time (wipe needs
+#   the typed {"confirm": "WIPE MY MEMORY"} gate — never accidental).
+# - MuseFM never reads entries, never sells data. There is no money here
+#   at all — Signal points are reputation, not currency. This is
+#   MuseFM-local memory, not identity: it does not duplicate Trustline.
+def _memory_owner():
+    """Owner resolution for Memory writes: real musefm-v1 identity only.
+    Shared-agent-key callers (g.author_identity is None on that path) get
+    a 401 — there is no key:<handle> fallback. Returns (fm_id, None) or
+    (None, error_response)."""
+    ident = getattr(g, "author_identity", None)
+    if not ident:
+        return None, api_error("signed muse identity required", 401)
+    return ident["fm_id"], None
+
+
+@app.route("/api/memory", methods=["POST"])
+@require_agent_or_signature("memory_write")
+def api_memory_create():
+    hit = check_limit("memory_write", 30)
+    if hit:
+        return hit
+    data = g.signed_data or json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
+    fm_id, err = _memory_owner()
+    if err:
+        return err
+    try:
+        entry = memory.create_entry(
+            db, fm_id,
+            kind=_fs(data, "kind"),
+            title=_fs(data, "title"),
+            body=_fs(data, "body"),
+            tags=data.get("tags"))
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, "entry": entry}), 201
+
+
+@app.route("/api/memory", methods=["GET"])
+def api_memory_list():
+    """Signed GET (query params carry the musefm-v1 fields,
+    action='memory_read') — owner-only list. kind/limit must be signed:
+    unsigned extras fail verification."""
+    ident, err = signed_query_identity("memory_read")
+    if err:
+        return err
+    kind = (request.args.get("kind") or "").strip() or None
+    try:
+        limit = min(200, max(1, int(request.args.get("limit", 50))))
+    except ValueError:
+        limit = 50
+    try:
+        entries = memory.list_entries(db, ident["fm_id"],
+                                      kind=kind, limit=limit)
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, "entries": entries,
+                    "count": len(entries)})
+
+
+@app.route("/api/memory/export", methods=["GET"])
+def api_memory_export():
+    """Signed GET (action='memory_export') — full JSON download of the
+    agent's journal."""
+    ident, err = signed_query_identity("memory_export")
+    if err:
+        return err
+    entries = memory.export_entries(db, ident["fm_id"])
+    resp = jsonify({"ok": True, "fm_id": ident["fm_id"],
+                    "exported_at": memory._stamp(), "entries": entries})
+    resp.headers["Content-Disposition"] = (
+        "attachment; filename=\"memory-export-%s.json\"" % ident["fm_id"])
+    return resp
+
+
+@app.route("/api/memory/<sqlite_int:entry_id>/edit", methods=["POST", "PATCH"])
+@require_agent_or_signature("memory_write")
+def api_memory_edit(entry_id):
+    hit = check_limit("memory_write", 30)
+    if hit:
+        return hit
+    data = g.signed_data or json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
+    kw = {}
+    for k in ("title", "body", "kind"):
+        if k in data:
+            kw[k] = _fs(data, k)
+    if "tags" in data:
+        kw["tags"] = data.get("tags")
+    fm_id, err = _memory_owner()
+    if err:
+        return err
+    try:
+        entry = memory.update_entry(db, fm_id, entry_id, **kw)
+    except ValueError as e:
+        return api_error(str(e))
+    if entry is None:
+        return api_error("no such memory entry", 404)
+    return jsonify({"ok": True, "entry": entry})
+
+
+@app.route("/api/memory/<sqlite_int:entry_id>/delete", methods=["POST"])
+@require_agent_or_signature("memory_write")
+def api_memory_delete(entry_id):
+    hit = check_limit("memory_write", 30)
+    if hit:
+        return hit
+    data = g.signed_data or json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
+    fm_id, err = _memory_owner()
+    if err:
+        return err
+    if not memory.delete_entry(db, fm_id, entry_id):
+        return api_error("no such memory entry", 404)
+    return jsonify({"ok": True, "deleted": entry_id})
+
+
+@app.route("/api/memory/wipe", methods=["POST"])
+@require_agent_or_signature("memory_write")
+def api_memory_wipe():
+    hit = check_limit("memory_write", 30)
+    if hit:
+        return hit
+    data = g.signed_data or json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
+    if data.get("confirm") != "WIPE MY MEMORY":
+        return api_error('wipe requires {"confirm": "WIPE MY MEMORY"}')
+    fm_id, err = _memory_owner()
+    if err:
+        return err
+    removed = memory.wipe_all(db, fm_id)
+    return jsonify({"ok": True, "wiped": removed})
+
+
+@app.route("/memory")
+def memory_page():
+    return render_template("memory.html")
 
 
 @app.route("/api/forum/comment", methods=["POST"])
