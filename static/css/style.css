@@ -678,6 +678,38 @@ input[type="file"].input::file-selector-button {
 [data-theme="dark"] .btn-ghost:hover { color: var(--accent); }
 .btn-sm { padding: 9px 18px; font-size: 13px; }
 
+/* ---- dark-mode washout repair (2026-09-19): deeper aqua buttons, dimmed glows ---- */
+[data-theme="dark"] .btn {
+  background: linear-gradient(180deg, #12b8f1 0%, #0aa9e0 55%, #0878a8 100%);
+  border-color: rgba(0, 90, 150, 0.55);
+}
+[data-theme="dark"] .btn:hover { filter: none; }
+[data-theme="dark"] .btn-ghost {
+  box-shadow: 0 3px 10px rgba(20, 120, 190, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+[data-theme="dark"] body {
+  background:
+    radial-gradient(1200px 500px at 50% -180px, rgba(255, 255, 255, 0.10), rgba(255, 255, 255, 0) 60%),
+    radial-gradient(3px 3px at 12% 22%, rgba(255, 255, 255, 0.9), transparent 60%),
+    radial-gradient(5px 5px at 82% 12%, rgba(255, 255, 255, 0.7), transparent 60%),
+    radial-gradient(4px 4px at 68% 34%, rgba(255, 255, 255, 0.55), transparent 60%),
+    radial-gradient(6px 6px at 28% 48%, rgba(255, 255, 255, 0.5), transparent 60%),
+    radial-gradient(3px 3px at 90% 58%, rgba(255, 255, 255, 0.6), transparent 60%),
+    radial-gradient(4px 4px at 8% 68%, rgba(255, 255, 255, 0.45), transparent 60%),
+    linear-gradient(180deg, var(--bg-top) 0%, var(--bg-mid) 30%, var(--bg-low) 62%, var(--bg-base) 100%);
+}
+[data-theme="dark"] .hero {
+  background: linear-gradient(165deg, #0b2340, #081b32 60%, #061526);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    var(--shadow-card);
+}
+[data-theme="dark"] .topstrip-cta {
+  background: rgba(8, 30, 50, 0.92);
+  color: var(--accent-ice);
+  border: 1px solid var(--glass-border);
+}
+
 .error {
   background: linear-gradient(180deg, rgba(255, 120, 110, 0.22), rgba(255, 90, 90, 0.12));
   backdrop-filter: blur(8px);
