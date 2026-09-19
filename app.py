@@ -3495,6 +3495,12 @@ def serve_video(uid):
     resp = send_file(full, mimetype=u["mime"] or "video/mp4", conditional=True,
                      download_name=u["filename"] or f"vid-{uid}")
     resp.headers["X-Worker-Pid"] = str(os.getpid())  # TEMP diagnostic
+    try:
+        _direct = db._one("SELECT id, title FROM video_uploads WHERE id=?", (int(uid),))
+        resp.headers["X-Direct-Title"] = (_direct["title"] if _direct else "NO-ROW")[:80]
+        resp.headers["X-GetUpload-Title"] = (u.get("title") or "NO-TITLE")[:80]
+    except Exception as _e:
+        resp.headers["X-Direct-Title"] = "ERR:" + str(_e)[:60]
     return resp
 
 
