@@ -173,7 +173,7 @@ def test_startup_cleanup():
     check("video 46 retitled", v and v["title"] == "Krusty Krab Dance Break",
           str(v and v["title"]))
     check("meta key set",
-          db._one("SELECT v FROM schema_meta WHERE k='media_cleanup_2026_09_18'") is not None)
+          db._one("SELECT v FROM schema_meta WHERE k='media_cleanup_2026_09_18_b'") is not None)
     # second run: no-op, retitle not re-applied
     db._exec("UPDATE video_uploads SET title='Custom Title' WHERE id=46")
     appmod._run_startup_media_cleanup(db, data_dir)

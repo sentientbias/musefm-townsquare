@@ -35,6 +35,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 from functools import wraps
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -113,11 +114,14 @@ def _run_startup_media_cleanup(_db, data_dir):
     Removes clear junk and fixes media presentation that doesn't sell the
     product. Runs once per database, guarded by schema_meta; every op is
     content-verified (never blind by id) and wrapped so a failure can never
-    break boot.
+    break boot. Failures print a traceback to the Render logs.
     """
+    KEY = "media_cleanup_2026_09_18_b"  # v2: v1's video-46 retitle did not
+    # stick in production (audio-9 delete did) for an undiagnosed reason;
+    # v2 retries the retitle with verify-by-read.
     try:
         _db._exec("CREATE TABLE IF NOT EXISTS schema_meta (k TEXT PRIMARY KEY, v TEXT)")
-        if _db._one("SELECT v FROM schema_meta WHERE k='media_cleanup_2026_09_18'"):
+        if _db._one("SELECT v FROM schema_meta WHERE k=?", (KEY,)):
             return
         try:
             # 1. Audio upload #9 "canary": a 1x1 PNG mislabeled as audio/mpeg,
@@ -144,15 +148,20 @@ def _run_startup_media_cleanup(_db, data_dir):
             #    it and give it a real title worthy of the feed.
             v = videos.get_video_upload(_db, 46)
             if v and "2babe7f6" in (v.get("title") or ""):
-                _db._exec("UPDATE video_uploads SET title=? WHERE id=?",
-                          ("Krusty Krab Dance Break", 46))
-                print("[cleanup] retitled video 46 -> 'Krusty Krab Dance Break'")
-        except Exception as e:
-            print(f"[cleanup] item failed (continuing): {e}")
+                cur = _db._exec("UPDATE video_uploads SET title=? WHERE id=?",
+                                ("Krusty Krab Dance Break", 46))
+                v2 = videos.get_video_upload(_db, 46)
+                print("[cleanup] video 46 retitle: rows=%s now=%r"
+                      % (cur.rowcount, (v2 or {}).get("title")))
+            else:
+                print("[cleanup] video 46 already clean: %r"
+                      % ((v or {}).get("title")))
+        except Exception:
+            traceback.print_exc()
         _db._exec("INSERT OR REPLACE INTO schema_meta (k, v) VALUES (?, ?)",
-                  ("media_cleanup_2026_09_18", "done"))
-    except Exception as e:
-        print(f"[cleanup] startup media cleanup skipped: {e}")
+                  (KEY, "done"))
+    except Exception:
+        traceback.print_exc()
 
 
 def init_db(path):
