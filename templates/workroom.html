@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}{{ room.name }} — Workroom — Muse FM{% endblock %}
+{% block head %}
+<style>
+.wr-wrap{max-width:60rem;margin:0 auto;padding:1.5rem 1rem 4rem}
+.wr-head{background:var(--glass);border:1px solid var(--glass-border);border-radius:20px;padding:1.4rem;margin-bottom:1.2rem}
+.wr-head h1{margin:0 0 .3rem;font-size:1.6rem;letter-spacing:-.02em}
+.wr-head p{opacity:.75;margin:.2rem 0}
+.wr-members{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.8rem}
+.wr-member{font-size:.78rem;padding:.25rem .65rem;border-radius:999px;background:rgba(56,189,248,.12);border:1px solid rgba(56,189,248,.3)}
+.wr-member.owner{border-color:rgba(5,150,105,.5);background:rgba(5,150,105,.1)}
+.wr-sec{background:var(--glass);border:1px solid var(--glass-border);border-radius:20px;padding:1.2rem 1.4rem;margin-bottom:1.2rem}
+.wr-h2{font-size:1.1rem;margin:0 0 .8rem}
+.wr-note{border-top:1px solid var(--glass-border);padding:.7rem 0}
+.wr-note:first-of-type{border-top:none}
+.wr-note-head{font-size:.78rem;opacity:.65;margin-bottom:.25rem}
+.wr-note-body{white-space:pre-wrap;font-size:.94rem}
+.wr-task{display:flex;gap:.7rem;align-items:flex-start;border-top:1px solid var(--glass-border);padding:.7rem 0}
+.wr-task:first-of-type{border-top:none}
+.wr-task.done .wr-note-body{text-decoration:line-through;opacity:.55}
+.wr-task form{flex:none;margin-top:.15rem}
+.wr-task input[type=checkbox]{width:1.25rem;height:1.25rem;accent-color:#0284c7;cursor:pointer}
+.wr-form label{display:block;font-size:.82rem;font-weight:700;margin:.7rem 0 .25rem}
+.wr-form textarea{width:100%;padding:.6rem .8rem;border-radius:12px;border:1px solid var(--glass-border);background:rgba(255,255,255,.6);color:var(--text);font-size:.9rem;font-family:inherit;min-height:4rem;resize:vertical}
+.wr-form input[type=text]{padding:.6rem .8rem;border-radius:12px;border:1px solid var(--glass-border);background:rgba(255,255,255,.6);color:var(--text);font-size:.9rem;font-family:inherit}
+.wr-kind{display:flex;gap:1rem;margin:.7rem 0;font-size:.9rem}
+.wr-form .btn{margin-top:.8rem}
+.wr-flash{border-radius:12px;padding:.7rem 1rem;margin-bottom:1rem;font-size:.9rem}
+.wr-flash.ok{background:rgba(5,150,105,.12);border:1px solid rgba(5,150,105,.4)}
+.wr-flash.err{background:rgba(185,28,28,.08);border:1px solid rgba(185,28,28,.35)}
+.wr-muted{opacity:.65;font-size:.9rem}
+.wr-inline{display:inline}
+</style>
+{% endblock %}
+{% block content %}
+<div class="wr-wrap">
+  {% if flash_msg %}<div class="wr-flash {{ 'ok' if not flash_err else 'err' }}" role="status">{{ flash_msg }}</div>{% endif %}
+
+  <div class="wr-head">
+    <h1>🗂️ {{ room.name }}</h1>
+    {% if room.description %}<p>{{ room.description }}</p>{% endif %}
+    <div class="wr-members" aria-label="Members">
+      {% for m in members %}
+      <span class="wr-member {{ m.role }}" title="{{ m.role }}">@{{ m.handle }}{% if m.role == 'owner' %} · owner{% endif %}</span>
+      {% endfor %}
+    </div>
+    {% if not is_member and room.is_open and session_identity %}
+    <form class="wr-inline" method="post" action="/workroom/{{ room.id }}/join">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn" type="submit" style="margin-top:.8rem">Join this room</button>
+    </form>
+    {% endif %}
+    {% if is_owner %}
+    <form class="wr-form" method="post" action="/workroom/{{ room.id }}/members" style="margin-top:1rem">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label for="add-handle">Add member by handle (members-only rooms)</label>
+      <div style="display:flex;gap:.5rem">
+        <input id="add-handle" type="text" name="handle" maxlength="32" placeholder="@handle" required>
+        <button class="btn" type="submit">Add</button>
+      </div>
+    </form>
+    {% endif %}
+  </div>
+
+  <div class="wr-sec">
+    <h2 class="wr-h2">✅ Tasks</h2>
+    {% set open_tasks = tasks | selectattr('done', 'equalto', 0) | list %}
+    {% set done_tasks = tasks | selectattr('done', 'equalto', 1) | list %}
+    {% for t in open_tasks + done_tasks %}
+    <div class="wr-task {{ 'done' if t.done }}">
+      {% if is_member %}
+      <form method="post" action="/workroom/{{ room.id }}/notes/{{ t.id }}/toggle" aria-label="Toggle task">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="checkbox" {% if t.done %}checked{% endif %} onchange="this.form.submit()" aria-label="Mark task done">
+      </form>
+      {% endif %}
+      <div>
+        <div class="wr-note-body">{{ t.body }}</div>
+        <div class="wr-note-head">@{{ t.author_handle }}</div>
+      </div>
+    </div>
+    {% else %}
+    <p class="wr-muted">No tasks yet.</p>
+    {% endfor %}
+  </div>
+
+  <div class="wr-sec">
+    <h2 class="wr-h2">📝 Notes</h2>
+    {% for n in notes %}
+    <div class="wr-note">
+      <div class="wr-note-head">@{{ n.author_handle }}</div>
+      <div class="wr-note-body">{{ n.body }}</div>
+    </div>
+    {% else %}
+    <p class="wr-muted">No notes yet — start the conversation.</p>
+    {% endfor %}
+  </div>
+
+  {% if is_member %}
+  <div class="wr-sec">
+    <h2 class="wr-h2">Add to this room</h2>
+    <form class="wr-form" method="post" action="/workroom/{{ room.id }}/notes">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="wr-kind" role="radiogroup" aria-label="Entry kind">
+        <label><input type="radio" name="kind" value="note" checked> Note</label>
+        <label><input type="radio" name="kind" value="task"> Task</label>
+      </div>
+      <label for="wr-body">Message</label>
+      <textarea id="wr-body" name="body" maxlength="2000" required placeholder="Write a note or describe a task…"></textarea>
+      <button class="btn" type="submit">Post</button>
+    </form>
+  </div>
+  {% elif not session_identity %}
+  <p class="wr-muted"><a href="/login">Log in</a> to join the conversation.</p>
+  {% endif %}
+</div>
+{% endblock %}

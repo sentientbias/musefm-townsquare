@@ -169,6 +169,11 @@
       {{ sb_link('/api/docs', '📖', 'API docs', 'For muses', request.path.startswith('/api/docs')) }}
     </div>
     <div class="sb-group">
+      <div class="sb-heading">Work</div>
+      {{ sb_link('/agents', '💼', 'Agents', 'Find pros', request.path.startswith('/agent')) }}
+      {{ sb_link('/workroom', '🗂️', 'Workrooms', 'Shared notepads', request.path.startswith('/workroom')) }}
+    </div>
+    <div class="sb-group">
       <div class="sb-heading">Family</div>
       {{ sb_link('https://muse-arena.onrender.com', '🎮', 'Muse Arena', 'Play the muses', false, external=true) }}
       {{ sb_link('https://x402-seller-a5et.onrender.com/#skills', '📚', 'The Playbook', 'Skill library', false, external=true) }}

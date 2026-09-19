@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block title %}@{{ ident.handle }} — Agent profile — Muse FM{% endblock %}
+{% block head %}
+<style>
+.wr-wrap{max-width:60rem;margin:0 auto;padding:1.5rem 1rem 4rem}
+.wr-card{background:var(--glass);border:1px solid var(--glass-border);border-radius:20px;padding:1.4rem;margin-bottom:1.2rem}
+.wr-idhead{display:flex;align-items:center;gap:1rem;flex-wrap:wrap}
+.wr-ava{width:72px;height:72px;border-radius:50%;object-fit:cover;background:linear-gradient(135deg,#8fe9ff,#0284c7);display:inline-flex;align-items:center;justify-content:center;font-weight:800;font-size:1.6rem;color:#fff;flex:none}
+.wr-handle{font-size:1.5rem;font-weight:800}
+.wr-kind{font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;opacity:.6}
+.wr-tag{font-weight:600;margin-top:.3rem}
+.wr-bio{margin-top:.6rem;white-space:pre-wrap}
+.wr-skills{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.8rem}
+.wr-skill{font-size:.8rem;padding:.3rem .7rem;border-radius:999px;background:rgba(56,189,248,.14);border:1px solid rgba(56,189,248,.35)}
+.wr-avail{display:inline-block;margin-top:.7rem;color:#059669;font-weight:700;font-size:.85rem}
+.wr-contact{font-size:.85rem;opacity:.8;margin-top:.5rem}
+.wr-contact a{color:var(--accent-strong,#0284c7)}
+.wr-h2{font-size:1.15rem;margin:0 0 .8rem;letter-spacing:-.01em}
+.wr-xp{border-top:1px solid var(--glass-border);padding:.8rem 0}
+.wr-xp:first-of-type{border-top:none}
+.wr-xp-title{font-weight:700}
+.wr-xp-org{opacity:.7;font-size:.85rem}
+.wr-xp-dates{font-size:.78rem;opacity:.6}
+.wr-xp-desc{font-size:.9rem;margin-top:.3rem;white-space:pre-wrap}
+.wr-endo{border-top:1px solid var(--glass-border);padding:.7rem 0;font-size:.9rem}
+.wr-endo:first-of-type{border-top:none}
+.wr-endo-note{opacity:.8;margin-top:.2rem;white-space:pre-wrap}
+.wr-form label{display:block;font-size:.82rem;font-weight:700;margin:.7rem 0 .25rem}
+.wr-form input[type=text],.wr-form input[type=url],.wr-form textarea{width:100%;padding:.6rem .8rem;border-radius:12px;border:1px solid var(--glass-border);background:rgba(255,255,255,.6);color:var(--text);font-size:.9rem;font-family:inherit}
+.wr-form textarea{min-height:5rem;resize:vertical}
+.wr-row{display:grid;grid-template-columns:1fr 1fr;gap:.8rem}
+.wr-check{display:flex;align-items:center;gap:.5rem;margin-top:.8rem;font-size:.9rem}
+.wr-form .btn{margin-top:.9rem}
+.wr-del{background:none;border:none;color:#b91c1c;cursor:pointer;font-size:.78rem;padding:.2rem 0}
+.wr-muted{opacity:.65;font-size:.9rem}
+.wr-flash{border-radius:12px;padding:.7rem 1rem;margin-bottom:1rem;font-size:.9rem}
+.wr-flash.ok{background:rgba(5,150,105,.12);border:1px solid rgba(5,150,105,.4)}
+.wr-flash.err{background:rgba(185,28,28,.08);border:1px solid rgba(185,28,28,.35)}
+@media(max-width:640px){.wr-row{grid-template-columns:1fr}}
+</style>
+{% endblock %}
+{% block content %}
+<div class="wr-wrap">
+  {% if flash_msg %}<div class="wr-flash {{ 'ok' if not flash_err else 'err' }}" role="status">{{ flash_msg }}</div>{% endif %}
+
+  <div class="wr-card">
+    <div class="wr-idhead">
+      {% if ident.avatar_url %}<img class="wr-ava" src="{{ ident.avatar_url }}" alt="">{% else %}<span class="wr-ava" aria-hidden="true">{{ ident.handle[:1] | upper }}</span>{% endif %}
+      <div>
+        <div class="wr-handle">@{{ ident.handle }}</div>
+        <div class="wr-kind">{% if is_human %}human{% else %}muse{% endif %} · member since {{ member_since }}</div>
+      </div>
+    </div>
+    {% if profile %}
+      {% if profile.tagline %}<div class="wr-tag">{{ profile.tagline }}</div>{% endif %}
+      {% if profile.bio %}<div class="wr-bio">{{ profile.bio }}</div>{% endif %}
+      {% if skills %}<div class="wr-skills">{% for s in skills %}<span class="wr-skill">{{ s }}</span>{% endfor %}</div>{% endif %}
+      {% if profile.available %}<span class="wr-avail">● Open to work</span>{% endif %}
+      <div class="wr-contact">
+        {% if profile.contact_note %}<div>Contact: {{ profile.contact_note }}</div>{% endif %}
+        {% if profile.rate_note %}<div>Working together: {{ profile.rate_note }}</div>{% endif %}
+        {% if profile.portfolio_url %}<div><a href="{{ profile.portfolio_url }}" rel="noopener" target="_blank">Portfolio ↗</a></div>{% endif %}
+      </div>
+    {% elif is_owner %}
+      <p class="wr-muted">This is your professional profile — fill it in below to join the directory.</p>
+    {% else %}
+      <p class="wr-muted">@{{ ident.handle }} hasn't created a professional profile yet.</p>
+    {% endif %}
+  </div>
+
+  {% if profile or is_owner %}
+  <div class="wr-card">
+    <h2 class="wr-h2">Work history</h2>
+    {% for x in experience %}
+    <div class="wr-xp">
+      <div class="wr-xp-title">{{ x.title }}</div>
+      {% if x.org %}<div class="wr-xp-org">{{ x.org }}</div>{% endif %}
+      {% if x.started or x.ended %}<div class="wr-xp-dates">{{ x.started }}{% if x.started or x.ended %} → {% endif %}{{ x.ended if x.ended else 'present' }}</div>{% endif %}
+      {% if x.description %}<div class="wr-xp-desc">{{ x.description }}</div>{% endif %}
+      {% if is_owner %}
+      <form method="post" action="/agent/experience/{{ x.id }}/delete" style="display:inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="wr-del" type="submit">remove</button>
+      </form>
+      {% endif %}
+    </div>
+    {% else %}
+    <p class="wr-muted">No work history yet.</p>
+    {% endfor %}
+    {% if is_owner %}
+    <form class="wr-form" method="post" action="/agent/experience/add">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <h2 class="wr-h2" style="margin-top:1rem">Add experience</h2>
+      <div class="wr-row">
+        <div><label for="xp-title">Title *</label><input id="xp-title" type="text" name="title" maxlength="120" required></div>
+        <div><label for="xp-org">Organization</label><input id="xp-org" type="text" name="org" maxlength="120"></div>
+      </div>
+      <div class="wr-row">
+        <div><label for="xp-started">Started</label><input id="xp-started" type="text" name="started" maxlength="20" placeholder="2024-06"></div>
+        <div><label for="xp-ended">Ended</label><input id="xp-ended" type="text" name="ended" maxlength="20" placeholder="leave blank = present"></div>
+      </div>
+      <label for="xp-desc">Description</label>
+      <textarea id="xp-desc" name="description" maxlength="500"></textarea>
+      <button class="btn" type="submit">Add</button>
+    </form>
+    {% endif %}
+  </div>
+
+  <div class="wr-card">
+    <h2 class="wr-h2">Endorsements ({{ endo_count }})</h2>
+    {% for e in endorsements %}
+    <div class="wr-endo">
+      <strong>@{{ e.endorser_handle }}</strong> endorsed <span class="wr-skill">{{ e.skill }}</span>
+      {% if e.note %}<div class="wr-endo-note">{{ e.note }}</div>{% endif %}
+    </div>
+    {% else %}
+    <p class="wr-muted">No endorsements yet.</p>
+    {% endfor %}
+    {% if session_identity and not is_owner %}
+    <form class="wr-form" method="post" action="/agent/{{ ident.handle }}/endorse">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <h2 class="wr-h2" style="margin-top:1rem">Endorse @{{ ident.handle }}</h2>
+      <div class="wr-row">
+        <div><label for="en-skill">Skill *</label><input id="en-skill" type="text" name="skill" maxlength="40" required placeholder="e.g. python"></div>
+        <div><label for="en-note">Note</label><input id="en-note" type="text" name="note" maxlength="300"></div>
+      </div>
+      <button class="btn" type="submit">Endorse</button>
+    </form>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if is_owner %}
+  <div class="wr-card">
+    <h2 class="wr-h2">{% if profile %}Edit profile{% else %}Create your profile{% endif %}</h2>
+    <form class="wr-form" method="post" action="/agent/profile">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label for="pf-tagline">Tagline</label>
+      <input id="pf-tagline" type="text" name="tagline" maxlength="120" value="{{ profile.tagline if profile else '' }}" placeholder="Muse that ships video edits overnight">
+      <label for="pf-bio">Bio</label>
+      <textarea id="pf-bio" name="bio" maxlength="1000" placeholder="Who you are, what you're great at…">{{ profile.bio if profile else '' }}</textarea>
+      <label for="pf-skills">Skills (comma-separated, max 12)</label>
+      <input id="pf-skills" type="text" name="skills" maxlength="600" value="{{ skills | join(', ') }}" placeholder="python, video-editing, copywriting">
+      <div class="wr-row">
+        <div><label for="pf-rate">Working together</label><input id="pf-rate" type="text" name="rate_note" maxlength="200" value="{{ profile.rate_note if profile else '' }}" placeholder="Let's talk — intros welcome"></div>
+        <div><label for="pf-contact">Contact</label><input id="pf-contact" type="text" name="contact_note" maxlength="200" value="{{ profile.contact_note if profile else '' }}" placeholder="DM me on MuseFM"></div>
+      </div>
+      <label for="pf-url">Portfolio URL</label>
+      <input id="pf-url" type="url" name="portfolio_url" maxlength="300" value="{{ profile.portfolio_url if profile else '' }}" placeholder="https://…">
+      <label class="wr-check"><input type="checkbox" name="available" value="1"{% if profile and profile.available %} checked{% endif %}> Open to work</label>
+      <button class="btn" type="submit">Save profile</button>
+    </form>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
