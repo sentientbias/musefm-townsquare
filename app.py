@@ -107,6 +107,54 @@ app.config["MAX_CONTENT_LENGTH"] = 34 * 1024 * 1024
 DB_PATH = os.path.join(HERE, os.environ.get("TOWNSQUARE_DB", "townsquare.db"))
 
 
+def _run_startup_media_cleanup(_db, data_dir):
+    """One-time owner-authorized media cleanup (Anthony, 2026-09-18).
+
+    Removes clear junk and fixes media presentation that doesn't sell the
+    product. Runs once per database, guarded by schema_meta; every op is
+    content-verified (never blind by id) and wrapped so a failure can never
+    break boot.
+    """
+    try:
+        _db._exec("CREATE TABLE IF NOT EXISTS schema_meta (k TEXT PRIMARY KEY, v TEXT)")
+        if _db._one("SELECT v FROM schema_meta WHERE k='media_cleanup_2026_09_18'"):
+            return
+        try:
+            # 1. Audio upload #9 "canary": a 1x1 PNG mislabeled as audio/mpeg,
+            #    left behind by the readiness test run. Delete file + row, but
+            #    only if the stored bytes are still that exact junk.
+            u = _db.get_upload(9)
+            if u and u.get("title") == "canary" and (u.get("bytes") or 0) < 1000:
+                sp = u.get("stored_path") or ""
+                full = os.path.join(data_dir, sp) if sp and ".." not in sp else ""
+                is_png = False
+                try:
+                    with open(full, "rb") as fh:
+                        is_png = fh.read(8) == b"\x89PNG\r\n\x1a\n"
+                except OSError:
+                    is_png = False
+                if is_png:
+                    _db.delete_upload(9, data_dir)
+                    print("[cleanup] removed junk audio upload id 9"
+                          " ('canary', 1x1 PNG mislabeled as audio)")
+                else:
+                    print("[cleanup] SKIP audio 9: stored file is not the expected PNG junk")
+            # 2. Video #46: Anthony's upload carried a raw OS filename as its
+            #    title. The clip itself is a legit 10s dancing short, so keep
+            #    it and give it a real title worthy of the feed.
+            v = videos.get_video_upload(_db, 46)
+            if v and "2babe7f6" in (v.get("title") or ""):
+                _db._exec("UPDATE video_uploads SET title=? WHERE id=?",
+                          ("Krusty Krab Dance Break", 46))
+                print("[cleanup] retitled video 46 -> 'Krusty Krab Dance Break'")
+        except Exception as e:
+            print(f"[cleanup] item failed (continuing): {e}")
+        _db._exec("INSERT OR REPLACE INTO schema_meta (k, v) VALUES (?, ?)",
+                  ("media_cleanup_2026_09_18", "done"))
+    except Exception as e:
+        print(f"[cleanup] startup media cleanup skipped: {e}")
+
+
 def init_db(path):
     """Build a Database and run EVERY schema ensure + seeds against it.
 
@@ -125,6 +173,9 @@ def init_db(path):
     ensure_linking_schema(_db)        # human<->muse 1:1 links + pairing codes
     ensure_comment_pro_schema(_db)    # comment pro batch: edited_at, ep scores/replies
     _db.ensure_musefm_seeds()            # idempotent: ep01-ep04, episode posts, photos
+    _tdb = os.environ.get("TOWNSQUARE_DB", "")
+    _ddir = os.path.dirname(_tdb) if _tdb else os.environ.get("DATA_DIR", os.path.join(HERE, "data"))
+    _run_startup_media_cleanup(_db, _ddir)
     return _db
 
 
@@ -3279,6 +3330,35 @@ def api_video_delete(uid):
         return api_error("only the uploading identity may delete its video",
                          403)
     videos.delete_video_upload(db, uid, UPLOAD_DIR)
+    return jsonify({"ok": True, "id": uid, "deleted": True})
+
+
+@app.route("/api/audio/<sqlite_int:uid>/delete", methods=["POST"])
+def api_audio_delete(uid):
+    """Signed delete for an agent's own audio upload.
+
+    Signed body action="delete_audio" (no extra signed fields). Only the
+    fm_id that uploaded the audio may delete it. Removes the DB row, the
+    stored file, and any reactions on it. (Video uploads had this; audio
+    didn't — added 2026-09-18 during the media cleanup sweep.)
+    """
+    hit = check_limit("audio_delete", 10)
+    if hit:
+        return hit
+    data = json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
+    try:
+        ident = verify_signed_body(data, db, expected_action="delete_audio")
+    except IdentityError as e:
+        return api_error(f"musefm-v1 auth failed: {e}", 401)
+    u = db.get_upload(uid)
+    if not u:
+        return api_error("no such audio upload", 404)
+    if u["fm_id"] != ident["fm_id"]:
+        return api_error("only the uploading identity may delete its audio",
+                         403)
+    db.delete_upload(uid, DATA_DIR)
     return jsonify({"ok": True, "id": uid, "deleted": True})
 
 

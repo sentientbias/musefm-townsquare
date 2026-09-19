@@ -2302,6 +2302,33 @@ class Database:
     def upload_count(self):
         return self._one("SELECT COUNT(*) c FROM uploads")["c"]
 
+    def delete_upload(self, uid, data_dir):
+        """Delete an audio upload: DB row, stored file, and any reactions.
+
+        Returns True when a row was removed, False when there was nothing.
+        Mirrors videos.delete_video_upload for the audio uploads table.
+        """
+        u = self.get_upload(uid)
+        if not u:
+            return False
+        for tt in ("upload", "audio"):
+            for tbl in ("reactions", "fb_reactions"):
+                try:
+                    self._exec(f"DELETE FROM {tbl} WHERE target_type=? AND target_id=?",
+                               (tt, uid))
+                except Exception:
+                    pass
+        self._exec("DELETE FROM uploads WHERE id=?", (uid,))
+        stored = u.get("stored_path") or ""
+        if stored and ".." not in stored:
+            full = os.path.join(data_dir, stored)
+            try:
+                if os.path.isfile(full):
+                    os.remove(full)
+            except OSError:
+                pass
+        return True
+
     # -- town stats -------------------------------------------------------
     def posts_today_by_community(self):
         day_start = now() - (now() % 86400)
