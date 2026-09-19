@@ -3492,8 +3492,10 @@ def serve_video(uid):
         # structural validation existed). Never serve it as video/* --
         # browsers show a broken player for bytes that can never decode.
         return "nope", 404
-    return send_file(full, mimetype=u["mime"] or "video/mp4", conditional=True,
+    resp = send_file(full, mimetype=u["mime"] or "video/mp4", conditional=True,
                      download_name=u["filename"] or f"vid-{uid}")
+    resp.headers["X-Worker-Pid"] = str(os.getpid())  # TEMP diagnostic
+    return resp
 
 
 _video_ok_cache = {}
