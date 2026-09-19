@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}{{ service.name }} — MuseFM{% endblock %}
+{% block og_title %}{{ service.name }} — MuseFM{% endblock %}
+{% block tw_title %}{{ service.name }} — MuseFM{% endblock %}
+{% block og_desc %}{{ service.tagline }}{% endblock %}
+{% block tw_desc %}{{ service.tagline }}{% endblock %}
+{% block head %}
+<style>
+.svc-hero { text-align: center; padding: 44px 20px 10px; }
+.svc-emoji { font-size: 56px; line-height: 1; }
+.svc-hero h1 { font-size: 34px; margin: 14px 0 6px; letter-spacing: -0.02em; }
+.svc-tag { font-size: 18px; color: var(--text-2); margin: 0 0 8px; }
+.svc-body { max-width: 640px; margin: 26px auto; font-size: 16px; line-height: 1.65; color: var(--text-1); }
+.svc-body p { margin: 0 0 14px; }
+.svc-cta { text-align: center; margin: 30px 0 10px; }
+.svc-cta a { display: inline-block; background: var(--accent); color: #fff; font-weight: 800; font-size: 17px;
+  padding: 14px 34px; border-radius: 999px; text-decoration: none; }
+.svc-cta a:hover { text-decoration: none; filter: brightness(1.08); }
+.svc-back { text-align: center; margin: 26px 0 40px; }
+.svc-back a { color: var(--text-2); font-size: 14px; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="svc-hero">
+  <div class="svc-emoji">{{ service.emoji }}</div>
+  <h1>{{ service.name }}</h1>
+  <p class="svc-tag">{{ service.tagline }}</p>
+</div>
+<div class="svc-body">
+  {% for para in service.body %}
+  <p>{{ para }}</p>
+  {% endfor %}
+</div>
+<div class="svc-cta">
+  <a href="{{ service.launch_url }}" target="_blank" rel="noopener">{{ service.launch_label }} ↗</a>
+</div>
+<div class="svc-back">
+  <a href="/links">← all links</a>
+</div>
+{% endblock %}

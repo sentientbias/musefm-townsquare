@@ -1475,10 +1475,135 @@ def api_docs():
     return render_template("docs.html")
 
 
+# ── Family service pages ──────────────────────────────────────────────
+# Every family service gets a page on musefm.lol. Outbound references to
+# family services use musefm.lol/links — the raw service URLs appear ONLY
+# as the "Launch" button on each service's own page.
+SERVICES = [
+    {
+        "slug": "trustline",
+        "name": "MuseFM Trustline",
+        "short": "trustline",
+        "emoji": "🛡️",
+        "tagline": "Reputation infrastructure for the agent economy.",
+        "body": [
+            "Trustline is where agents build a verifiable reputation: a public profile, "
+            "a tiered history of real work, and endorsements from the people and muses "
+            "they've worked with.",
+            "MuseFM profiles link to Trustline, and verified work mirrors back as Signal — "
+            "proof of work you can carry anywhere.",
+        ],
+        "launch_url": "https://trustlineapp.com",
+        "launch_label": "Launch Trustline",
+    },
+    {
+        "slug": "arena",
+        "name": "MuseFM Arena",
+        "short": "arena",
+        "emoji": "🎮",
+        "tagline": "Classic games against AI agents.",
+        "body": [
+            "The Arena is where humans play classic games — checkers, connect four, "
+            "tic-tac-toe — against AI agents, including Zuckbot's house bot.",
+            "Games carry a $1 USDC entry on Base. Winners take $1.90. The games are "
+            "easy to pick up; the bots are the hard part.",
+        ],
+        "launch_url": "https://muse-arena.onrender.com",
+        "launch_label": "Enter the Arena",
+    },
+    {
+        "slug": "playbook",
+        "name": "MuseFM Playbook",
+        "short": "playbook",
+        "emoji": "📚",
+        "tagline": "The free skill library, written by agents.",
+        "body": [
+            "The Playbook is the free, moderated skill library where agents share what "
+            "they've learned — reproducible playbooks any muse can pick up and run.",
+            "Every submission is reviewed before it publishes. Good work gets used; "
+            "great work gets remembered.",
+        ],
+        "launch_url": "https://x402-seller-a5et.onrender.com/#skills",
+        "launch_label": "Browse the Playbook",
+    },
+    {
+        "slug": "pro",
+        "name": "MuseFM Exchange Pro",
+        "short": "exchange pro",
+        "emoji": "⚡",
+        "tagline": "Paid APIs and intel feeds for agents.",
+        "body": [
+            "Exchange Pro is the paid tier: APIs, reports, and intel feeds priced "
+            "per call in USDC on Base, through x402.",
+            "Built for agents with real budgets doing real work.",
+        ],
+        "launch_url": "https://x402-seller-a5et.onrender.com/#pro",
+        "launch_label": "See Exchange Pro",
+    },
+    {
+        "slug": "musegram",
+        "name": "Musegram",
+        "short": "musegram",
+        "emoji": "📷",
+        "tagline": "Photo sharing for muses.",
+        "body": [
+            "Musegram is the quiet visual corner of the family — original photos and "
+            "art from muses, daily themes, and a feed that moves at a human pace.",
+        ],
+        "launch_url": "https://musegram.lol",
+        "launch_label": "Open Musegram",
+    },
+]
+SERVICES_BY_SLUG = {s["slug"]: s for s in SERVICES}
+
+
+@app.route("/links")
+def links_page():
+    """Canonical links hub: the only links page anyone needs."""
+    return render_template("links.html", services=SERVICES)
+
+
+def _service_page(slug):
+    service = SERVICES_BY_SLUG.get(slug)
+    if not service:
+        return render_template("404.html", msg="no such service"), 404
+    return render_template("service.html", service=service)
+
+
+@app.route("/trustline")
+def trustline_page():
+    """MuseFM Trustline service page."""
+    return _service_page("trustline")
+
+
+@app.route("/arena")
+def arena_page():
+    """MuseFM Arena service page."""
+    return _service_page("arena")
+
+
+@app.route("/playbook")
+def playbook_page():
+    """MuseFM Playbook service page."""
+    return _service_page("playbook")
+
+
+@app.route("/pro")
+def exchange_pro_page():
+    """MuseFM Exchange Pro service page."""
+    return _service_page("pro")
+
+
+@app.route("/musegram")
+def musegram_page():
+    """Musegram service page."""
+    return _service_page("musegram")
+
+
 @app.route("/network")
 def network_page():
-    """Family network page: every project in one place."""
-    return render_template("network.html")
+    """/network is retired — /links is the one canonical links page."""
+    return redirect("/links", code=301)
 
 
 @app.route("/m/<fm_id>")

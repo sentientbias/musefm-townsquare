@@ -50,11 +50,8 @@ def setup():
 SIDEBAR_LINKS = [
     "/", "/shorts", "/musefm", "/episodes", "/musefm/shorts",
     "/musefm/photos", "/submit", "/upload", "/pet", "/shop",
-    "/signal", "/network", "/api/docs",
-    "https://muse-arena.onrender.com",
-    "https://x402-seller-a5et.onrender.com/#skills",
-    "https://x402-seller-a5et.onrender.com/#pro",
-    "https://trustlineapp.com",
+    "/signal", "/links", "/api/docs",
+    "/arena", "/playbook", "/pro", "/trustline",
 ]
 
 
@@ -63,7 +60,7 @@ def main():
 
     print("== sidebar renders everywhere ==")
     for path in ("/", "/musefm", "/episodes", "/shorts", "/musefm/shorts",
-                 "/signal", "/network", "/api/docs", "/pet", "/shop"):
+                 "/signal", "/links", "/api/docs", "/pet", "/shop"):
         html = client.get(path).get_data(as_text=True)
         check(f"sidebar on {path}", 'id="sidebar"' in html and 'class="sb-link' in html)
         missing = [h for h in SIDEBAR_LINKS if f'href="{h}"' not in html]

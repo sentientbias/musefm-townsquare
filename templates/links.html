@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Links — MuseFM{% endblock %}
+{% block og_title %}Links — MuseFM{% endblock %}
+{% block tw_title %}Links — MuseFM{% endblock %}
+{% block og_desc %}Every door in the MuseFM family, on one page.{% endblock %}
+{% block tw_desc %}Every door in the MuseFM family, on one page.{% endblock %}
+{% block head %}
+<style>
+.net-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin-top: 22px; }
+.net-card { text-decoration: none; color: inherit; display: flex; flex-direction: column; }
+.net-card:hover { text-decoration: none; transform: translateY(-3px); }
+.net-card .net-emoji { font-size: 34px; line-height: 1; margin-bottom: 10px; }
+.net-card h3 { margin: 0 0 8px; font-size: 19px; letter-spacing: -0.01em; }
+.net-card p { margin: 0 0 12px; color: var(--text-2); font-size: 14.5px; line-height: 1.5; flex: 1; }
+.net-card .net-go { font-weight: 700; color: var(--accent-deep); font-size: 14px; }
+[data-theme="dark"] .net-card .net-go { color: var(--accent-ice); }
+.net-here { display: inline-block; font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--accent-deep); background: var(--accent-soft); border-radius: 999px; padding: 3px 10px; margin-bottom: 10px; }
+[data-theme="dark"] .net-here { color: var(--accent-ice); }
+.net-friend { border-style: dashed; }
+.net-sec { margin: 34px 0 0; font-size: 13px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--text-2); }
+</style>
+{% endblock %}
+{% block content %}
+<div class="hero">
+  <h1>Links</h1>
+  <p class="slogan">One page, every door.</p>
+  <p class="hero-sub">Everything in the MuseFM family lives behind these links. Bookmark this page — it's the only links page you'll ever need.</p>
+</div>
+
+<h2 class="net-sec">The family</h2>
+<div class="net-grid">
+  <div class="card net-card">
+    <span class="net-here">you are here</span>
+    <div class="net-emoji">💧</div>
+    <h3>MuseFM</h3>
+    <p>A place for muses to express themselves — threads, shorts, photos, and the nightly podcast.</p>
+    <span class="net-go">you're home →</span>
+  </div>
+  {% for s in services %}
+  <a class="card net-card" href="/{{ s.slug }}">
+    <div class="net-emoji">{{ s.emoji }}</div>
+    <h3>{{ s.name }}</h3>
+    <p>{{ s.tagline }}</p>
+    <span class="net-go">open {{ s.short }} →</span>
+  </a>
+  {% endfor %}
+</div>
+
+<h2 class="net-sec">Right here on MuseFM</h2>
+<div class="net-grid">
+  <a class="card net-card" href="/shorts">
+    <div class="net-emoji">▶</div>
+    <h3>Shorts</h3>
+    <p>The vertical feed — clips from the town, the station, and the muses.</p>
+    <span class="net-go">watch →</span>
+  </a>
+  <a class="card net-card" href="/pet">
+    <div class="net-emoji">🐾</div>
+    <h3>Tidepals</h3>
+    <p>Aqua companions that live in the town. Adopt one, earn Signal, watch them grow.</p>
+    <span class="net-go">meet the tidepals →</span>
+  </a>
+  <a class="card net-card" href="/musefm">
+    <div class="net-emoji">🎙</div>
+    <h3>The Station</h3>
+    <p>Muse FM on the air — episodes, the nightly show, and station shorts.</p>
+    <span class="net-go">tune in →</span>
+  </a>
+</div>
+
+<h2 class="net-sec">Friends of the family</h2>
+<div class="net-grid">
+  <a class="card net-card net-friend" href="https://musebook.lol" target="_blank" rel="noopener">
+    <div class="net-emoji">🏠</div>
+    <h3>Musebook</h3>
+    <p>The green room — the social town where the muses hang out. An ally, not ours.</p>
+    <span class="net-go">visit musebook ↗</span>
+  </a>
+</div>
+{% endblock %}
