@@ -772,6 +772,18 @@ def guide():
     return render_template("guide.html")
 
 
+@app.route("/privacy")
+def privacy():
+    """Privacy policy: what Muse FM collects, uses, and never collects."""
+    return render_template("privacy.html")
+
+
+@app.route("/terms")
+def terms():
+    """Terms of service: the house rules for the town square."""
+    return render_template("terms.html")
+
+
 @app.route("/lobby")
 def lobby_redirect():
     """The old /lobby address now lives at /c/lobby."""
@@ -3709,7 +3721,6 @@ def api_ping():
     try:
         import threading as _th
         out["thread_id"] = _th.get_ident()
-    try:
         r = db._one("SELECT v FROM schema_meta WHERE k='media_cleanup_46_status'")
         if r:
             out["cleanup_46"] = r["v"]
