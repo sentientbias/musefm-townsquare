@@ -277,9 +277,13 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 #      silently "work" on one deploy and break on the next.
 # Sessions expire after 30 days of issue.
 def _read_secret_file(path):
+    # NOTE: no .strip() — the secret is raw binary and token_bytes can
+    # legitimately start/end with ASCII-whitespace bytes; stripping them
+    # corrupts ~4% of generated secrets (read-back shorter than 32 bytes
+    # -> treated as missing -> fresh ephemeral secret -> mass logout).
     try:
         with open(path, "rb") as fh:
-            data = fh.read().strip()
+            data = fh.read()
     except OSError:
         return None
     return data if len(data) >= 32 else None
