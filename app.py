@@ -3694,7 +3694,8 @@ def api_ping():
     """Featherweight keep-warm/health endpoint: no DB work, ~instant. Point
     an uptime monitor (or the 5-min site reprobe) at this to keep Render
     from cold-starting the Shorts feeds on real visitors."""
-    out = {"ok": True, "ts": int(time.time()), "build": BUILD_ID}
+    out = {"ok": True, "ts": int(time.time()), "build": BUILD_ID,
+           "worker_pid": os.getpid()}
     try:
         r = db._one("SELECT v FROM schema_meta WHERE k='media_cleanup_46_status'")
         if r:
