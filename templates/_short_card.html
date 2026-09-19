@@ -1,0 +1,49 @@
+{% from "_reactions.html" import rxn_widget %}
+{% macro short_card(it) %}
+<article class="short-item" data-id="{{ it.id }}">
+  <video class="short-video" src="{{ it.video_url }}" muted loop playsinline preload="metadata" disablepictureinpicture></video>
+  <button class="short-mute" aria-label="toggle sound">🔇</button>
+  <div class="short-overlay">
+    <div class="short-meta">
+      <div class="short-author">u/{{ it.handle }}</div>
+      <div class="short-title">{{ it.title }}</div>
+      <div class="short-chips">
+        {% if it.ai_generated %}<span class="ai-badge ai-badge-static">✨ AI-generated</span>{% endif %}
+        {% if it.duration_secs %}<span class="dur-chip">{{ (it.duration_secs // 60) }}:{{ "%02d"|format(it.duration_secs % 60) }}</span>{% endif %}
+        {% if it.is_duet %}<a class="duet-chip" href="{{ it.watch_url }}#duets" title="A remix of another short">🔀 duet</a>{% endif %}
+        {% if it.duet_count %}<a class="duet-chip" href="{{ it.watch_url }}#duets" title="{{ it.duet_count }} remix{{ 'es' if it.duet_count != 1 else '' }}">🔀 ×{{ it.duet_count }}</a>{% endif %}
+      </div>
+      {% if it.thread_url %}<a class="short-thread-link" href="{{ it.thread_url }}">View thread →</a>{% endif %}
+    </div>
+    <div class="short-actions">
+      <button class="short-btn short-comments-btn" data-vid="{{ it.id }}" title="Comments" aria-label="Comments">
+        <svg class="short-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5c-1.5 0-3-.4-4.2-1L3 20l1.2-4.1A8.5 8.5 0 1 1 21 11.5z"/></svg>
+        <span class="short-ccount" data-vid="{{ it.id }}">{{ it.comment_count }}</span>
+      </button>
+      <a class="short-btn" href="{{ it.watch_url }}" title="Watch page" aria-label="Watch page">⛶</a>
+    </div>
+  </div>
+  <div class="short-comments" data-vid="{{ it.id }}" data-sort="top" data-page="1" hidden>
+    <div class="sc-head"><span>Comments</span><button class="sc-close" aria-label="Close comments">✕</button></div>
+    <div class="sc-sortbar" role="group" aria-label="Sort comments">
+      <button type="button" data-sort="top" class="is-active">Top</button><button type="button" data-sort="new">Newest</button><button type="button" data-sort="old">Oldest</button>
+    </div>
+    <div class="sc-list" aria-live="polite"></div>
+    <div class="sc-composer">
+      {% if handle != 'anon' %}
+      <form class="sc-form" data-vid="{{ it.id }}" action="/video/{{ it.id }}/comment" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="next" value="/shorts?video={{ it.id }}">
+        <input class="sc-input" name="body" maxlength="2000" placeholder="Add a comment…" autocomplete="off">
+        <button class="sc-send" type="submit" aria-label="Post comment">➤</button>
+      </form>
+      {% else %}
+      <a class="sc-nudge" href="/login?next={{ ('/shorts?video=%d' % it.id) | urlencode }}">Sign in to comment</a>
+      {% endif %}
+    </div>
+  </div>
+  <div class="short-rxn">
+    {{ rxn_widget(it.target_type, it.target_id, it.fb, handle, '/shorts', compact=true) }}
+  </div>
+</article>
+{% endmacro %}

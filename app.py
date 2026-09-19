@@ -795,6 +795,7 @@ def home():
         db, secrets.token_hex(8), limit=12, page=0,
         exclude=session.get("home_shorts_last") or ())
     shorts = _short_items(shorts)
+    _attach_short_fb(shorts, _fb_web_reactor())
     session["home_shorts_last"] = [s["id"] for s in shorts]
     return render_template("index.html", posts=posts, sort=sort,
                            active_community=None, shorts=shorts,

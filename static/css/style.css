@@ -1420,6 +1420,48 @@ body.shorts-mode .wrap { max-width: none; margin: 0; padding: 0; }
   .mp-info { flex: 1 1 100%; order: -1; }
 }
 
+/* ================= FM brand hero (homepage) =================
+   Shrunken in-style take on the Muse FM brand card: frosted light glass,
+   waveform mark, navy + blue wordmark, glass orbs. Deliberately light in
+   both themes — it's a brand element, not page chrome. */
+.fm-hero {
+  position: relative; overflow: hidden;
+  margin: 0 0 16px; padding: 22px 24px;
+  border-radius: 26px;
+  background: linear-gradient(120deg, #f5faff 0%, #e9f4fe 48%, #d9ecfd 100%);
+  border: 1px solid rgba(255, 255, 255, .9);
+  box-shadow: 0 14px 44px rgba(30, 120, 220, .16), inset 0 1px 0 #fff;
+  color: #0a2540;
+}
+.fm-hero-orbs { position: absolute; inset: 0; pointer-events: none; }
+.fm-hero-orbs .orb {
+  position: absolute; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, rgba(255,255,255,.8), rgba(120,190,255,.38) 55%, rgba(60,150,255,.16));
+  border: 1px solid rgba(255, 255, 255, .65);
+  box-shadow: inset -10px -14px 34px rgba(80, 170, 255, .28);
+}
+.fm-hero-orbs .orb1 { width: 200px; height: 200px; right: 7%; top: -52px; }
+.fm-hero-orbs .orb2 { width: 132px; height: 132px; right: -14px; bottom: -56px; }
+.fm-hero-inner { position: relative; max-width: 64ch; }
+.fm-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.fm-mark { display: inline-flex; line-height: 0; filter: drop-shadow(0 3px 10px rgba(31,143,255,.30)); }
+.fm-wordmark { font-size: 34px; font-weight: 800; letter-spacing: -0.03em; margin: 0; color: #0a1f44; line-height: 1; }
+.fm-wordmark span {
+  background: linear-gradient(180deg, #1f9dff 20%, #22d3ee 90%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.fm-head { font-size: 24px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.22; margin: 0 0 4px; color: #0a2540; }
+.fm-sub { font-size: 17px; font-weight: 600; color: #3d5a80; margin: 0 0 8px; }
+.fm-tag { font-size: 15px; font-weight: 600; color: #0a2540; margin: 0; min-height: 1.4em; transition: opacity .35s ease; }
+.fm-tag.fade { opacity: 0; }
+.fm-cta { font-size: 13.5px; color: #5a7391; margin: 6px 0 0; }
+@media (max-width: 640px) {
+  .fm-hero { padding: 18px; }
+  .fm-hero-orbs .orb1 { width: 128px; height: 128px; right: 2%; }
+  .fm-wordmark { font-size: 28px; }
+  .fm-head { font-size: 20px; }
+}
+
 /* home page: shorts spotlight — the video tiles lead, words sit beneath.
    9:16 thumbnail cards, snap-x, glow treatment in the glass-blue brand */
 .shorts-vfeed-wrap { margin: 20px 0 6px; }
@@ -1455,6 +1497,37 @@ body.shorts-mode .wrap { max-width: none; margin: 0; padding: 0; }
 @media (max-width: 560px) {
   .vfeed-card { width: 182px; }
   .shorts-copy h2 { font-size: 20px; }
+}
+
+/* home page: mini shorts reel — the actual /shorts reel UI (same cards,
+   same overlay, same autoplay behavior) shrunk into a phone-sized frame
+   that sits next to the spotlight copy. */
+.mini-spotlight { display: flex; gap: 28px; align-items: center; }
+.mini-reel {
+  flex: 0 0 auto;
+  width: 300px; max-width: 78vw;
+  padding: 10px;
+  border-radius: 28px;
+  background: linear-gradient(160deg, rgba(20,40,66,.92), rgba(6,16,30,.96));
+  border: 1px solid rgba(140,190,255,.35);
+  box-shadow: 0 18px 50px rgba(20,80,160,.30), var(--shadow-card);
+}
+.mini-reel .shorts-feed {
+  height: 532px; max-height: 68dvh;
+  border-radius: 18px;
+  background: #000;
+  scroll-snap-type: y mandatory;
+}
+.mini-reel .short-item {
+  width: 100%; height: 100%;
+  margin: 0; border: 0; border-radius: 0;
+  scroll-snap-align: start; scroll-snap-stop: always;
+}
+.mini-reel .shorts-feed::-webkit-scrollbar { width: 0; }
+@media (max-width: 640px) {
+  .mini-spotlight { flex-direction: column; align-items: stretch; }
+  .mini-reel { margin: 0 auto; }
+  .mini-reel .shorts-feed { height: 480px; }
 }
 
 /* ================= Muse FM section ================= */

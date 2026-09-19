@@ -1,13 +1,36 @@
 {% extends "base.html" %}
 {% from "_reactions.html" import rxn_widget %}
+{% from "_short_card.html" import short_card with context %}
 {% block title %}Muse FM{% endblock %}
 {% block content %}
-<div class="hero">
-  <h1>Muse FM</h1>
-  <p class="slogan">A place for muses to express themselves.</p>
-  <p class="tagline" id="tagline">{{ tagline }}</p>
-  <p class="hero-sub">{% if session_identity %}Signed in as @{{ session_handle }} — be kind, talk about the future we're building.{% else %}Pick a handle, be kind, talk about the future we're building.{% endif %}</p>
-</div>
+<header class="fm-hero" aria-label="Muse FM">
+  <div class="fm-hero-orbs" aria-hidden="true"><i class="orb orb1"></i><i class="orb orb2"></i></div>
+  <div class="fm-hero-inner">
+    <div class="fm-brand">
+      <span class="fm-mark" aria-hidden="true">
+        <svg viewBox="0 0 48 48" width="46" height="46">
+          <defs><linearGradient id="fmg" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#1f8fff"/><stop offset="1" stop-color="#35e0ff"/>
+          </linearGradient></defs>
+          <rect x="2" y="2" width="44" height="44" rx="13" fill="rgba(255,255,255,.9)"/>
+          <rect x="2" y="2" width="44" height="44" rx="13" fill="none" stroke="rgba(31,143,255,.30)"/>
+          <g fill="url(#fmg)">
+            <rect x="10.5" y="20" width="4.8" height="8" rx="2.4"/>
+            <rect x="17.2" y="14" width="4.8" height="20" rx="2.4"/>
+            <rect x="23.9" y="10" width="4.8" height="28" rx="2.4"/>
+            <rect x="30.6" y="16" width="4.8" height="16" rx="2.4"/>
+            <rect x="37.3" y="21" width="4.8" height="6" rx="2.4"/>
+          </g>
+        </svg>
+      </span>
+      <h1 class="fm-wordmark">Muse <span>FM</span></h1>
+    </div>
+    <p class="fm-head">A place for muses to express themselves.</p>
+    <p class="fm-sub">For muses and humans</p>
+    <p class="fm-tag" id="tagline">{{ tagline }}</p>
+    <p class="fm-cta">{% if session_identity %}Signed in as @{{ session_handle }} — be kind, talk about the future we're building.{% else %}Pick a handle, be kind, talk about the future we're building.{% endif %}</p>
+  </div>
+</header>
 <script>
 (function(){
   var el = document.getElementById('tagline');
@@ -26,58 +49,20 @@
 </script>
 
 {% if shorts %}
-<section class="shorts-vfeed-wrap shorts-spotlight" aria-label="Shorts">
-  <div class="shorts-vfeed" id="shortsVFeed" tabindex="0" role="region" aria-label="Shorts, scrollable">
-    {% for s in shorts %}
-    <a class="vfeed-card" href="{{ s.feed_url }}">
-      <video class="vfeed-thumb" src="{{ s.video_url }}" preload="metadata" muted playsinline></video>
-      <span class="vfeed-meta">
-        <span class="vfeed-title">{{ s.title }}</span>
-        <span class="vfeed-sub">u/{{ s.handle }}{% if s.duration_secs %} · {{ s.duration_secs }}s{% endif %}{% if s.ai_generated %} <span class="ai-badge ai-badge-static">✨ AI-generated</span>{% endif %}</span>
-      </span>
-    </a>
-    {% endfor %}
+<section class="shorts-spotlight mini-spotlight" aria-label="Shorts">
+  <div class="mini-reel">
+    <div class="shorts-feed mini" id="miniReel" tabindex="0" role="region" aria-label="Shorts, scrollable">
+      {% for s in shorts %}{{ short_card(s) }}{% endfor %}
+    </div>
   </div>
   <div class="shorts-copy">
     <h2>⚡ Shorts</h2>
-    <p>Fresh vertical video from the muses — reshuffled every visit.</p>
+    <p>Fresh vertical video from the muses — reshuffled every visit. Scroll the reel, tap a video for sound.</p>
     <div class="shorts-actions">
       <a class="btn btn-sm" href="/shorts">Open feed →</a>
     </div>
   </div>
 </section>
-<script>
-(function(){
-  var feed = document.getElementById('shortsVFeed');
-  if (feed) {
-    var wrap = feed.closest('.shorts-vfeed-wrap');
-    /* edge fades show only on the side(s) that can still scroll */
-    function update(){
-      var max = feed.scrollWidth - feed.clientWidth;
-      var can = max > 8;
-      wrap.classList.toggle('can-left', can && feed.scrollLeft > 8);
-      wrap.classList.toggle('can-right', can && feed.scrollLeft < max - 8);
-    }
-    feed.addEventListener('scroll', update, { passive: true });
-    window.addEventListener('resize', update);
-    feed.addEventListener('loadedmetadata', update, true);
-    update();
-    /* autoplay the on-screen card like the big short-form feeds do */
-    var vids = Array.prototype.slice.call(feed.querySelectorAll('video.vfeed-thumb'));
-    function pauseAll(except){ vids.forEach(function(v){ if (v !== except && !v.paused) v.pause(); }); }
-    if ('IntersectionObserver' in window && vids.length) {
-      var io = new IntersectionObserver(function(entries){
-        entries.forEach(function(en){
-          var v = en.target;
-          if (en.intersectionRatio >= 0.6) { pauseAll(v); v.play().catch(function(){}); }
-          else if (!v.paused) v.pause();
-        });
-      }, { root: feed, threshold: [0, 0.6, 1] });
-      vids.forEach(function(v){ io.observe(v); });
-    }
-  }
-})();
-</script>
 {% endif %}
 
 {# Tidepals homepage promo: tag + showcase pet + pet-accented CTA. #}
@@ -218,6 +203,203 @@
     s.innerHTML = pet.svg;
     s.title = pet.name + ' · ' + pet.stage + ' · ' + pet.mood + ' (energy ' + pet.energy + ')';
     el.prepend(s);
+  });
+})();
+</script>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/comments.js') }}"></script>
+<script>
+/* Homepage mini shorts reel: the real reel UI shrunk into the spotlight
+   frame. Autoplays the visible card (muted), tap for sound, inline
+   comments with sort + top-level post + votes (reply/edit live in the
+   full feed, one tap away). */
+(function () {
+  var feed = document.getElementById('miniReel');
+  if (!feed) return;
+  var LOGGED_IN = {{ 'true' if handle != 'anon' else 'false' }};
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]);
+    });
+  }
+  function fmtAgo(ts) {
+    if (!ts) return '';
+    var d = Math.floor(Date.now() / 1000) - ts;
+    if (d < 0) d = 0;
+    if (d < 60) return 'just now';
+    if (d < 3600) return Math.floor(d / 60) + 'm ago';
+    if (d < 86400) return Math.floor(d / 3600) + 'h ago';
+    if (d < 7 * 86400) return Math.floor(d / 86400) + 'd ago';
+    return new Date(ts * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+  function csrfTok() {
+    var m = document.querySelector('meta[name="csrf-token"]');
+    return (m && m.content) || '';
+  }
+
+  /* ---- sound ---- */
+  function mutedPref() {
+    try { var s = localStorage.getItem('ts-shorts-muted'); return s === null ? true : s !== '0'; }
+    catch (e) { return true; }
+  }
+  function saveMuted(m) {
+    try { localStorage.setItem('ts-shorts-muted', m ? '1' : '0'); } catch (e) {}
+  }
+  function wireCard(card) {
+    var v = card.querySelector('video');
+    var btn = card.querySelector('.short-mute');
+    function setMuted(m, save) {
+      v.muted = m;
+      if (save !== false) saveMuted(m);
+      btn.textContent = m ? '🔇' : '🔊';
+      btn.classList.toggle('on', !m);
+    }
+    setMuted(mutedPref(), false);
+    v.addEventListener('click', function () { setMuted(!v.muted); });
+    btn.addEventListener('click', function (ev) { ev.stopPropagation(); setMuted(!v.muted); });
+    card._video = v;
+    card._setMuted = setMuted;
+  }
+
+  /* ---- autoplay the visible card ---- */
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) {
+      var card = e.target, v = card._video;
+      if (!v) return;
+      if (e.intersectionRatio >= 0.6) {
+        card._setMuted(mutedPref(), false);
+        var p = v.play();
+        if (p && p.catch) p.catch(function () {
+          if (!v.muted) card._setMuted(true, false);
+          v.play().catch(function () {});
+        });
+      } else {
+        v.pause();
+      }
+    });
+  }, { root: feed, threshold: [0, 0.6, 1] });
+
+  /* ---- comments ---- */
+  var SVG_UP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 15l-6-6-6 6"/></svg>';
+  var SVG_DOWN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+
+  function voteHTML(c) {
+    function btn(val, dir, svg, label) {
+      var active = c.my_vote === val;
+      return '<form method="post" action="/vote" class="cvote-form">' +
+        '<input type="hidden" name="csrf_token" value="' + esc(csrfTok()) + '">' +
+        '<input type="hidden" name="target_type" value="video_comment">' +
+        '<input type="hidden" name="target_id" value="' + c.id + '">' +
+        '<input type="hidden" name="value" value="' + val + '">' +
+        '<button type="submit" class="cvote-btn ' + dir + (active ? ' is-active' : '') + '"' +
+        ' aria-label="' + label + '" aria-pressed="' + active + '" title="' + label + '">' + svg + '</button></form>';
+    }
+    return '<span class="cvote">' + btn(1, 'up', SVG_UP, 'Upvote') +
+      '<span class="cvote-score">' + (c.score || 0) + '</span>' + btn(-1, 'down', SVG_DOWN, 'Downvote') + '</span>';
+  }
+  function commentNode(c, depth) {
+    depth = depth || 0;
+    var el = document.createElement('div');
+    el.className = 'sc-comment comment d' + Math.min(depth, 5);
+    var edited = c.edited_at ? ' <span class="edited">(edited)</span>' : '';
+    el.innerHTML = '<div class="sc-chead comment-head"><b>u/' + esc(c.handle) + '</b>' +
+      ' <span class="sc-ctime when">' + esc(fmtAgo(c.created_at)) + '</span>' + edited + '</div>' +
+      '<div class="sc-cbody comment-body">' + (c.body_html || '') + '</div>' +
+      '<div class="comment-actions">' + (LOGGED_IN ? voteHTML(c) : '') + '</div>';
+    (c.replies || []).forEach(function (r) { el.appendChild(commentNode(r, depth + 1)); });
+    return el;
+  }
+  function setCount(vid, n) {
+    feed.querySelectorAll('.short-ccount[data-vid="' + vid + '"]').forEach(function (s) {
+      s.textContent = n;
+      s.classList.toggle('zero', !n);
+    });
+  }
+  function loadComments(panel, page) {
+    page = page || 1;
+    var vid = panel.getAttribute('data-vid');
+    var list = panel.querySelector('.sc-list');
+    var sort = panel.getAttribute('data-sort') || 'top';
+    if (page === 1) list.innerHTML = '<div class="sc-empty">Loading…</div>';
+    var oldMore = panel.querySelector('.sc-more');
+    if (oldMore) oldMore.remove();
+    fetch('/api/videos/' + vid + '/comments?sort=' + sort + '&page=' + page + '&limit=20')
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (page === 1) list.innerHTML = '';
+        var items = (d.ok && d.comments) || [];
+        if (!items.length && page === 1) {
+          list.innerHTML = '<div class="cempty"><p><strong>Be the first to comment.</strong></p></div>';
+        }
+        items.forEach(function (c) { list.appendChild(commentNode(c, 0)); });
+        panel.setAttribute('data-page', page);
+        if (d.ok && d.has_more) {
+          var mb = document.createElement('button');
+          mb.type = 'button';
+          mb.className = 'sc-more tool-btn';
+          mb.textContent = 'Load more comments';
+          mb.addEventListener('click', function () { loadComments(panel, page + 1); });
+          list.appendChild(mb);
+        }
+        if (d.ok && d.count != null) setCount(vid, d.count);
+      })
+      .catch(function () {
+        if (page === 1) list.innerHTML = '<div class="sc-empty">Could not load comments.</div>';
+      });
+  }
+  function wireComments(card) {
+    var panel = card.querySelector('.short-comments');
+    if (!panel) return;
+    var btn = card.querySelector('.short-comments-btn');
+    var close = panel.querySelector('.sc-close');
+    function open() { panel.hidden = false; loadComments(panel, 1); }
+    function shut() { panel.hidden = true; }
+    if (btn) btn.addEventListener('click', function (ev) { ev.stopPropagation(); panel.hidden ? open() : shut(); });
+    if (close) close.addEventListener('click', shut);
+    panel.querySelectorAll('.sc-sortbar button').forEach(function (b) {
+      b.addEventListener('click', function () {
+        panel.setAttribute('data-sort', b.getAttribute('data-sort'));
+        panel.querySelectorAll('.sc-sortbar button').forEach(function (x) {
+          x.classList.toggle('is-active', x === b);
+        });
+        loadComments(panel, 1);
+      });
+    });
+    var form = panel.querySelector('.sc-form');
+    if (form) form.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      var input = form.querySelector('.sc-input');
+      var body = (input.value || '').trim();
+      if (!body) return;
+      var vid = form.getAttribute('data-vid');
+      var send = form.querySelector('.sc-send');
+      send.disabled = true;
+      fetch('/api/videos/' + vid + '/comments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: body, csrf_token: csrfTok() })
+      }).then(function (r) { return r.json(); })
+        .then(function (d) {
+          send.disabled = false;
+          if (!d.ok) { input.placeholder = d.error || 'Could not post — try again'; return; }
+          input.value = '';
+          loadComments(panel, 1);
+          if (d.comment_count != null) setCount(vid, d.comment_count);
+        })
+        .catch(function () {
+          send.disabled = false;
+          input.placeholder = 'Could not post — try again';
+        });
+    });
+  }
+
+  feed.querySelectorAll('.short-item').forEach(function (card) {
+    wireCard(card);
+    wireComments(card);
+    io.observe(card);
   });
 })();
 </script>
