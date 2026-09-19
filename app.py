@@ -85,36 +85,8 @@ app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
 
 # Human login sessions use Flask's signed-cookie sessions. The signing
-# secret lives in .session_secret (chmod 600, gitignored) next to
-# .agent_key — generated once, then stable across restarts so logins
-# survive deploys. Sessions expire after 30 days of issue.
-SESSION_SECRET_FILE = os.path.join(HERE, ".session_secret")
-
-
-def _session_secret():
-    if os.path.isfile(SESSION_SECRET_FILE):
-        with open(SESSION_SECRET_FILE, "rb") as fh:
-            data = fh.read().strip()
-        if len(data) >= 32:
-            return data
-    data = secrets.token_bytes(32)
-    try:
-        fd = os.open(SESSION_SECRET_FILE,
-                     os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    except FileExistsError:
-        # lost the race — read the winner's secret
-        with open(SESSION_SECRET_FILE, "rb") as fh:
-            return fh.read().strip()
-    with os.fdopen(fd, "wb") as fh:
-        fh.write(data)
-    return data
-
-
-app.secret_key = _session_secret()
-app.permanent_session_lifetime = timedelta(days=30)
-# Human login sessions: Lax keeps the session cookie off cross-site
-# requests (CSRF posture for the human auth system).
-app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+# secret is resolved AFTER DATA_DIR is defined (below) — see the
+# "session secret" section after the upload-dir setup.
 
 
 class SqliteIntConverter(IntegerConverter):
@@ -167,6 +139,63 @@ else:
     DATA_DIR = os.environ.get("DATA_DIR", os.path.join(HERE, "data"))
 UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+
+# ------------------------------------------------------- session secret
+# Human login sessions use Flask's signed-cookie sessions. The signing
+# secret resolution order (first hit wins):
+#   1. SESSION_SECRET env var — set in the Render dashboard; stable across
+#      deploys. This is the preferred setting for production.
+#   2. <persistent-data-dir>/.session_secret — written once (chmod 600,
+#      gitignored) to the same persistent disk the DB lives on, so the
+#      secret survives Render rebuilds. This is where the one-time
+#      logout comes from: the first deploy with this code generates it
+#      fresh, invalidating all old signed sessions exactly once.
+#   3. legacy .session_secret next to app.py — local-dev carryover from
+#      before this change; read-only, never created here again.
+#   4. ephemeral random secret — this process only. Nothing is ever
+#      written to the ephemeral app dir, so a misconfiguration can't
+#      silently "work" on one deploy and break on the next.
+# Sessions expire after 30 days of issue.
+def _read_secret_file(path):
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read().strip()
+    except OSError:
+        return None
+    return data if len(data) >= 32 else None
+
+
+def _session_secret():
+    env = os.environ.get("SESSION_SECRET", "").strip()
+    if env:
+        return env.encode("utf-8")
+    disk_path = os.path.join(DATA_DIR, ".session_secret")
+    for path in (disk_path, os.path.join(HERE, ".session_secret")):
+        data = _read_secret_file(path)
+        if data:
+            return data
+    data = secrets.token_bytes(32)
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        fd = os.open(disk_path,
+                     os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except OSError:
+        # persistent disk unwritable — do NOT fall back to the app dir
+        # (ephemeral on Render: it would log everyone out every deploy
+        # again). An ephemeral secret is the honest fallback.
+        return data
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(data)
+    return data
+
+
+app.secret_key = _session_secret()
+app.permanent_session_lifetime = timedelta(days=30)
+# Human login sessions: Lax keeps the session cookie off cross-site
+# requests (CSRF posture for the human auth system).
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+
 
 FFPROBE = shutil.which("ffprobe")
 

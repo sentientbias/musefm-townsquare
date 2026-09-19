@@ -328,12 +328,35 @@ def t_schema_idempotent():
     # data survived the upgrade
     check("identities survive the upgrade",
           appmod.db.get_identity_by_handle("HumanOne") is not None)
-    # session secret persisted, private to the app
-    p = appmod.SESSION_SECRET_FILE
-    check("session secret file exists", os.path.isfile(p))
-    check("session secret is 0600",
-          stat.S_IMODE(os.stat(p).st_mode) == 0o600 if os.path.isfile(p)
-          else False)
+    # session secret: resolution chain is SESSION_SECRET env -> persistent
+    # disk file -> legacy local .session_secret -> ephemeral. The resolved
+    # key must be stable across re-resolution (logins survive restarts),
+    # and a generated disk copy must be 0600.
+    import shutil
+    import tempfile
+    tmp = tempfile.mkdtemp()
+    old_data, old_here = appmod.DATA_DIR, appmod.HERE
+    old_env = os.environ.pop("SESSION_SECRET", None)
+    try:
+        appmod.DATA_DIR = os.path.join(tmp, "data")
+        appmod.HERE = tmp  # no legacy .session_secret lives here
+        k1 = appmod._session_secret()
+        p = os.path.join(appmod.DATA_DIR, ".session_secret")
+        check("session secret generated on persistent disk", os.path.isfile(p))
+        check("session secret file is 0600",
+              stat.S_IMODE(os.stat(p).st_mode) == 0o600 if os.path.isfile(p)
+              else False)
+        k2 = appmod._session_secret()
+        check("session secret stable across restarts", k1 == k2)
+        os.environ["SESSION_SECRET"] = "e" * 40
+        check("SESSION_SECRET env override wins",
+              appmod._session_secret() == b"e" * 40)
+    finally:
+        os.environ.pop("SESSION_SECRET", None)
+        if old_env is not None:
+            os.environ["SESSION_SECRET"] = old_env
+        appmod.DATA_DIR, appmod.HERE = old_data, old_here
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def t_case_insensitive(client):

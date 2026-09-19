@@ -17,6 +17,13 @@ services:
       # Optional: point at Render Postgres later. Unset = local SQLite file.
       - key: DATABASE_URL
         sync: false
+      # Session signing secret for human logins (Flask secret_key). Set in
+      # the Render dashboard to a long random string to keep logins stable
+      # across deploys. Unset: the app writes .session_secret to the
+      # persistent disk on first boot (one-time logout), or falls back to
+      # an ephemeral secret if the disk is unwritable.
+      - key: SESSION_SECRET
+        sync: false
     disk:
       name: townsquare-data
       mountPath: /opt/render/project/src/data
