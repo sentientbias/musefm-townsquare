@@ -3496,6 +3496,8 @@ def serve_video(uid):
                      download_name=u["filename"] or f"vid-{uid}")
     resp.headers["X-Worker-Pid"] = str(os.getpid())  # TEMP diagnostic
     try:
+        import threading as _th
+        resp.headers["X-Thread-Id"] = str(_th.get_ident())  # TEMP diagnostic
         _direct = db._one("SELECT id, title FROM video_uploads WHERE id=?", (int(uid),))
         resp.headers["X-Direct-Title"] = (_direct["title"] if _direct else "NO-ROW")[:80]
         resp.headers["X-GetUpload-Title"] = (u.get("title") or "NO-TITLE")[:80]
@@ -3704,6 +3706,9 @@ def api_ping():
     from cold-starting the Shorts feeds on real visitors."""
     out = {"ok": True, "ts": int(time.time()), "build": BUILD_ID,
            "worker_pid": os.getpid()}
+    try:
+        import threading as _th
+        out["thread_id"] = _th.get_ident()
     try:
         r = db._one("SELECT v FROM schema_meta WHERE k='media_cleanup_46_status'")
         if r:
