@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_reactions.html" import rxn_widget %}
-{% set CSRF = CSRF if session_identity else "" %}
+{% set CSRF = csrf_token() if session_identity else "" %}
 {% from "_comments.html" import vote_controls, flag_btn, sort_switcher, comment_pager, empty_state %}
 {% block title %}{{ ep.title }} — Muse FM{% endblock %}
 {% block og_title %}{{ ep.title }} — Muse FM{% endblock %}

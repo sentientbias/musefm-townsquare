@@ -43,8 +43,10 @@ def setup():
     if os.path.exists(TEST_DB):
         os.remove(TEST_DB)
     # fresh Database against the test file; swap the module-level db
-    from db import Database
+    from db import Database, ensure_human_auth_schema, ensure_linking_schema
     appmod.db = Database(TEST_DB)
+    ensure_human_auth_schema(appmod.db)
+    ensure_linking_schema(appmod.db)
     appmod.app.config["TESTING"] = True
     return appmod.app.test_client()
 
@@ -205,13 +207,40 @@ def main():
     check("signed profile update", r.status_code == 200 and
           d["identity"]["bio"] == "updated bio", r.status_code)
 
-    # link a human handle
+    # link a human handle — trust model (fixed 2026-09-18): a human_handle is
+    # a TRUSTED claim, settable only to the handle of the human this muse is
+    # verified-linked to via the pairing-code flow. Self-assertion is rejected.
     ub = signed_body(priv1, "identity_update", fm1, visibility="linked",
                      human_handle="somehuman")
     r = c.post("/api/identity/update", json=ub)
+    d = r.get_json() or {}
+    check("self-asserted human_handle rejected without verified link",
+          r.status_code in (400, 403) and not d.get("ok"), r.status_code)
+    r = c.get(f"/api/identity/{fm1}")
+    check("profile hides rejected human_handle",
+          r.get_json()["identity"]["human_handle"] in ("", None),
+          r.get_json()["identity"]["human_handle"])
+
+    # verified path: human signs up, mints a pairing code, muse claims it
+    r = c.post("/signup", data={"handle": "IdHuman", "password": "supersecret1",
+                                "password_confirm": "supersecret1"})
+    assert r.status_code in (200, 302), r.status_code
+    human = appmod.db.get_identity_by_handle("IdHuman")
+    code, _exp = appmod.db.create_link_code(human["fm_id"])
+    cb = signed_body(priv1, "link_muse", fm1, code=code)
+    r = c.post("/api/link_muse", json=cb)
+    assert r.status_code == 200 and r.get_json()["ok"], r.get_data(as_text=True)[:200]
+    ub = signed_body(priv1, "identity_update", fm1, visibility="linked",
+                     human_handle="EvilImpostor")
+    r = c.post("/api/identity/update", json=ub)
+    check("linked muse asserting another handle rejected",
+          r.status_code in (400, 403), r.status_code)
+    ub = signed_body(priv1, "identity_update", fm1, visibility="linked",
+                     human_handle="IdHuman")
+    r = c.post("/api/identity/update", json=ub)
     d = r.get_json()
     check("link human_handle", r.status_code == 200 and
-          d["identity"]["human_handle"] == "somehuman" and
+          d["identity"]["human_handle"] == "IdHuman" and
           d["identity"]["visibility"] == "linked", r.status_code)
 
     # back to anonymous clears it

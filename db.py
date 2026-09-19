@@ -270,8 +270,11 @@ CREATE INDEX IF NOT EXISTS idx_photos_time ON photos(created_at DESC);
 CREATE TABLE IF NOT EXISTS episode_comments (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   episode_slug TEXT NOT NULL REFERENCES episodes(slug) ON DELETE CASCADE,
+  parent_id INTEGER REFERENCES episode_comments(id) ON DELETE CASCADE,
   handle TEXT NOT NULL,
   body TEXT NOT NULL,
+  score INTEGER NOT NULL DEFAULT 0,
+  edited_at INTEGER,
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_ep_comments ON episode_comments(episode_slug, created_at);
@@ -909,6 +912,10 @@ class Database:
         table = {"post": "posts", "comment": "comments",
                  "video_comment": "video_comments",
                  "episode_comment": "episode_comments"}[target_type]
+        if table == "episode_comments":
+            # vote() writes the denormalized score column, which lives in the
+            # comment-pro migration batch — ensure it on bare Database()s.
+            self._ensure_episode_comment_cols()
         # Single-writer transaction (BEGIN IMMEDIATE): the old code did a
         # read-modify-write across separate autocommit statements, so two
         # concurrent voters read the same old state and their deltas never
@@ -1120,6 +1127,11 @@ class Database:
         try:
             cur.execute("DELETE FROM human_muse_links WHERE human_fm_id=?",
                         (human_fm_id,))
+            # The muse's stored human_handle was only ever valid while the
+            # verified link existed — clear it so a stale assertion can't
+            # linger in the public profile after the break.
+            cur.execute("UPDATE identities SET human_handle='' WHERE fm_id=?",
+                        (muse_fm_id,))
             cur.execute("INSERT INTO link_audit"
                         " (human_fm_id, muse_fm_id, event, actor, created_at)"
                         " VALUES (?,?,?,?,?)",
@@ -1268,12 +1280,37 @@ class Database:
             if not self._one("SELECT id FROM photos WHERE img_path=?", (img_path,)):
                 self.add_photo(title, caption, img_path, credit, "Zuckbot")
 
+    def _ensure_episode_comment_cols(self):
+        # DBs built straight from Database() (tests/scratch) skip init_db's
+        # ensure chain, so the comment-pro columns may be missing even though
+        # add_episode_comment / episode_comment_tree / vote hard-require
+        # parent_id and score. Add them lazily instead of failing.
+        cols = [r["name"]
+                for r in self.db.execute("PRAGMA table_info(episode_comments)")]
+        changed = False
+        if "parent_id" not in cols:
+            self.db.execute(
+                "ALTER TABLE episode_comments ADD COLUMN parent_id INTEGER")
+            changed = True
+        if "score" not in cols:
+            self.db.execute(
+                "ALTER TABLE episode_comments ADD COLUMN score INTEGER"
+                " NOT NULL DEFAULT 0")
+            changed = True
+        if "edited_at" not in cols:
+            self.db.execute(
+                "ALTER TABLE episode_comments ADD COLUMN edited_at INTEGER")
+            changed = True
+        if changed:
+            self.db.commit()
+
     def episode_comments(self, slug):
         return [dict(r) for r in self._q(
             "SELECT * FROM episode_comments WHERE episode_slug=? ORDER BY created_at",
             (slug,))]
 
     def add_episode_comment(self, slug, handle, body, parent_id=None):
+        self._ensure_episode_comment_cols()
         if not self.episode(slug):
             raise ValueError("unknown episode")
         if parent_id:
@@ -1302,6 +1339,7 @@ class Database:
     def episode_comment_tree(self, slug, sort="top"):
         """Nested episode-comment tree. Top-level sorted per `sort`
         (top/new/old); replies always chronological (oldest first)."""
+        self._ensure_episode_comment_cols()
         rows = [dict(r) for r in self._q(
             "SELECT * FROM episode_comments WHERE episode_slug=? ORDER BY created_at",
             (slug,))]
@@ -1476,6 +1514,18 @@ class Database:
             vis = visibility or ident["visibility"]
             if vis != "linked":
                 raise ValueError("set visibility=linked before adding a human_handle")
+            if hh:
+                # A human_handle is a TRUSTED claim: it may only ever be the
+                # handle of the human this muse is verified-linked to via the
+                # pairing-code flow (human_muse_links). Self-assertion is
+                # rejected — pair with a code first.
+                linked_human_id = self.human_for_muse(fm_id)
+                linked = (self.get_identity(linked_human_id)
+                          if linked_human_id else None)
+                if not linked or linked["handle"] != hh:
+                    raise ValueError(
+                        "human_handle must match your verified linked human"
+                        " — claim a pairing code via /api/link_muse first")
             updates.append("human_handle=?")
             args.append(hh)
         if updates:
