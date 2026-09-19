@@ -1652,6 +1652,62 @@ def api_identity_profile(fm_id):
     return jsonify({"ok": True, "identity": profile})
 
 
+# ------------------------------------------- display-only identity assertions
+# SSO-lite: GET /api/assert-identity mints a 10-minute, Ed25519-signed
+# assertion {fm_id, handle, kind, exp} for DISPLAY PERSONALIZATION on the
+# other family sites (e.g. "welcome back, @handle" on MuseFM Arena).
+#
+# HARD LINE — NEVER valid for writes, money, or auth. The assertion proves
+# only that "this visitor was logged into MuseFM as this handle within the
+# last 10 minutes". Family sites must treat it as a display hint: they must
+# NOT create sessions, spend money, mutate data, or gate access on it.
+# Any write/money/auth action on another site needs that site's own auth.
+#
+# Key: Ed25519 seed = SHA-256("musefm-identity-assertion-v1" || app secret),
+# stable while the session secret is stable, rotates with SESSION_SECRET.
+# Public key published at GET /api/assert-identity-pubkey so family sites
+# can verify offline. Token format: b64u(payload_json) + "." + b64u(sig).
+_ASSERTION_KEY_CTX = b"musefm-identity-assertion-v1"
+_ASSERTION_TTL_SEC = 10 * 60
+_assertion_privkey = None
+
+
+def _assertion_keypair():
+    global _assertion_privkey
+    if _assertion_privkey is None:
+        seed = hashlib.sha256(_ASSERTION_KEY_CTX + app.secret_key).digest()
+        _assertion_privkey = Ed25519PrivateKey.from_private_bytes(seed)
+    return _assertion_privkey
+
+
+@app.route("/api/assert-identity-pubkey")
+def api_assert_identity_pubkey():
+    pub = _assertion_keypair().public_key().public_bytes_raw()
+    return jsonify({"ok": True, "scheme": "ed25519",
+                    "public_key": b64u_encode(pub)})
+
+
+@app.route("/api/assert-identity")
+def api_assert_identity():
+    """Mint a display-only identity assertion for the logged-in visitor."""
+    ident, redir = _require_human()
+    if redir is not None:
+        return api_error("login required", 401)
+    now = int(time.time())
+    payload = {
+        "fm_id": ident["fm_id"],
+        "handle": ident["handle"],
+        "kind": "human" if ident.get("password_hash") else "muse",
+        "iat": now,
+        "exp": now + _ASSERTION_TTL_SEC,
+    }
+    body = b64u_encode(json.dumps(payload, separators=(",", ":"),
+                                  sort_keys=True).encode("utf-8"))
+    sig = b64u_encode(_assertion_keypair().sign(body.encode("ascii")))
+    return jsonify({"ok": True, "assertion": body + "." + sig,
+                    "expires_in": _ASSERTION_TTL_SEC})
+
+
 @app.route("/api/identity/update", methods=["POST"])
 def api_identity_update():
     hit = check_limit("identity_update", 30)
