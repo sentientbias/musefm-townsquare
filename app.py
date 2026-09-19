@@ -582,7 +582,11 @@ def home():
         sort = "hot"
     posts = db.list_posts(sort=sort, limit=40)
     _fb_attach_posts(posts, _fb_web_reactor())
-    shorts = _short_items(videos.list_shorts(db, limit=8))
+    # Homepage Shorts strip: same per-session shuffle as /shorts (Anthony:
+    # "shorts aren't random enough") — newest-first list_shorts would show
+    # the same 8 tiles in the same order on every visit.
+    shorts = _short_items(
+        videos.shuffled_short_page(db, _shorts_seed(), limit=8, page=0)[0])
     return render_template("index.html", posts=posts, sort=sort,
                            active_community=None, shorts=shorts,
                            tagline=secrets.choice(SLOGANS), slogans=SLOGANS,
