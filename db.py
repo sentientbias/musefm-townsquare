@@ -598,7 +598,17 @@ class Database:
         conn = sqlite3.connect(self.path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA busy_timeout = 5000")
+        # WAL: readers never block writers and writers never block
+        # readers — the concurrent-write 500s ("database is locked") came
+        # from rollback-journal mode under gunicorn's 2 workers. The mode
+        # is stored in the DB header, so one boot flips it for every
+        # connection afterwards. Extra -wal/-shm files live next to the
+        # DB on the persistent disk, which is gitignored.
+        conn.execute("PRAGMA journal_mode = WAL")
+        # busy_timeout IS the retry: a writer that hits a lock sleeps and
+        # retries inside SQLite instead of surfacing OperationalError.
+        # 10 s gives contended writes room on a loaded box.
+        conn.execute("PRAGMA busy_timeout = 10000")
         return conn
 
     @property
