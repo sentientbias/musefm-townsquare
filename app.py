@@ -175,20 +175,32 @@ def _run_startup_media_cleanup(_db, data_dir):
             #    its title. The clip itself is a legit 10s dancing short,
             #    so keep it and give it a real title worthy of the feed.
             #    Raw SQL on purpose: no videos-module schema ensure at boot.
-            r = _db._one("SELECT title FROM video_uploads WHERE id=46")
-            cur_title = r["title"] if r else None
-            if cur_title and "2babe7f6" in cur_title:
-                _db._exec("UPDATE video_uploads SET title=? WHERE id=46",
-                          (FIXED_TITLE_46,))
-                r2 = _db._one("SELECT title FROM video_uploads WHERE id=46")
-                now_title = r2["title"] if r2 else None
-                if now_title == FIXED_TITLE_46:
-                    print("[cleanup] video 46 retitled -> %r" % FIXED_TITLE_46)
+            status = "skip:unknown"
+            try:
+                r = _db._one("SELECT title FROM video_uploads WHERE id=46")
+                cur_title = r["title"] if r else None
+                if cur_title and "2babe7f6" in cur_title:
+                    _db._exec("UPDATE video_uploads SET title=? WHERE id=46",
+                              (FIXED_TITLE_46,))
+                    r2 = _db._one("SELECT title FROM video_uploads WHERE id=46")
+                    now_title = r2["title"] if r2 else None
+                    if now_title == FIXED_TITLE_46:
+                        status = "ok:retitled"
+                        print("[cleanup] video 46 retitled -> %r" % FIXED_TITLE_46)
+                    else:
+                        status = "warn:not_persisted:%r" % (now_title,)
+                        print("[cleanup] WARNING: video 46 retitle did NOT persist"
+                              " (still %r)" % (now_title,))
+                elif cur_title:
+                    status = "skip:already_clean:%r" % (cur_title,)
+                    print("[cleanup] video 46 title already clean: %r" % (cur_title,))
                 else:
-                    print("[cleanup] WARNING: video 46 retitle did NOT persist"
-                          " (still %r)" % (now_title,))
-            elif cur_title:
-                print("[cleanup] video 46 title already clean: %r" % (cur_title,))
+                    status = "skip:no_row"
+            except Exception:
+                status = "err:" + traceback.format_exc(limit=3).replace("\n", " | ")[:300]
+                print("[cleanup] video 46 block failed:\n" + traceback.format_exc())
+            _db._exec("INSERT OR REPLACE INTO schema_meta (k, v) VALUES (?, ?)",
+                      ("media_cleanup_46_status", "%s @%d" % (status, int(time.time()))))
         except Exception:
             traceback.print_exc()
     except Exception:
@@ -3682,7 +3694,14 @@ def api_ping():
     """Featherweight keep-warm/health endpoint: no DB work, ~instant. Point
     an uptime monitor (or the 5-min site reprobe) at this to keep Render
     from cold-starting the Shorts feeds on real visitors."""
-    return jsonify({"ok": True, "ts": int(time.time()), "build": BUILD_ID})
+    out = {"ok": True, "ts": int(time.time()), "build": BUILD_ID}
+    try:
+        r = db._one("SELECT v FROM schema_meta WHERE k='media_cleanup_46_status'")
+        if r:
+            out["cleanup_46"] = r["v"]
+    except Exception:
+        pass
+    return jsonify(out)
 
 
 def _feed_anchor_video(param, require_series=None):

@@ -188,6 +188,9 @@ def test_startup_cleanup():
     v = videos.get_video_upload(db, 46)
     check("retitle retried on later boot until clean",
           v and v["title"] == "Krusty Krab Dance Break", str(v and v["title"]))
+    st = db._one("SELECT v FROM schema_meta WHERE k='media_cleanup_46_status'")
+    check("cleanup status recorded", st and st["v"].startswith("ok:retitled"),
+          str(st and st["v"]))
 
     # negative: real audio at id 9 must NOT be deleted
     db2 = Database(TEST_DB + ".clean2")
