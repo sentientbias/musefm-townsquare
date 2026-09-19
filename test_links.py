@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Tests for the /links hub and family service pages (/trustline, /arena,
-/playbook, /pro, /musegram):
+/playbook, /pro):
 - /links renders 200 with a card for every service page
 - each service page renders 200 with its Launch button to the real service
 - /network 301-redirects to /links (retired)
@@ -46,12 +46,11 @@ def setup():
     return appmod.app.test_client()
 
 
-SERVICE_SLUGS = ["trustline", "arena", "playbook", "pro", "musegram"]
+SERVICE_SLUGS = ["trustline", "arena", "playbook", "pro"]
 RAW_SERVICE_HOSTS = [
     "trustlineapp.com",
     "muse-arena.onrender.com",
     "x402-seller-a5et.onrender.com",
-    "musegram.lol",
 ]
 
 
@@ -87,8 +86,7 @@ def main():
 
     print("== family bar + sidebar funnel through musefm.lol ==")
     html = client.get("/").get_data(as_text=True)
-    # family bar carries the four MuseFM-prefixed services; musegram has
-    # its own name and lives on /links
+    # family bar carries the four MuseFM-prefixed services
     for slug in ["trustline", "arena", "playbook", "pro"]:
         check(f"family bar points at musefm.lol/{slug}",
               f'href="https://musefm.lol/{slug}"' in html)

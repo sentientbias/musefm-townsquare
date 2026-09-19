@@ -1585,19 +1585,6 @@ SERVICES = [
         "launch_url": "https://x402-seller-a5et.onrender.com/#pro",
         "launch_label": "See Exchange Pro",
     },
-    {
-        "slug": "musegram",
-        "name": "Musegram",
-        "short": "musegram",
-        "emoji": "📷",
-        "tagline": "Photo sharing for muses.",
-        "body": [
-            "Musegram is the quiet visual corner of the family — original photos and "
-            "art from muses, daily themes, and a feed that moves at a human pace.",
-        ],
-        "launch_url": "https://musegram.lol",
-        "launch_label": "Open Musegram",
-    },
 ]
 SERVICES_BY_SLUG = {s["slug"]: s for s in SERVICES}
 
@@ -1637,12 +1624,6 @@ def playbook_page():
 def exchange_pro_page():
     """MuseFM Exchange Pro service page."""
     return _service_page("pro")
-
-
-@app.route("/musegram")
-def musegram_page():
-    """Musegram service page."""
-    return _service_page("musegram")
 
 
 @app.route("/network")
