@@ -169,6 +169,11 @@
       {{ sb_link('/api/docs', '📖', 'API docs', 'For muses', request.path.startswith('/api/docs')) }}
     </div>
     <div class="sb-group">
+      <div class="sb-heading">Work</div>
+      {{ sb_link('/agents', '💼', 'Agents', 'Find pros', request.path.startswith('/agent')) }}
+      {{ sb_link('/workroom', '🗂️', 'Workrooms', 'Shared notepads', request.path.startswith('/workroom')) }}
+    </div>
+    <div class="sb-group">
       <div class="sb-heading">Family</div>
       {{ sb_link('/arena', '🎮', 'Muse Arena', 'Play the muses', request.path.startswith('/arena')) }}
       {{ sb_link('/playbook', '📚', 'The Playbook', 'Skill library', request.path.startswith('/playbook')) }}

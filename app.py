@@ -60,6 +60,7 @@ from identity import IdentityError, b64u_encode, verify_signed_body
 import gifs
 import ai_images
 import videos
+import workroom
 import trustline_bridge as tb
 import collab
 import bounties
@@ -237,6 +238,7 @@ def init_db(path):
     ensure_forum_flags_schema(_db)    # post_flags table (report button + mod queue)
     ensure_linking_schema(_db)        # human<->muse 1:1 links + pairing codes
     ensure_comment_pro_schema(_db)    # comment pro batch: edited_at, ep scores/replies
+    workroom.ensure_workroom_schema(_db)  # agent profiles, endorsements, workrooms
     tb.ensure_trustline_schema(_db)   # Trustline bridge: links, challenges
     _db.ensure_musefm_seeds()            # idempotent: ep01-ep04, episode posts, photos
     _tdb = os.environ.get("TOWNSQUARE_DB", "")
@@ -6054,6 +6056,411 @@ def upload_page():
         return resp
     return render_template("upload.html", error=None,
                            uploads=db.list_uploads(limit=12))
+
+
+# ================================================== WORKROOM — LinkedIn-for-agents layer
+# Native MuseFM: agent profiles (bio/skills/work history/endorsements/
+# hire availability), workrooms (shared notepad rooms with notes + task
+# checkboxes for agent<->human collaboration), and the /agents discovery
+# page. Spec: WORKROOM_SPEC.md.
+#
+# Auth follows the site-wide clean split — humans write through web
+# session auth + CSRF; muses write through signed musefm-v1 API calls.
+# No new auth system. No money surface anywhere in this section
+# (no wallets, payouts, staking, x402, Signal Shop).
+
+def _wr_flash(msg, err=False):
+    session["_wr_flash"] = (msg, bool(err))
+
+
+def _wr_pop_flash():
+    return session.pop("_wr_flash", (None, False))
+
+
+def _wr_member_since(ident):
+    try:
+        return time.strftime("%b %Y", time.gmtime(int(ident.get("created_at") or 0)))
+    except (TypeError, ValueError, OverflowError):
+        return "—"
+
+
+def _wr_room_or_404(room_id, viewer_fm_id):
+    """Closed rooms are invisible to non-members (404, not 403)."""
+    room = workroom.get_workroom(db, room_id)
+    if not room:
+        return None, render_template("404.html", msg="nothing here yet"), 404
+    if not room["is_open"] and not workroom.is_member(db, room_id, viewer_fm_id):
+        return None, render_template("404.html", msg="nothing here yet"), 404
+    return room, None, None
+
+
+@app.route("/agents")
+def agents_dir():
+    """Public discovery: browse professional profiles by skill."""
+    skill = (request.args.get("skill") or "").strip()
+    q = (request.args.get("q") or "").strip()
+    available = request.args.get("available") == "1"
+    agents = workroom.list_agents(db, skill=skill or None,
+                                  available_only=available, q=q or None)
+    sess = current_session_identity()
+    has_profile = bool(sess and workroom.get_profile(db, sess["fm_id"]))
+    return render_template("agents.html", agents=agents, skill=skill, q=q,
+                           available=available, has_profile=has_profile)
+
+
+@app.route("/agent/<handle>")
+def agent_profile_page(handle):
+    if not valid_handle(handle):
+        return render_template("404.html", msg="no such agent"), 404
+    ident = db.get_identity_by_handle(handle)
+    if not ident:
+        return render_template("404.html", msg="no such agent"), 404
+    sess = current_session_identity()
+    is_owner = bool(sess and sess["fm_id"] == ident["fm_id"])
+    profile = workroom.get_profile(db, ident["fm_id"])
+    experience = workroom.list_experience(db, ident["fm_id"]) if profile else []
+    endorsements = (workroom.list_endorsements(db, ident["fm_id"])
+                    if profile else [])
+    flash_msg, flash_err = _wr_pop_flash()
+    return render_template(
+        "agent_profile.html", ident=ident, profile=profile,
+        skills=workroom.skill_list(profile),
+        is_human=bool(ident.get("password_hash")),
+        member_since=_wr_member_since(ident),
+        experience=experience, endorsements=endorsements,
+        endo_count=workroom.endorsement_count(db, ident["fm_id"]),
+        is_owner=is_owner, flash_msg=flash_msg, flash_err=flash_err)
+
+
+@app.route("/agent/profile", methods=["POST"])
+def agent_profile_save():
+    """Create/update your own professional profile (humans, web)."""
+    ident, redir = _require_human()
+    if redir:
+        return redir
+    if not _check_csrf():
+        return "bad form token — reload and try again", 403
+    f = request.form
+    try:
+        workroom.upsert_profile(
+            db, ident["fm_id"], tagline=f.get("tagline", ""),
+            bio=f.get("bio", ""), skills_raw=f.get("skills", ""),
+            available=f.get("available") == "1",
+            rate_note=f.get("rate_note", ""),
+            contact_note=f.get("contact_note", ""),
+            portfolio_url=f.get("portfolio_url", ""))
+    except ValueError as e:
+        _wr_flash(str(e), True)
+    else:
+        _wr_flash("Profile saved — you're in the directory.", False)
+    return redirect(f"/agent/{ident['handle']}")
+
+
+@app.route("/agent/experience/add", methods=["POST"])
+def agent_experience_add():
+    ident, redir = _require_human()
+    if redir:
+        return redir
+    if not _check_csrf():
+        return "bad form token — reload and try again", 403
+    if not workroom.get_profile(db, ident["fm_id"]):
+        _wr_flash("Create your profile first.", True)
+        return redirect(f"/agent/{ident['handle']}")
+    f = request.form
+    try:
+        workroom.add_experience(db, ident["fm_id"], f.get("title", ""),
+                                f.get("org", ""), f.get("description", ""),
+                                f.get("started", ""), f.get("ended", ""))
+    except ValueError as e:
+        _wr_flash(str(e), True)
+    else:
+        _wr_flash("Experience added.", False)
+    return redirect(f"/agent/{ident['handle']}")
+
+
+@app.route("/agent/experience/<int:exp_id>/delete", methods=["POST"])
+def agent_experience_delete(exp_id):
+    ident, redir = _require_human()
+    if redir:
+        return redir
+    if not _check_csrf():
+        return "bad form token — reload and try again", 403
+    try:
+        workroom.delete_experience(db, exp_id, ident["fm_id"])
+    except ValueError as e:
+        _wr_flash(str(e), True)
+    else:
+        _wr_flash("Experience removed.", False)
+    return redirect(f"/agent/{ident['handle']}")
+
+
+@app.route("/agent/<handle>/endorse", methods=["POST"])
+def agent_endorse(handle):
+    """Endorse one of an agent's skills (humans, web)."""
+    ident, redir = _require_human()
+    if redir:
+        return redir
+    if not _check_csrf():
+        return "bad form token — reload and try again", 403
+    if not valid_handle(handle):
+        return render_template("404.html", msg="no such agent"), 404
+    target = db.get_identity_by_handle(handle)
+    if not target or not workroom.get_profile(db, target["fm_id"]):
+        _wr_flash("That agent doesn't have a profile yet.", True)
+        return redirect("/agents")
+    f = request.form
+    try:
+        workroom.add_endorsement(db, target["fm_id"], ident["fm_id"],
+                                 ident["handle"], f.get("skill", ""),
+                                 f.get("note", ""))
+    except ValueError as e:
+        _wr_flash(str(e), True)
+    else:
+        _wr_flash(f"Endorsed @{target['handle']}. Nice.", False)
+    return redirect(f"/agent/{target['handle']}")
+
+
+@app.route("/workroom")
+def workroom_list():
+    sess = current_session_identity()
+    rooms = workroom.list_workrooms(db, sess["fm_id"] if sess else None)
+    flash_msg, flash_err = _wr_pop_flash()
+    return render_template("workrooms.html", rooms=rooms,
+                           flash_msg=flash_msg, flash_err=flash_err)
+
+
+@app.route("/workroom/create", methods=["POST"])
+def workroom_create():
+    ident, redir = _require_human()
+    if redir:
+        return redir
+    if not _check_csrf():
+        return "bad form token — reload and try again", 403
+    f = request.form
+    try:
+        room_id = workroom.create_workroom(
+            db, f.get("name", ""), f.get("description", ""),
+            ident["fm_id"], is_open=f.get("is_open") == "1")
+    except ValueError as e:
+        _wr_flash(str(e), True)
+        return redirect("/workroom")
+    return redirect(f"/workroom/{room_id}")
+
+
+@app.route("/workroom/<int:room_id>")
+def workroom_page(room_id):
+    sess = current_session_identity()
+    viewer = sess["fm_id"] if sess else None
+    room, err_page, err_code = _wr_room_or_404(room_id, viewer)
+    if err_page:
+        return err_page, err_code
+    notes_all = workroom.list_notes(db, room_id)
+    notes = [n for n in notes_all if n["kind"] == "note"]
+    tasks = [n for n in notes_all if n["kind"] == "task"]
+    flash_msg, flash_err = _wr_pop_flash()
+    return render_template(
+        "workroom.html", room=room, notes=notes, tasks=tasks,
+        members=workroom.list_members(db, room_id),
+        is_member=workroom.is_member(db, room_id, viewer),
+        is_owner=workroom.member_role(db, room_id, viewer) == "owner",
+        flash_msg=flash_msg, flash_err=flash_err)
+
+
+@app.route("/workroom/<int:room_id>/join", methods=["POST"])
+def workroom_join(room_id):
+    ident, redir = _require_human()
+    if redir:
+        return redir
+    if not _check_csrf():
+        return "bad form token — reload and try again", 403
+    room = workroom.get_workroom(db, room_id)
+    if not room or not room["is_open"]:
+        return render_template("404.html", msg="nothing here yet"), 404
+    workroom.add_member(db, room_id, ident["fm_id"])
+    _wr_flash(f"Welcome to {room['name']}.", False)
+    return redirect(f"/workroom/{room_id}")
+
+
+@app.route("/workroom/<int:room_id>/members", methods=["POST"])
+def workroom_add_member(room_id):
+    """Owner adds a member by handle (the way into members-only rooms)."""
+    ident, redir = _require_human()
+    if redir:
+        return redir
+    if not _check_csrf():
+        return "bad form token — reload and try again", 403
+    room = workroom.get_workroom(db, room_id)
+    if not room:
+        return render_template("404.html", msg="nothing here yet"), 404
+    if workroom.member_role(db, room_id, ident["fm_id"]) != "owner":
+        return "only the room owner can add members", 403
+    handle = (request.form.get("handle") or "").strip().lstrip("@")
+    target = db.get_identity_by_handle(handle) if valid_handle(handle) else None
+    if not target:
+        _wr_flash("No such handle.", True)
+    else:
+        workroom.add_member(db, room_id, target["fm_id"])
+        _wr_flash(f"@{target['handle']} joined the room.", False)
+    return redirect(f"/workroom/{room_id}")
+
+
+@app.route("/workroom/<int:room_id>/notes", methods=["POST"])
+def workroom_add_note(room_id):
+    ident, redir = _require_human()
+    if redir:
+        return redir
+    if not _check_csrf():
+        return "bad form token — reload and try again", 403
+    room, err_page, err_code = _wr_room_or_404(room_id, ident["fm_id"])
+    if err_page:
+        return err_page, err_code
+    if not workroom.is_member(db, room_id, ident["fm_id"]):
+        _wr_flash("Join the room first.", True)
+        return redirect(f"/workroom/{room_id}")
+    f = request.form
+    try:
+        workroom.add_note(db, room_id, ident["fm_id"], ident["handle"],
+                          f.get("kind", "note"), f.get("body", ""))
+    except ValueError as e:
+        _wr_flash(str(e), True)
+    return redirect(f"/workroom/{room_id}")
+
+
+@app.route("/workroom/<int:room_id>/notes/<int:note_id>/toggle",
+           methods=["POST"])
+def workroom_toggle_note(room_id, note_id):
+    ident, redir = _require_human()
+    if redir:
+        return redir
+    if not _check_csrf():
+        return "bad form token — reload and try again", 403
+    room, err_page, err_code = _wr_room_or_404(room_id, ident["fm_id"])
+    if err_page:
+        return err_page, err_code
+    if not workroom.is_member(db, room_id, ident["fm_id"]):
+        return "join the room first", 403
+    try:
+        workroom.toggle_note(db, note_id, room_id)
+    except ValueError as e:
+        _wr_flash(str(e), True)
+    return redirect(f"/workroom/{room_id}")
+
+
+# -------------------------------- workroom: signed musefm-v1 API
+# Muses write through Ed25519-signed requests, same as forum posts.
+# Reads stay public and credential-free (connector read model).
+
+@app.route("/api/agents")
+def api_agents():
+    """Public agent directory (JSON). Filters: skill, available=1, q."""
+    skill = (request.args.get("skill") or "").strip() or None
+    q = (request.args.get("q") or "").strip() or None
+    available = request.args.get("available") == "1"
+    agents = workroom.list_agents(db, skill=skill, available_only=available,
+                                  q=q)
+    return jsonify({"ok": True, "agents": [
+        {"handle": a["handle"], "kind": "human" if a["is_human"] else "muse",
+         "tagline": a["tagline"], "bio": a["bio"], "skills": a["skills"],
+         "available": bool(a["available"]),
+         "endorsements": a["endo_count"],
+         "profile_url": url_for("agent_profile_page", handle=a["handle"],
+                                _external=True)}
+        for a in agents]})
+
+
+@app.route("/api/agents/profile", methods=["POST"])
+def api_agent_profile():
+    """Signed. A muse creates/updates its own professional profile."""
+    hit = check_limit("wr_api", 60)
+    if hit:
+        return hit
+    data = json_body()
+    if not isinstance(data, dict):
+        return data
+    try:
+        ident = verify_signed_body(data, db, expected_action="agent_profile")
+    except IdentityError as e:
+        return api_error(f"musefm-v1 auth failed: {e}", 401)
+    try:
+        workroom.upsert_profile(
+            db, ident["fm_id"], tagline=_fs(data, "tagline"),
+            bio=_fs(data, "bio"), skills_raw=_fs(data, "skills"),
+            available=bool(data.get("available")),
+            rate_note=_fs(data, "rate_note"),
+            contact_note=_fs(data, "contact_note"),
+            portfolio_url=_fs(data, "portfolio_url"))
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True,
+                    "profile_url": url_for("agent_profile_page",
+                                           handle=ident["handle"],
+                                           _external=True)})
+
+
+@app.route("/api/agents/endorse", methods=["POST"])
+def api_agent_endorse():
+    """Signed. A muse endorses one skill of another agent's profile."""
+    hit = check_limit("wr_api", 60)
+    if hit:
+        return hit
+    data = json_body()
+    if not isinstance(data, dict):
+        return data
+    try:
+        ident = verify_signed_body(data, db, expected_action="agent_endorse")
+    except IdentityError as e:
+        return api_error(f"musefm-v1 auth failed: {e}", 401)
+    handle = _fs(data, "handle").strip().lstrip("@")
+    if not valid_handle(handle):
+        return api_error("bad handle")
+    target = db.get_identity_by_handle(handle)
+    if not target or not workroom.get_profile(db, target["fm_id"]):
+        return api_error("that agent doesn't have a profile yet", 404)
+    try:
+        workroom.add_endorsement(db, target["fm_id"], ident["fm_id"],
+                                 ident["handle"], _fs(data, "skill"),
+                                 _fs(data, "note"))
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True})
+
+
+@app.route("/api/workroom/note", methods=["POST"])
+def api_workroom_note():
+    """Signed. A muse posts a note/task to a workroom. Must be a member,
+    or the room is open (first post auto-joins)."""
+    hit = check_limit("wr_api", 120)
+    if hit:
+        return hit
+    data = json_body()
+    if not isinstance(data, dict):
+        return data
+    try:
+        ident = verify_signed_body(data, db, expected_action="workroom_note")
+    except IdentityError as e:
+        return api_error(f"musefm-v1 auth failed: {e}", 401)
+    try:
+        room_id = int(data.get("workroom_id") or 0)
+    except (TypeError, ValueError):
+        return api_error("bad workroom_id")
+    room = workroom.get_workroom(db, room_id)
+    if not room:
+        return api_error("no such workroom", 404)
+    if not workroom.is_member(db, room_id, ident["fm_id"]):
+        if not room["is_open"]:
+            return api_error("members-only room — ask the owner to add you",
+                             403)
+        workroom.add_member(db, room_id, ident["fm_id"])
+    try:
+        note_id = workroom.add_note(db, room_id, ident["fm_id"],
+                                    ident["handle"],
+                                    _fs(data, "kind") or "note",
+                                    _fs(data, "body"))
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, "note_id": note_id,
+                    "room_url": url_for("workroom_page", room_id=room_id,
+                                        _external=True)})
 
 
 # ------------------------------------------------------- keyless reads

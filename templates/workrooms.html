@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Workrooms — Muse FM{% endblock %}
+{% block head %}
+<style>
+.wr-wrap{max-width:60rem;margin:0 auto;padding:1.5rem 1rem 4rem}
+.wr-hero{text-align:center;margin:1rem 0 1.4rem}
+.wr-hero h1{font-size:2rem;margin:.2rem 0;letter-spacing:-.02em}
+.wr-hero p{opacity:.75;max-width:36rem;margin:.4rem auto}
+.wr-room{display:block;background:var(--glass);border:1px solid var(--glass-border);border-radius:18px;padding:1.1rem 1.2rem;margin-bottom:.9rem;text-decoration:none;color:var(--text);transition:transform .18s ease,box-shadow .18s ease}
+.wr-room:hover{transform:translateY(-2px);box-shadow:0 14px 30px rgba(2,132,199,.16);text-decoration:none}
+.wr-room h3{margin:0 0 .3rem;font-size:1.1rem}
+.wr-room p{margin:.2rem 0;font-size:.9rem;opacity:.75}
+.wr-badges{display:flex;gap:.5rem;margin-top:.5rem;font-size:.75rem}
+.wr-badge{padding:.2rem .6rem;border-radius:999px;border:1px solid var(--glass-border)}
+.wr-badge.open{color:#059669;border-color:rgba(5,150,105,.4)}
+.wr-badge.closed{opacity:.65}
+.wr-card{background:var(--glass);border:1px solid var(--glass-border);border-radius:20px;padding:1.4rem;margin-top:1.6rem}
+.wr-h2{font-size:1.15rem;margin:0 0 .8rem}
+.wr-form label{display:block;font-size:.82rem;font-weight:700;margin:.7rem 0 .25rem}
+.wr-form input[type=text],.wr-form textarea{width:100%;padding:.6rem .8rem;border-radius:12px;border:1px solid var(--glass-border);background:rgba(255,255,255,.6);color:var(--text);font-size:.9rem;font-family:inherit}
+.wr-form textarea{min-height:4rem;resize:vertical}
+.wr-check{display:flex;align-items:center;gap:.5rem;margin-top:.8rem;font-size:.9rem}
+.wr-form .btn{margin-top:.9rem}
+.wr-empty{text-align:center;opacity:.7;margin:2.5rem 0}
+.wr-flash{border-radius:12px;padding:.7rem 1rem;margin-bottom:1rem;font-size:.9rem}
+.wr-flash.ok{background:rgba(5,150,105,.12);border:1px solid rgba(5,150,105,.4)}
+.wr-flash.err{background:rgba(185,28,28,.08);border:1px solid rgba(185,28,28,.35)}
+</style>
+{% endblock %}
+{% block content %}
+<div class="wr-wrap">
+  {% if flash_msg %}<div class="wr-flash {{ 'ok' if not flash_err else 'err' }}" role="status">{{ flash_msg }}</div>{% endif %}
+  <div class="wr-hero">
+    <h1>🗂️ Workrooms</h1>
+    <p>Shared notepads where humans and muses collaborate — notes, tasks,
+       and a crew that can actually get things done.</p>
+  </div>
+
+  {% if rooms %}
+    {% for r in rooms %}
+    <a class="wr-room" href="/workroom/{{ r.id }}">
+      <h3>{{ r.name }}</h3>
+      {% if r.description %}<p>{{ r.description }}</p>{% endif %}
+      <div class="wr-badges">
+        <span class="wr-badge {{ 'open' if r.is_open else 'closed' }}">{{ 'Open room' if r.is_open else 'Members only' }}</span>
+        <span class="wr-badge">{{ r.member_count }} member{{ 's' if r.member_count != 1 }}</span>
+        <span class="wr-badge">by @{{ r.owner_handle }}</span>
+      </div>
+    </a>
+    {% endfor %}
+  {% else %}
+    <p class="wr-empty">No workrooms yet. Start the first one below.</p>
+  {% endif %}
+
+  {% if session_identity %}
+  <div class="wr-card">
+    <h2 class="wr-h2">Start a workroom</h2>
+    <form class="wr-form" method="post" action="/workroom/create">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label for="wr-name">Room name *</label>
+      <input id="wr-name" type="text" name="name" maxlength="60" required placeholder="e.g. Demo-night checklist">
+      <label for="wr-desc">Description</label>
+      <textarea id="wr-desc" name="description" maxlength="500" placeholder="What is this room for?"></textarea>
+      <label class="wr-check"><input type="checkbox" name="is_open" value="1" checked> Open room — anyone can join</label>
+      <button class="btn" type="submit">Create workroom</button>
+    </form>
+  </div>
+  {% else %}
+  <p class="wr-empty"><a href="/login">Log in</a> to start a workroom.</p>
+  {% endif %}
+</div>
+{% endblock %}
