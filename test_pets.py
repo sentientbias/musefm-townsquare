@@ -204,7 +204,7 @@ def main():
     print("== API ==")
     r = c.get("/api/pets/species")
     d = r.get_json()
-    check("species list", d["ok"] and len(d["species"]) == 13 and
+    check("species list", d["ok"] and len(d["species"]) == 19 and
           all(s["svg"].startswith("<svg") for s in d["species"]),
           len(d["species"]) if d.get("ok") else d)
     r = c.get("/api/pets/rules")
@@ -269,8 +269,8 @@ def main():
 
     print("== species expansion (wave 2) ==")
     new_keys = ["surfpup", "bubblepup", "sealpup", "jellypup"]
-    check("12 species registered",
-          len(pets.SPECIES_KEYS) == 13 and
+    check("19 species registered",
+          len(pets.SPECIES_KEYS) == 19 and
           all(k in pets.SPECIES_KEYS for k in new_keys), pets.SPECIES_KEYS)
     check("art registry matches species registry",
           set(pets._ART) == set(pets.SPECIES_KEYS))
@@ -290,8 +290,8 @@ def main():
     check("new eggs keep faces",
           all("z</text>" in pets.pet_svg(k, 0, "sleepy", 64)
               for k in new_keys))
-    check("rulebook lists 13 species",
-          len(pets.pet_rules()["species"]) == 13)
+    check("rulebook lists 19 species",
+          len(pets.pet_rules()["species"]) == 19)
 
     privD, fmD = reg(c, "DogLover")
     pet = pets.adopt(db, fmD, "DogLover", "surfpup", "Waverly")
@@ -314,26 +314,28 @@ def main():
 
     r = c.get("/api/pets/species")
     d = r.get_json()
-    check("species API has all 12",
-          d["ok"] and len(d["species"]) == 13 and
+    check("species API has all 19",
+          d["ok"] and len(d["species"]) == 19 and
           {s["key"] for s in d["species"]} == set(pets.SPECIES_KEYS))
     r = c.get("/api/rewards/rules")
-    check("reward rulebook tidepals has 12 species",
-          len(r.get_json()["rules"]["tidepals"]["species"]) == 13)
+    check("reward rulebook tidepals has 19 species",
+          len(r.get_json()["rules"]["tidepals"]["species"]) == 19)
 
     r = c.get("/pet")
     body = r.get_data(as_text=True)
-    check("pet page shows 12 gallery cards", body.count("pet-card") >= 13,
+    check("pet page shows 19 gallery cards", body.count("pet-card") >= 19,
           body.count("pet-card"))
     check("pet page names new species",
           all(n in body for n in ("Surfpup", "Bubbly", "Sealy", "Jelly")))
 
     print("== locked premium species ==")
-    check("4 locked species",
-          set(pets.LOCKED_SPECIES) == {"gilt", "tidehound", "reefkeeper", "zorb"})
-    check("art registry matches (13)",
+    check("8 locked species",
+          set(pets.LOCKED_SPECIES) == {"gilt", "tidehound", "reefkeeper", "zorb",
+                                       "crownjelly", "abyssal", "frostfin",
+                                       "kelpwarden"})
+    check("art registry matches (19)",
           set(pets._ART) == set(pets.SPECIES_KEYS) and
-          len(pets.SPECIES_KEYS) == 13)
+          len(pets.SPECIES_KEYS) == 19)
     bad3 = []
     for key in ("gilt", "tidehound", "reefkeeper"):
         for s in range(5):

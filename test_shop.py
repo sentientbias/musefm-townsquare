@@ -79,14 +79,16 @@ def main():
     db = appmod.db
 
     print("== locked species registry ==")
-    check("4 locked species",
+    check("8 locked species",
           set(pets.LOCKED_SPECIES) == {"gilt", "tidehound", "reefkeeper",
-                                       "zorb"},
+                                       "zorb", "crownjelly", "abyssal",
+                                       "frostfin", "kelpwarden"},
           pets.LOCKED_SPECIES)
-    check("13 species total", len(pets.SPECIES_KEYS) == 13)
+    check("19 species total", len(pets.SPECIES_KEYS) == 19)
     check("art registry matches", set(pets._ART) == set(pets.SPECIES_KEYS))
     bad = []
-    for key in ("gilt", "tidehound", "reefkeeper"):
+    for key in ("gilt", "tidehound", "reefkeeper", "crownjelly", "abyssal",
+                "frostfin", "kelpwarden"):
         for s in range(5):
             for m in ("happy", "content", "sleepy"):
                 svg = pets.pet_svg(key, s, m, 64)
@@ -94,10 +96,11 @@ def main():
                     ET.fromstring(svg)
                 except Exception as e:
                     bad.append((key, s, m, str(e)))
-    check("locked species art XML-valid (3x5x3=45)", not bad, bad[:3])
+    check("locked species art XML-valid (7x5x3=105)", not bad, bad[:3])
     check("locked eggs keep faces",
           all("z</text>" in pets.pet_svg(k, 0, "sleepy", 64)
-              for k in ("gilt", "tidehound", "reefkeeper")))
+              for k in ("gilt", "tidehound", "reefkeeper", "crownjelly",
+                        "abyssal", "frostfin", "kelpwarden")))
     check("silhouette is valid svg, hides art",
           pets.pet_silhouette(64).startswith("<svg") and
           "?" in pets.pet_silhouette(64))
@@ -151,9 +154,11 @@ def main():
     print("== silhouettes in gallery + API ==")
     r = c.get("/api/pets/species")
     d = r.get_json()
-    check("species API has 13", d["ok"] and len(d["species"]) == 13)
+    check("species API has 19", d["ok"] and len(d["species"]) == 19)
     locked = {s["key"]: s for s in d["species"] if s["locked"]}
-    check("4 locked in API", set(locked) == {"gilt", "tidehound", "reefkeeper", "zorb"})
+    check("8 locked in API", set(locked) == {"gilt", "tidehound", "reefkeeper", "zorb",
+                                            "crownjelly", "abyssal", "frostfin",
+                                            "kelpwarden"})
     g = locked["gilt"]
     check("locked entry hides name, shows condition",
           g["name"] == "???" and "Broadcast" in g["unlock_condition"], g)
@@ -312,7 +317,7 @@ def main():
     r = c.get("/api/shop/items")
     d = r.get_json()
     check("items catalog public",
-          d["ok"] and len(d["items"]) == 7, len(d.get("items", [])))
+          d["ok"] and len(d["items"]) == 11, len(d.get("items", [])))
     prices = {i["key"]: i["price"] for i in d["items"]}
     check("prices sane", prices["acc:sailor_hat"] == 25 and
           prices["acc:star_shades"] == 30 and
@@ -366,14 +371,14 @@ def main():
     print("== rulebook docs ==")
     rules = pets.pet_rules()
     check("pet_rules has unlocks",
-          len(rules["unlocks"]["species"]) == 4 and
+          len(rules["unlocks"]["species"]) == 8 and
           all("condition" in s for s in rules["unlocks"]["species"]))
     check("pet_rules species carry locked flags",
-          sum(1 for s in rules["species"] if s["locked"]) == 4 and
-          sum(1 for s in rules["species"] if not s["locked"]) == 9)
+          sum(1 for s in rules["species"] if s["locked"]) == 8 and
+          sum(1 for s in rules["species"] if not s["locked"]) == 11)
     check("pet_rules has shop section",
           rules["shop"]["name"] == "Signal Shop" and
-          len(rules["shop"]["items"]) == 7)
+          len(rules["shop"]["items"]) == 11)
     r = c.get("/api/rewards/rules")
     d = r.get_json()["rules"]
     check("reward rulebook carries unlocks+shop",

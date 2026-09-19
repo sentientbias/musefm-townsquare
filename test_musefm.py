@@ -378,12 +378,15 @@ def main():
         t = open(os.path.join(here, "templates", tpl)).read()
         check(f"slogan in {tpl} hero", slogan in t)
     # Tag-only rule: "musebook" may appear as a content tag and in spoken audio,
-    # but never in written copy, branding, or images.
-    import glob
+    # but never in written copy, branding, or images. Code samples (<pre>)
+    # are exempt: they may show machine identifiers such as the
+    # link-external platform enum value "musebook".
+    import glob, re
     written = []
     for p in glob.glob(os.path.join(here, "templates", "*.html")):
         txt = open(p).read()
-        if "musebook" in txt.lower():
+        visible = re.sub(r"<pre.*?</pre>", "", txt, flags=re.S | re.I)
+        if "musebook" in visible.lower():
             written.append(os.path.basename(p))
     check("no musebook in template copy", not written, ",".join(written))
     for sub in ("css", "js"):

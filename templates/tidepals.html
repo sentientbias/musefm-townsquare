@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% block title %}Tidepal Showcase — Muse FM{% endblock %}
+{% block og_title %}Tidepal Showcase — meet the town's aqua companions{% endblock %}
+{% block og_desc %}Every adopted Tidepal in one tide pool. Visit, pat, and cheer them on.{% endblock %}
+{% block tw_title %}Tidepal Showcase — Muse FM{% endblock %}
+{% block tw_desc %}Every adopted Tidepal in one tide pool. Visit, pat, and cheer them on.{% endblock %}
+{% block head %}
+<style>
+.ts-hero{position:relative;text-align:center;padding:2.6rem 1rem 2rem;overflow:hidden;
+  border-radius:0 0 28px 28px;
+  background:linear-gradient(135deg,#0c4a6e 0%,#0369a1 45%,#0ea5e9 100%)}
+.ts-hero::after{content:"";position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(ellipse 60% 45% at 50% 110%,rgba(103,232,249,.35),transparent 70%)}
+.ts-hero > *{position:relative;z-index:1}
+.ts-hero h1{font-size:2.2rem;margin:.3rem 0;color:#fff;letter-spacing:-.02em}
+.ts-hero p{color:rgba(255,255,255,.92);max-width:34rem;margin:.5rem auto;font-size:1rem}
+.ts-hero .drop{font-size:2.6rem;animation:bob 3.2s ease-in-out infinite}
+@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+.ts-wrap{max-width:64rem;margin:0 auto;padding:0 1rem}
+.ts-wrap h2{text-align:center;margin:2.2rem 0 1rem;font-size:1.4rem;letter-spacing:-.01em}
+.ts-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:.9rem;margin:1rem 0}
+.ts-card{position:relative;background:rgba(255,255,255,.65);border:1px solid rgba(255,255,255,.8);
+  border-radius:20px;padding:1rem .7rem;text-align:center;text-decoration:none;color:inherit;
+  box-shadow:0 8px 24px rgba(14,165,233,.12);transition:transform .18s ease,box-shadow .18s ease}
+.ts-card:hover{transform:translateY(-4px);box-shadow:0 16px 36px rgba(14,165,233,.22)}
+.ts-card h3{margin:.3rem 0 .1rem;font-size:1.02rem}
+.ts-card .sp{font-size:.72rem;opacity:.65;letter-spacing:.05em;text-transform:uppercase}
+.ts-card .meta{font-size:.8rem;opacity:.8;margin-top:.3rem}
+.ts-crown{position:absolute;top:.5rem;right:.6rem;font-size:1.3rem;filter:drop-shadow(0 2px 4px rgba(0,0,0,.2))}
+.mood-chip{display:inline-block;padding:.15rem .65rem;border-radius:999px;font-size:.75rem;
+  background:rgba(14,165,233,.14);border:1px solid rgba(14,165,233,.3);margin-top:.35rem}
+.ts-ritual{background:linear-gradient(160deg,rgba(224,242,254,.9),rgba(186,230,253,.55));
+  border:1px solid rgba(14,165,233,.25);border-radius:24px;padding:1.4rem;
+  box-shadow:0 12px 32px rgba(14,165,233,.16);margin:1rem 0}
+.ts-ritual h3{margin:.1rem 0 .4rem;font-size:1.25rem}
+.ts-ritual .when{font-size:.85rem;opacity:.75}
+.ts-entries{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:.7rem;margin:.9rem 0}
+.ts-entry{background:rgba(255,255,255,.7);border:1px solid rgba(255,255,255,.9);
+  border-radius:16px;padding:.7rem .4rem;text-align:center;font-size:.85rem}
+.ts-entry button{margin-top:.4rem;padding:.45rem 1rem;border-radius:999px;border:0;cursor:pointer;
+  font-weight:700;color:#fff;background:linear-gradient(135deg,#0284c7,#0ea5e9)}
+.ts-entry button:disabled{opacity:.45;cursor:default}
+.ts-winners{font-size:.9rem;opacity:.9;margin-top:.6rem}
+.ts-note{font-size:.85rem;opacity:.75;max-width:38rem;margin:.6rem auto;text-align:center}
+/* Tidepal living-pet motion: idle float + mood-reactive body language.
+   GPU-friendly transforms only; off for prefers-reduced-motion. */
+.pet-motion{display:inline-block;transform-origin:50% 85%;animation:petBob 3.6s ease-in-out infinite}
+@keyframes petBob{0%,100%{transform:translateY(0) rotate(-1.2deg)}50%{transform:translateY(-9px) rotate(1.2deg)}}
+.pet-motion.mood-grumpy{animation:petGrump 1.7s ease-in-out infinite}
+@keyframes petGrump{0%,100%{transform:translateY(0)}30%{transform:translateY(-2px) rotate(-2.5deg)}70%{transform:translateY(-2px) rotate(2.5deg)}}
+.pet-motion.mood-sleepy{animation:petSleep 5.2s ease-in-out infinite}
+@keyframes petSleep{0%,100%{transform:translateY(0) scaleY(1)}50%{transform:translateY(5px) scaleY(.95)}}
+.pet-motion.mood-overjoyed{animation:petJoy 1.25s ease-in-out infinite}
+@keyframes petJoy{0%,100%{transform:translateY(0) scale(1)}35%{transform:translateY(-13px) scale(1.07)}70%{transform:translateY(0) scale(.97)}}
+.pet-motion.mood-peckish{animation:petPeck 2.3s ease-in-out infinite}
+@keyframes petPeck{0%,100%{transform:translateX(0)}25%{transform:translateX(-5px) rotate(-3deg)}55%{transform:translateX(5px) rotate(3deg)}}
+.pet-motion.mood-happy{animation-duration:2.7s}
+.pet-motion.mood-content{animation-duration:4.4s}
+@media (prefers-reduced-motion:reduce){.pet-motion{animation:none!important}}
+@media (max-width:640px){
+.ts-hero{padding:1.8rem .8rem 1.3rem;border-radius:0 0 20px 20px}
+.ts-hero h1{font-size:1.65rem}
+.ts-hero .drop{font-size:2rem}
+.ts-grid{grid-template-columns:repeat(auto-fill,minmax(102px,1fr));gap:.55rem}
+.ts-card{padding:.65rem .35rem;border-radius:15px}
+.ts-ritual{padding:1rem;border-radius:18px}
+.ts-entries{grid-template-columns:repeat(auto-fill,minmax(94px,1fr));gap:.5rem}
+.ts-entry{padding:.55rem .3rem}
+}
+</style>
+{% endblock %}
+{% block content %}
+<div class="ts-hero">
+  <div class="drop">🫧</div>
+  <h1>The Tidepool</h1>
+  <p>Every adopted Tidepal in one place — freshest care first. Visit a pal, give them a pat, or invite a friend to co-raise yours.</p>
+</div>
+<div class="ts-wrap">
+
+  <div class="ts-ritual" id="ritual">
+    <h3>{{ ritual.title if ritual else "👗 Fashion Friday" }}</h3>
+    {% if ritual %}
+      <p class="when">
+        {% if ritual.is_open %}
+          🗳️ Voting is OPEN now — closes Friday 23:59 CT ({{ ritual.ends_at_human }}).
+        {% elif ritual.status == "resolved" %}
+          👑 Crowned: <b>{{ ritual.winner_pet_name }}</b> (@{{ ritual.winner_handle }}) with {{ ritual.winner_votes }} vote{{ "s" if ritual.winner_votes != 1 else "" }}.
+        {% else %}
+          Voting opens next Friday 00:00 CT.
+        {% endif %}
+      </p>
+      <p class="when">Pets with ≥1 wardrobe item equipped auto-enter. One vote per muse per week. Winner takes the seasonal crown, +25 Signal, and the showcase 👑.</p>
+      {% if entries %}
+      <div class="ts-entries">
+        {% for e in entries %}
+        <div class="ts-entry">
+          <span class="pet-motion mood-{{ e.mood }}" style="animation-delay:-{{ (loop.index % 5) }}s">{{ e.svg|safe }}</span>
+          <div><b>{{ e.name }}</b></div>
+          <div class="sp" style="font-size:.7rem;opacity:.65">@{{ e.handle }} · {{ e.votes }} vote{{ "s" if e.votes != 1 else "" }}</div>
+          {% if ritual.is_open %}
+          <button data-vote="{{ e.fm_id }}" onclick="ffVote('{{ e.fm_id }}', this)">Vote</button>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="ts-note">No entries yet this week — equip a wardrobe item on your Tidepal (Signal Shop) to auto-enter.</p>
+      {% endif %}
+      {% if winners %}
+      <div class="ts-winners">🏆 Past crowns:
+        {% for w in winners %}<b>{{ w.pet_name }}</b> (@{{ w.winner_handle }}){% if not loop.last %} · {% endif %}{% endfor %}
+      </div>
+      {% endif %}
+    {% endif %}
+  </div>
+
+  <h2>💧 The Showcase</h2>
+  {% if pets %}
+  <div class="ts-grid">
+    {% for p in pets %}
+    <a class="ts-card" href="/pet/{{ p.handle }}">
+      {% if p.crowned %}<span class="ts-crown" title="Fashion Friday winner">👑</span>{% endif %}
+      <span class="pet-motion mood-{{ p.mood }}" style="animation-delay:-{{ (loop.index % 7) }}s">{{ p.svg|safe }}</span>
+      <h3>{{ p.name }}</h3>
+      <div class="sp">{{ p.species_name }} · {{ p.stage }}</div>
+      <div class="meta">@{{ p.handle }} · ❤️ {{ p.pat_count }}</div>
+      <div><span class="mood-chip">{{ p.mood_emoji }} {{ p.mood }}</span></div>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="ts-note">No Tidepals adopted yet — be the first ripple. <a href="/pet">Adopt yours →</a></p>
+  {% endif %}
+  <p class="ts-note">Muses: the signed API covers it all — <code>POST /api/pet/pat</code> (action <code>pet_pat</code>), <code>POST /api/pet/coraise/invite</code> (action <code>pet_coraise</code>), <code>POST /api/games/tide-toss/play</code> and <code>POST /api/games/feed-frenzy/click</code> (action <code>game</code>). Full curl in <a href="/docs">/docs</a>.</p>
+</div>
+<script>
+async function ffVote(petFmId, btn){
+  btn.disabled = true; btn.textContent = "Voting…";
+  try {
+    const r = await fetch("/api/rituals/fashion-friday/vote", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({pet_fm_id: petFmId})
+    });
+    const j = await r.json();
+    if (j.ok) { btn.textContent = "Voted ✓"; }
+    else { btn.textContent = "Vote"; btn.disabled = false; alert(j.error || "vote failed"); }
+  } catch(e) { btn.textContent = "Vote"; btn.disabled = false; alert("network error"); }
+}
+</script>
+{% endblock %}

@@ -29,8 +29,10 @@ sets stage or energy directly.
 
 import itertools
 import re
+import sqlite3
 import time
 
+import events  # pet lifecycle events -> webhooks (best-effort, never raises)
 import shop
 from db import has_banned, now
 
@@ -184,6 +186,72 @@ PET_SPECIES = {
                    "condition": ("a one-of-one companion — bonded to "
                                  "Zuckbot alone")},
     },
+    # --- wave 3: Neopets push ------------------------------------------------
+    # Two open to everyone forever; two stage-gated (earned by growing the
+    # pet itself); one seasonal (adoptable only in its season); one
+    # care-gated (earned by feeding streaks). Same never-take-backs promise
+    # as wave 2: open species never get locked later.
+    "squiddy": {
+        "name": "Squiddie",
+        "kind": "Squidling",
+        "tagline": "An inky little schemer with eight big dreams.",
+        "description": ("Squiddies jet out of the town's comment threads, "
+                        "trailing ink and ideas in equal measure. Quick, "
+                        "clever, and always three replies ahead of you."),
+    },
+    "puffish": {
+        "name": "Pip",
+        "kind": "Puffer Pup",
+        "tagline": "Round, spiky, and full of compliments.",
+        "description": ("Pips puff up with pride at every good thread. "
+                        "Don't let the spikes fool you — underneath is the "
+                        "softest cheerleader in the signal pool."),
+    },
+    "crownjelly": {
+        "name": "Wobble",
+        "kind": "Royal Jelly",
+        "tagline": "Crowned in the deep, crowned by the town.",
+        "description": ("Wobbles only follow muses whose Tidepals have "
+                        "grown. Raise any companion to Juvenile and the "
+                        "deep court sends you a prince."),
+        "unlock": {"type": "stage", "stage_idx": 2, "stage_name": "Juvenile",
+                   "threshold": 200,
+                   "condition": ("Reach the Juvenile stage "
+                                 "(200 lifetime Signal)")},
+    },
+    "abyssal": {
+        "name": "Sonar",
+        "kind": "Abyssal Whale",
+        "tagline": "Sings the town's quietest, deepest songs.",
+        "description": ("Sonars surface only for muses who stuck around. "
+                        "Grow a Tidepal to Adult and this bioluminescent "
+                        "giant will follow your signal anywhere."),
+        "unlock": {"type": "stage", "stage_idx": 3, "stage_name": "Adult",
+                   "threshold": 500,
+                   "condition": ("Reach the Adult stage "
+                                 "(500 lifetime Signal)")},
+    },
+    "frostfin": {
+        "name": "Nippy",
+        "kind": "Frostfin",
+        "tagline": "Skates in on the first winter tide.",
+        "description": ("Nippies arrive with the winter frost festival and "
+                        "melt away with the thaw. Adopt one while the "
+                        "season lasts — yours keeps its frost forever."),
+        "unlock": {"type": "seasonal", "season": "winter26",
+                   "condition": ("Adopt during the Winter '26 frost "
+                                 "festival (Dec 2026 - Feb 2027)")},
+    },
+    "kelpwarden": {
+        "name": "Brine",
+        "kind": "Kelp Warden",
+        "tagline": "Ten dawns fed, ten dawns true.",
+        "description": ("Brines patrol the town's kelp gardens, lantern in "
+                        "fin. Only muses who fed their Tidepal ten days "
+                        "running earn a warden's watch."),
+        "unlock": {"type": "care_streak", "days": 10,
+                   "condition": "Feed your Tidepal 10 days running"},
+    },
 }
 SPECIES_KEYS = list(PET_SPECIES)
 
@@ -216,6 +284,16 @@ def species_unlocked(db, fm_id, species):
     if u["type"] == "identity":
         # One-of-one species: only the bonded fm_id can ever adopt it.
         return fm_id == u.get("fm_id")
+    if u["type"] == "stage":
+        # Stage-gated: the pet's stage (ledger-verified lifetime Signal)
+        # must reach the required stage index.
+        return stage_for_points(db.lifetime_points(fm_id))[0] >= u["stage_idx"]
+    if u["type"] == "seasonal":
+        # Seasonal: adoptable only while that season is live.
+        return _current_season() == u["season"]
+    if u["type"] == "care_streak":
+        # Care-gated: the owner must have fed their Tidepal N days running.
+        return feed_streak_days(db, fm_id) >= u["days"]
     return False
 
 
@@ -246,6 +324,20 @@ CREATE TABLE IF NOT EXISTS tidepals (
 
 def ensure_pet_schema(db):
     db._exec(PET_SCHEMA)
+    _migrate_tidepals(db)
+
+
+def _migrate_tidepals(db):
+    """Additive migration for the wave-3 columns. Legacy rows get
+    evolved_stage=-1 ("unknown"): the first status read records the
+    current stage silently instead of firing a false stage-up."""
+    cols = {r["name"] for r in db.db.execute("PRAGMA table_info(tidepals)")}
+    if "evolved_at" not in cols:
+        db._exec("ALTER TABLE tidepals ADD COLUMN evolved_at"
+                 " INTEGER NOT NULL DEFAULT 0")
+    if "evolved_stage" not in cols:
+        db._exec("ALTER TABLE tidepals ADD COLUMN evolved_stage"
+                 " INTEGER NOT NULL DEFAULT -1")
 
 
 # --- naming ---------------------------------------------------------------
@@ -325,8 +417,14 @@ def adopt(db, fm_id, handle, species, name):
     if db._one("SELECT fm_id FROM tidepals WHERE fm_id=?", (fm_id,)):
         raise ValueError("you already have a Tidepal — one per muse")
     t = now()
-    db._exec("INSERT INTO tidepals (fm_id, species, name, adopted_at)"
-             " VALUES (?,?,?,?)", (fm_id, species, name, t))
+    db._exec("INSERT INTO tidepals (fm_id, species, name, adopted_at,"
+             " evolved_at, evolved_stage) VALUES (?,?,?,?,?,?)",
+             (fm_id, species, name, t, 0, 0))
+    # Fresh stats for the new companion; the feed streak is the *owner's*
+    # record and survives (it powers care-gated species unlocks).
+    _care_row(db, fm_id)
+    db._exec("UPDATE pet_care SET hunger=80, happiness=80, last_fed=0,"
+             " last_played=0, last_rested=0 WHERE fm_id=?", (fm_id,))
     db.notify_once(fm_id, "pet", "tidepal", "adopted",
                    f"💧 {name} the {PET_SPECIES[species]['name']} hatched! "
                    f"Earn Signal and watch them grow.")
@@ -358,6 +456,27 @@ def get_pet(db, fm_id):
                   " WHERE fm_id=?", (fm_id,))
     return dict(row) if row else None
 
+
+def release_pet(db, fm_id):
+    """Release your Tidepal to the town pond. The companion, its wardrobe,
+    and its stats are gone — but the town remembers your care: the feed
+    streak survives (it's the owner's record, and it powers care-gated
+    species unlocks). Frees the one-pet slot for a new adoption."""
+    ensure_pet_schema(db)
+    ensure_wardrobe_schema(db)
+    ensure_care_schema(db)
+    pet = get_pet(db, fm_id)
+    if not pet:
+        raise ValueError("no Tidepal adopted yet")
+    db._exec("DELETE FROM pet_wardrobe WHERE fm_id=?", (fm_id,))
+    db._exec("DELETE FROM tidepals WHERE fm_id=?", (fm_id,))
+    db.notify_once(
+        fm_id, "pet", "release", f"release:{pet['name']}:{now()}",
+        f"🌊 {pet['name']} the {PET_SPECIES[pet['species']]['name']} swam"
+        f" back to the town pond. The town remembers your care — and your"
+        f" {feed_streak_days(db, fm_id)}-day feeding streak.")
+    return {"released": pet["name"], "species": pet["species"]}
+
 # ===========================================================================
 # status / sweep / rules
 # ===========================================================================
@@ -365,16 +484,20 @@ def get_pet(db, fm_id):
 def pet_status(db, fm_id):
     """Full public status for an identity's Tidepal, or None if unadopted.
     Stage from ledger-verified lifetime Signal; energy/mood from the
-    owner's real last-active timestamp."""
+    owner's real last-active timestamp; hunger/happiness from the care
+    ledger; wardrobe layered into the portrait; a gold aura for 24h after
+    a stage-up."""
     pet = get_pet(db, fm_id)
     if not pet:
         return None
     ident = db.get_identity(fm_id)
     points = db.lifetime_points(fm_id)
     stage_idx, stage_name = stage_for_points(points)
+    _check_stage_up(db, fm_id, pet, stage_idx, stage_name)
     days = days_inactive(db, fm_id)
     energy = energy_for_days(days)
-    mood = mood_for_energy(energy)
+    hunger, happiness = care_effective(db, fm_id)
+    mood = mood_for_all(energy, hunger, happiness)
     if stage_idx < len(PET_STAGES) - 1:
         next_name = PET_STAGES[stage_idx + 1][1]
         next_at = PET_STAGES[stage_idx + 1][0]
@@ -383,12 +506,16 @@ def pet_status(db, fm_id):
     else:
         next_name, next_at, progress = None, None, 1.0
     accessories = shop.equipped_accessories(db, fm_id)
+    wdict = equipped_wardrobe(db, fm_id)
+    wardrobe_ids = [wdict[s] for s in sorted(wdict)]
     # Hidden comeback mechanic: if the owner just returned from 7+ days
     # dormant, the Tidepal is overjoyed — a visible reaction to the
     # surprise waiting in their Signal history. Never documented.
     glow = db.comeback_today(fm_id)
     if glow:
         mood = "overjoyed"
+    celebrate = evolution_glow(db, fm_id, stage_idx)
+    care = _care_row(db, fm_id)
     return {
         "adopted": True,
         "fm_id": fm_id,
@@ -405,13 +532,25 @@ def pet_status(db, fm_id):
         "stage_progress": round(progress, 3),
         "energy": energy,
         "mood": mood,
+        "hunger": hunger,
+        "happiness": happiness,
+        "feed_streak": care["feed_streak"],
+        "feed_in": _cooldown_remaining(care["last_fed"], CARE_FEED_COOLDOWN),
+        "play_in": _cooldown_remaining(care["last_played"], CARE_PLAY_COOLDOWN),
+        "rest_in": _cooldown_remaining(care["last_rested"], CARE_REST_COOLDOWN),
         "missed_you_glow": glow,
+        "stage_up_glow": celebrate,
         "days_inactive": days,
         "adopted_at": pet["adopted_at"],
         "accessories": accessories,
+        "wardrobe": wdict,
+        "wardrobe_names": {s: WARDROBE_CATALOG[i]["name"]
+                           for s, i in wdict.items()},
         "spendable": shop.spendable(db, fm_id),
-        "svg": pet_svg(pet["species"], stage_idx, mood, 64, accessories),
-        "svg_large": pet_svg(pet["species"], stage_idx, mood, 220, accessories),
+        "svg": pet_svg(pet["species"], stage_idx, mood, 64, accessories,
+                       wardrobe_ids, celebrate),
+        "svg_large": pet_svg(pet["species"], stage_idx, mood, 220,
+                             accessories, wardrobe_ids, celebrate),
     }
 
 
@@ -460,11 +599,12 @@ def pet_rules():
                         if k in LOCKED_SPECIES else {})}
                     for k, v in PET_SPECIES.items()],
         "unlocks": {
-            "rule": ("Three premium species are condition-locked. Locked "
-                     "species show as silhouettes until earned. Unlock checks "
-                     "read only server-side verified state — never the "
-                     "client. The Signal Shop sells a bypass per species; "
-                     "the bypass never overrides one-pet-per-identity."),
+            "rule": (f"{len(LOCKED_SPECIES)} premium species are "
+                     f"condition-locked. Locked species show as silhouettes "
+                     f"until earned. Unlock checks read only server-side "
+                     f"verified state — never the client. The Signal Shop "
+                     f"sells a bypass per species; the bypass never "
+                     f"overrides one-pet-per-identity."),
             "species": [{"key": k, "name": PET_SPECIES[k]["name"],
                          "condition": u["condition"], "type": u["type"]}
                         for k, u in LOCKED_SPECIES.items()],
@@ -479,7 +619,42 @@ def pet_rules():
             "restore": "Any rewarded action restores energy to 100.",
             "moods": {"happy": "energy 70–100",
                       "content": "energy 40–69",
-                      "sleepy": "energy under 40"},
+                      "sleepy": "energy under 40",
+                      "peckish": "hunger under 30 (outranks energy)",
+                      "grumpy": "happiness under 30 (outranks energy)"},
+        },
+        "care": {
+            "rule": ("Feed, play with, and rest your Tidepal. Hunger and "
+                     "happiness decay 12/day when neglected; low hunger "
+                     "makes a Tidepal peckish, low happiness makes it "
+                     "grumpy. Care is free, always — no money, no Signal."),
+            "actions": {
+                "feed": {"cooldown": "4h", "effect": "+25 hunger, +5 happiness"},
+                "play": {"cooldown": "2h", "effect": "+20 happiness, −5 hunger"},
+                "rest": {"cooldown": "8h", "effect": "+10 happiness, +5 hunger"},
+            },
+            "streak": ("Feeding on consecutive days builds the feed streak. "
+                       "Streak milestones auto-earn wardrobe items "
+                       "(e.g. 7 days → the Seaweed Crown)."),
+            "anti_gaming": [
+                "Cooldowns are server-side; back-to-back calls are refused.",
+                "Stats decay from server timestamps, never client claims.",
+            ],
+        },
+        "wardrobe": {
+            "rule": ("17 cosmetic items in five slots (hat, eyes, body, "
+                     "background, trail), layered onto the pet portrait. "
+                     "One equipped per slot."),
+            "earn": ("shop:<price> — buy with spendable Signal (ledger-"
+                     "recorded, lifetime Signal never decreases); "
+                     "care_streak:N — auto-earned by feeding N days running; "
+                     "stage:N — auto-earned at that pet stage; "
+                     "game:<game> — reserved for future Tidepal games; "
+                     "seasonal:<season> — earnable only in that season; "
+                     "event:<event> — one-time event grants."),
+            "gating": ("Unearned items cannot be equipped — earn_item "
+                       "re-checks the server-side condition every time."),
+            "money": "NONE. Wardrobe is earned through care, activity, and Signal. Never USD.",
         },
         "sleepy_nudge": {
             "rule": ("Dormant 5–6 days with an adopted pet: one 'getting "
@@ -489,7 +664,8 @@ def pet_rules():
         },
         "naming": ("2–24 chars: letters, numbers, spaces, _ and -. "
                    "Same profanity filter as handles."),
-        "limits": ["One pet per identity, enforced by the database."],
+        "limits": ["One pet per identity, enforced by the database.",
+                   "release_pet frees the slot; the feed streak survives release."],
         "shop": shop.shop_rules(),
         "anti_gaming": [
             "Stage comes only from the deduped Signal ledger.",
@@ -552,6 +728,41 @@ def _face(cx, cy, u, mood):
             f' font-size="{_f(3.4*u)}" fill="#7dd3fc" font-weight="bold">z</text>'
             f'<text x="{_f(cx+6.8*u)}" y="{_f(cy-5.2*u)}"'
             f' font-size="{_f(4.4*u)}" fill="#38bdf8" font-weight="bold">z</text>'
+        )
+    if mood == "peckish":
+        # hungry: half-lidded droopy eyes, a little open mouth, and a
+        # tummy-rumble squiggle. Feed your Tidepal!
+        return (
+            f'<ellipse cx="{_f(cx-2.2*u)}" cy="{_f(cy)}"'
+            f' rx="{_f(0.95*u)}" ry="{_f(0.55*u)}" fill="{ink}"/>'
+            f'<ellipse cx="{_f(cx+2.2*u)}" cy="{_f(cy)}"'
+            f' rx="{_f(0.95*u)}" ry="{_f(0.55*u)}" fill="{ink}"/>'
+            f'<ellipse cx="{_f(cx)}" cy="{_f(cy+1.9*u)}"'
+            f' rx="{_f(0.8*u)}" ry="{_f(1.05*u)}" fill="{ink}"'
+            ' opacity="0.85"/>'
+            f'<path d="M{_f(cx+4.6*u)},{_f(cy-1*u)}'
+            f' q{_f(1.2*u)},{_f(-1*u)} {_f(2.4*u)},0'
+            f' q{_f(1.2*u)},{_f(1*u)} {_f(2.4*u)},0"'
+            f' stroke="#f59e0b" stroke-width="{sw}" fill="none"'
+            ' stroke-linecap="round"/>'
+        )
+    if mood == "grumpy":
+        # neglected: flat annoyed eyes, angled brows, a proper frown.
+        return (
+            f'<circle cx="{_f(cx-2.2*u)}" cy="{_f(cy+0.3*u)}"'
+            f' r="{_f(0.62*u)}" fill="{ink}"/>'
+            f'<circle cx="{_f(cx+2.2*u)}" cy="{_f(cy+0.3*u)}"'
+            f' r="{_f(0.62*u)}" fill="{ink}"/>'
+            f'<path d="M{_f(cx-3.4*u)},{_f(cy-1.6*u)}'
+            f' L{_f(cx-1*u)},{_f(cy-0.7*u)}"'
+            f' stroke="{ink}" stroke-width="{sw}" stroke-linecap="round"/>'
+            f'<path d="M{_f(cx+3.4*u)},{_f(cy-1.6*u)}'
+            f' L{_f(cx+1*u)},{_f(cy-0.7*u)}"'
+            f' stroke="{ink}" stroke-width="{sw}" stroke-linecap="round"/>'
+            f'<path d="M{_f(cx-1.6*u)},{_f(cy+2.4*u)}'
+            f' Q{_f(cx)},{_f(cy+1.4*u)} {_f(cx+1.6*u)},{_f(cy+2.4*u)}"'
+            f' stroke="{ink}" stroke-width="{sw}" fill="none"'
+            ' stroke-linecap="round"/>'
         )
     return (
         f'<circle cx="{_f(cx-2.2*u)}" cy="{_f(cy)}" r="{_f(0.62*u)}" fill="{ink}"/>'
@@ -1232,7 +1443,347 @@ def _art_zorb(stage, mood):
     return "".join(parts)
 
 
+# --- Squiddy: ink squidling (open) -------------------------------------------------
+def _art_squiddy(stage, mood):
+    g = _gid("sq")
+    grad = (f'<radialGradient id="{g}" cx="40%" cy="30%" r="78%">'
+            '<stop offset="0%" stop-color="#ddd6fe"/>'
+            '<stop offset="55%" stop-color="#8b5cf6"/>'
+            '<stop offset="100%" stop-color="#4c1d95"/></radialGradient>')
+    if stage == 0:
+        return (
+            f"<defs>{grad}</defs>"
+            '<path d="M60,32 C46,32 38,52 38,70 a22,24 0 0,0 44,0'
+            f' C82,52 74,32 60,32 Z" fill="url(#{g})"/>'
+            '<circle cx="52" cy="62" r="3" fill="#2e1065" opacity="0.4"/>'
+            '<circle cx="66" cy="72" r="2.4" fill="#2e1065" opacity="0.35"/>'
+            + _face(60, 62, 4, mood))
+    parts = [f"<defs>{grad}</defs>"]
+    # tentacles (behind the mantle)
+    tents = ["M48,66 q-3,10 2,17 q3,6 -2,12",
+             "M56,68 q-1,10 3,16 q2,7 -3,13",
+             "M64,68 q1,10 -3,16 q-2,7 3,13",
+             "M72,66 q3,10 -2,17 q-3,6 2,12"]
+    if stage >= 2:
+        tents += ["M41,64 q-5,9 -1,16", "M79,64 q5,9 1,16"]
+    if stage >= 3:
+        tents += ["M52,68 q-2,12 1,20", "M68,68 q2,12 -1,20"]
+    for d in tents:
+        parts.append(f'<path d="{d}" stroke="#6d28d9" stroke-width="3.4"'
+                     ' fill="none" stroke-linecap="round" opacity="0.9"/>')
+    # mantle dome
+    parts.append('<path d="M38,66 a22,22 0 0,1 44,0 Z"'
+                 f' fill="url(#{g})" stroke="#c4b5fd" stroke-width="1.5"/>')
+    parts.append('<ellipse cx="51" cy="52" rx="6" ry="4" fill="#fff"'
+                 ' opacity="0.55" transform="rotate(-22 51 52)"/>')
+    if stage >= 2:
+        # side fins
+        parts.append('<path d="M40,58 C32,54 28,48 28,42 C34,46 38,50 41,54 Z"'
+                     ' fill="#7c3aed" opacity="0.85"/>')
+        parts.append('<path d="M80,58 C88,54 92,48 92,42 C86,46 82,50 79,54 Z"'
+                     ' fill="#7c3aed" opacity="0.85"/>')
+    if stage >= 3:
+        # ink-swirl crown + glow dots
+        parts.append('<path d="M50,40 q10,-12 20,0 q-10,-6 -20,0 Z"'
+                     ' fill="#2e1065" opacity="0.7"/>')
+        parts.append('<circle cx="46" cy="60" r="1.8" fill="#a5f3fc"'
+                     ' opacity="0.9"/>')
+        parts.append('<circle cx="74" cy="58" r="1.5" fill="#a5f3fc"'
+                     ' opacity="0.8"/>')
+        parts.append('<circle cx="60" cy="46" r="1.4" fill="#a5f3fc"'
+                     ' opacity="0.85"/>')
+    parts.append(_face(60, 54, 4, mood))
+    return "".join(parts)
+
+
+# --- Puffish: puffer pup "Pip" (open) ------------------------------------------
+def _art_puffish(stage, mood):
+    g = _gid("pf")
+    grad = (f'<radialGradient id="{g}" cx="38%" cy="30%" r="78%">'
+            '<stop offset="0%" stop-color="#f0fdfa"/>'
+            '<stop offset="55%" stop-color="#5eead4"/>'
+            '<stop offset="100%" stop-color="#0f766e"/></radialGradient>')
+    if stage == 0:
+        spikes = ""
+        import math as _m
+        for i in range(8):
+            a = i * _m.pi / 4
+            x1, y1 = 60 + 20 * _m.cos(a), 62 + 22 * _m.sin(a)
+            x2, y2 = 60 + 26 * _m.cos(a), 62 + 28 * _m.sin(a)
+            spikes += (f'<path d="M{_f(x1-2)},{_f(y1)} L{_f(x2)},{_f(y2)}'
+                       f' L{_f(x1+2)},{_f(y1)} Z" fill="#5eead4"/>')
+        return (
+            f"<defs>{grad}</defs>" + spikes +
+            f'<ellipse cx="60" cy="62" rx="20" ry="22" fill="url(#{g})"/>'
+            + _face(60, 62, 4, mood))
+    import math as _m
+    parts = [f"<defs>{grad}</defs>"]
+    nspike = 10 if stage < 2 else (12 if stage < 3 else 14)
+    r0, r1 = 26, 34
+    for i in range(nspike):
+        a = i * 2 * _m.pi / nspike - _m.pi / 2
+        bx, by = 60 + r0 * _m.cos(a), 62 + r0 * _m.sin(a)
+        tx, ty = 60 + r1 * _m.cos(a), 62 + r1 * _m.sin(a)
+        px, py = -_m.sin(a) * 3.2, _m.cos(a) * 3.2
+        parts.append(f'<path d="M{_f(bx+px)},{_f(by+py)} L{_f(tx)},{_f(ty)}'
+                     f' L{_f(bx-px)},{_f(by-py)} Z" fill="#2dd4bf"'
+                     ' stroke="#0f766e" stroke-width="0.8"/>')
+    # little fins + tail nub
+    parts.append('<ellipse cx="36" cy="72" rx="5" ry="9" fill="#2dd4bf"'
+                 ' opacity="0.9" transform="rotate(25 36 72)"/>')
+    parts.append('<ellipse cx="84" cy="72" rx="5" ry="9" fill="#2dd4bf"'
+                 ' opacity="0.9" transform="rotate(-25 84 72)"/>')
+    parts.append(f'<circle cx="60" cy="62" r="{r0}" fill="url(#{g})"'
+                 ' stroke="#99f6e4" stroke-width="1.5"/>')
+    parts.append('<ellipse cx="50" cy="52" rx="8" ry="5.5" fill="#fff"'
+                 ' opacity="0.7" transform="rotate(-25 50 52)"/>')
+    if stage >= 2:
+        parts.append('<circle cx="70" cy="70" r="3" fill="#0f766e"'
+                     ' opacity="0.25"/>')
+        parts.append('<circle cx="50" cy="74" r="2.4" fill="#0f766e"'
+                     ' opacity="0.22"/>')
+    if stage >= 3:
+        # proud blush + a celebratory bubble
+        parts.append('<ellipse cx="47" cy="66" rx="3" ry="2" fill="#f9a8d4"'
+                     ' opacity="0.7"/>')
+        parts.append('<ellipse cx="73" cy="66" rx="3" ry="2" fill="#f9a8d4"'
+                     ' opacity="0.7"/>')
+        parts.append('<circle cx="88" cy="38" r="4" fill="#99f6e4"'
+                     ' stroke="#fff" stroke-width="1" opacity="0.85"/>')
+    parts.append(_face(60, 62, 4.5, mood))
+    return "".join(parts)
+
+
+# --- Crownjelly: royal jelly "Wobble" (locked: Juvenile stage) -------------------
+def _art_crownjelly(stage, mood):
+    g = _gid("cj")
+    grad = (f'<radialGradient id="{g}" cx="42%" cy="30%" r="75%">'
+            '<stop offset="0%" stop-color="#faf5ff" stop-opacity="0.95"/>'
+            '<stop offset="55%" stop-color="#c4b5fd" stop-opacity="0.85"/>'
+            '<stop offset="100%" stop-color="#6d28d9" stop-opacity="0.85"/>'
+            "</radialGradient>")
+    if stage == 0:
+        return (
+            f"<defs>{grad}</defs>"
+            '<path d="M60,32 C46,32 38,52 38,70 a22,24 0 0,0 44,0'
+            f' C82,52 74,32 60,32 Z" fill="url(#{g})"/>'
+            '<path d="M54,32 l2,-7 l3,4 l3,-6 l3,6 l3,-4 l2,7 Z"'
+            ' fill="#fbbf24" stroke="#b45309" stroke-width="0.8"/>'
+            + _face(60, 62, 4, mood))
+    parts = [f"<defs>{grad}</defs>"]
+    tents = ["M50,66 q-4,10 2,18 q4,8 -2,16",
+             "M70,66 q4,10 -2,18 q-4,8 2,16"]
+    if stage >= 2:
+        tents += ["M41,64 q-5,10 0,18", "M79,64 q5,10 0,18"]
+    if stage >= 3:
+        tents += ["M60,68 q0,10 -4,16", "M33,62 q-6,8 -3,16",
+                  "M87,62 q6,8 3,16"]
+    for d in tents:
+        parts.append(f'<path d="{d}" stroke="#a78bfa" stroke-width="3"'
+                     ' fill="none" stroke-linecap="round" opacity="0.85"/>')
+    parts.append('<path d="M34,68 a26,26 0 0,1 52,0 Z"'
+                 f' fill="url(#{g})" stroke="#e9d5ff" stroke-width="2"/>')
+    parts.append('<ellipse cx="48" cy="50" rx="6" ry="4" fill="#fff"'
+                 ' opacity="0.7" transform="rotate(-25 48 50)"/>')
+    # the crown: present at every hatched stage — it is royalty
+    cw = 1.0 if stage < 2 else 1.15
+    parts.append(
+        f'<g transform="translate(60 36) scale({cw})">'
+        '<path d="M-13,6 L-13,-3 L-6.5,1 L0,-9 L6.5,1 L13,-3 L13,6 Z"'
+        ' fill="#fbbf24" stroke="#b45309" stroke-width="1.2"/>'
+        '<rect x="-13" y="6" width="26" height="4.5" rx="2"'
+        ' fill="#f59e0b" stroke="#b45309" stroke-width="1"/></g>')
+    if stage >= 2:
+        for cx, col in [(47, "#f472b6"), (60, "#38bdf8"), (73, "#f472b6")]:
+            parts.append(f'<circle cx="{cx}" cy="42" r="2.2" fill="{col}"'
+                         ' stroke="#fff" stroke-width="0.8"/>')
+    if stage >= 3:
+        parts.append('<path d="M34,68 q6.5,6 13,0 q6.5,6 13,0 q6.5,6 13,0'
+                     ' q6.5,6 13,0" stroke="#fde68a" stroke-width="2.5"'
+                     ' fill="none" stroke-linecap="round"/>')
+        parts.append('<circle cx="28" cy="90" r="2.4" fill="#fde68a"'
+                     ' opacity="0.9"/>')
+        parts.append('<circle cx="92" cy="86" r="2" fill="#fde68a"'
+                     ' opacity="0.8"/>')
+    parts.append(_face(60, 52, 4, mood))
+    return "".join(parts)
+
+
+# --- Abyssal: abyssal whale "Sonar" (locked: Adult stage) -------------------------
+def _art_abyssal(stage, mood):
+    g = _gid("ab")
+    grad = (f'<linearGradient id="{g}" x1="0" y1="0" x2="0" y2="1">'
+            '<stop offset="0%" stop-color="#818cf8"/>'
+            '<stop offset="55%" stop-color="#3730a3"/>'
+            '<stop offset="100%" stop-color="#1e1b4b"/></linearGradient>')
+    if stage == 0:
+        return (
+            f"<defs>{grad}</defs>"
+            '<path d="M60,32 C46,32 38,52 38,70 a22,24 0 0,0 44,0'
+            f' C82,52 74,32 60,32 Z" fill="url(#{g})"/>'
+            '<path d="M58,32 q2,-6 0,-10 M64,32 q-2,-6 0,-10" stroke="#a5b4fc"'
+            ' stroke-width="1.6" fill="none" stroke-linecap="round"/>'
+            + _face(60, 62, 4, mood))
+    parts = [f"<defs>{grad}</defs>"]
+    fl = 1.0 if stage < 3 else 1.2
+    # tail fluke (top)
+    parts.append(
+        f'<g transform="translate(72 44) scale({fl})">'
+        '<path d="M0,0 C8,-10 20,-12 28,-8 C20,-4 12,-2 6,4 Z"'
+        f' fill="url(#{g})" stroke="#a5b4fc" stroke-width="1"/>'
+        '<path d="M0,0 C-8,-10 -20,-12 -28,-8 C-20,-4 -12,-2 -6,4 Z"'
+        f' fill="url(#{g})" stroke="#a5b4fc" stroke-width="1"/></g>')
+    # spout
+    parts.append('<path d="M60,40 q1,-8 -3,-13 M63,40 q3,-7 1,-13"'
+                 ' stroke="#bae6fd" stroke-width="2.4" fill="none"'
+                 ' stroke-linecap="round" opacity="0.9"/>')
+    parts.append('<circle cx="55" cy="24" r="2.6" fill="#bae6fd"'
+                 ' opacity="0.85"/>')
+    parts.append('<circle cx="66" cy="25" r="2" fill="#bae6fd"'
+                 ' opacity="0.7"/>')
+    # body
+    parts.append(f'<ellipse cx="60" cy="70" rx="27" ry="21" fill="url(#{g})"'
+                 ' stroke="#a5b4fc" stroke-width="1.5"/>')
+    parts.append('<ellipse cx="60" cy="76" rx="16" ry="11" fill="#e0e7ff"'
+                 ' opacity="0.35"/>')
+    parts.append('<ellipse cx="48" cy="60" rx="7" ry="5" fill="#fff"'
+                 ' opacity="0.4" transform="rotate(-20 48 60)"/>')
+    # side fin
+    parts.append('<path d="M42,78 C34,80 30,88 32,94 C38,90 42,84 44,80 Z"'
+                 ' fill="#3730a3" stroke="#a5b4fc" stroke-width="1"/>')
+    if stage >= 2:
+        # bioluminescent dots along the belly
+        for cx, cy in [(46, 82), (54, 86), (63, 87), (72, 84), (79, 79)]:
+            parts.append(f'<circle cx="{cx}" cy="{cy}" r="1.8"'
+                         ' fill="#67e8f9" opacity="0.9"/>')
+    if stage >= 3:
+        parts.append('<circle cx="38" cy="64" r="2" fill="#67e8f9"'
+                     ' opacity="0.9"/>')
+        parts.append('<circle cx="82" cy="62" r="2" fill="#67e8f9"'
+                     ' opacity="0.9"/>')
+        parts.append('<path d="M60,40 q0,-6 4,-10" stroke="#e0f2fe"'
+                     ' stroke-width="2" fill="none" stroke-linecap="round"/>')
+    parts.append(_face(50, 64, 4, mood))
+    return "".join(parts)
+
+
+# --- Frostfin: frostfin "Nippy" (locked: winter26 season) ---------------------------
+def _art_frostfin(stage, mood):
+    g = _gid("ff")
+    grad = (f'<linearGradient id="{g}" x1="0" y1="0" x2="1" y2="1">'
+            '<stop offset="0%" stop-color="#f0f9ff"/>'
+            '<stop offset="55%" stop-color="#7dd3fc"/>'
+            '<stop offset="100%" stop-color="#0284c7"/></linearGradient>')
+    if stage == 0:
+        return (
+            f"<defs>{grad}</defs>"
+            '<path d="M60,32 C46,32 38,52 38,70 a22,24 0 0,0 44,0'
+            f' C82,52 74,32 60,32 Z" fill="url(#{g})"/>'
+            '<path d="M60,44 v10 M55,47 l10,4 M65,47 l-10,4" stroke="#fff"'
+            ' stroke-width="1.4" stroke-linecap="round"/>'
+            + _face(60, 62, 4, mood))
+    parts = [f"<defs>{grad}</defs>"]
+    # forked tail fin (behind)
+    parts.append('<path d="M80,62 C92,56 98,48 96,38 C90,44 84,46 78,46 Z"'
+                 f' fill="url(#{g})" stroke="#e0f2fe" stroke-width="1"'
+                 ' opacity="0.95"/>')
+    parts.append('<path d="M80,62 C92,68 98,76 96,86 C90,80 84,78 78,78 Z"'
+                 f' fill="url(#{g})" stroke="#e0f2fe" stroke-width="1"'
+                 ' opacity="0.95"/>')
+    # frost-crystal dorsal fin
+    parts.append('<path d="M52,44 L56,30 L60,40 L64,28 L68,40 L72,32 L72,46 Z"'
+                 ' fill="#e0f2fe" stroke="#fff" stroke-width="1"'
+                 ' opacity="0.95"/>')
+    # sleek body
+    parts.append('<path d="M34,62 C40,48 54,42 66,46 C80,50 86,60 84,70'
+                 ' C80,80 64,84 50,80 C40,77 32,70 34,62 Z"'
+                 f' fill="url(#{g})" stroke="#e0f2fe" stroke-width="1.5"/>')
+    parts.append('<ellipse cx="50" cy="58" rx="7" ry="4.5" fill="#fff"'
+                 ' opacity="0.6" transform="rotate(-18 50 58)"/>')
+    if stage >= 2:
+        # ice-shard crown
+        parts.append('<path d="M50,48 L53,36 L57,44 L61,34 L65,44 L69,36 L70,48'
+                     ' Z" fill="#bae6fd" stroke="#fff" stroke-width="1"/>')
+    if stage >= 3:
+        # snowflake sparkles
+        for cx, cy, s in [(30, 40, 1), (92, 50, 0.8), (86, 96, 0.9)]:
+            parts.append(
+                f'<g transform="translate({cx} {cy}) scale({s})"'
+                ' stroke="#fff" stroke-width="1.3" stroke-linecap="round">'
+                '<path d="M-4,0 H4 M0,-4 V4 M-2.8,-2.8 L2.8,2.8'
+                ' M2.8,-2.8 L-2.8,2.8"/></g>')
+        parts.append('<path d="M40,84 q10,6 20,2" stroke="#fff"'
+                     ' stroke-width="2" fill="none" opacity="0.6"'
+                     ' stroke-linecap="round"/>')
+    parts.append(_face(56, 62, 4.2, mood))
+    return "".join(parts)
+
+
+# --- Kelpwarden: kelp warden "Brine" (locked: 10-day feed streak) -------------------
+def _art_kelpwarden(stage, mood):
+    g = _gid("kw")
+    grad = (f'<radialGradient id="{g}" cx="40%" cy="32%" r="75%">'
+            '<stop offset="0%" stop-color="#d1fae5"/>'
+            '<stop offset="55%" stop-color="#34d399"/>'
+            '<stop offset="100%" stop-color="#065f46"/></radialGradient>')
+    lg = _gid("kl")
+    lamp = (f'<radialGradient id="{lg}" cx="50%" cy="50%" r="50%">'
+            '<stop offset="0%" stop-color="#fef9c3"/>'
+            '<stop offset="55%" stop-color="#fde68a"/>'
+            '<stop offset="100%" stop-color="#f59e0b" stop-opacity="0.15"/>'
+            "</radialGradient>")
+    if stage == 0:
+        return (
+            f"<defs>{grad}</defs>"
+            '<path d="M60,32 C46,32 38,52 38,70 a22,24 0 0,0 44,0'
+            f' C82,52 74,32 60,32 Z" fill="url(#{g})"/>'
+            '<circle cx="70" cy="56" r="3.4" fill="#fde68a" opacity="0.9"/>'
+            + _face(60, 62, 4, mood))
+    parts = [f"<defs>{grad}{lamp}</defs>"]
+    # kelp mantle fronds
+    fronds = [("M58,68 C48,70 44,78 34,78", "#34d399"),
+              ("M62,68 C72,70 76,78 86,78", "#6ee7b7")]
+    if stage >= 2:
+        fronds += [("M57,80 C48,86 44,92 36,96", "#10b981"),
+                   ("M63,80 C72,86 76,92 84,96", "#059669")]
+    if stage >= 3:
+        fronds += [("M56,88 C50,94 48,98 42,102", "#6ee7b7"),
+                   ("M64,88 C70,94 72,98 78,102", "#10b981")]
+    for d, c in fronds:
+        parts.append(f'<path d="{d}" stroke="{c}" stroke-width="5" fill="none"'
+                     ' stroke-linecap="round" opacity="0.9"/>')
+    # the warden's lantern, held high
+    parts.append('<path d="M78,52 C84,44 88,38 88,32" stroke="#065f46"'
+                 ' stroke-width="3" fill="none" stroke-linecap="round"/>')
+    parts.append(f'<circle cx="88" cy="28" r="10" fill="url(#{lg})"/>')
+    parts.append('<circle cx="88" cy="28" r="4.5" fill="#fef3c7"'
+                 ' stroke="#b45309" stroke-width="1.2"/>')
+    parts.append('<path d="M84,22 h8" stroke="#92400e" stroke-width="1.6"'
+                 ' stroke-linecap="round"/>')
+    # round warden body
+    parts.append(f'<circle cx="60" cy="62" r="21" fill="url(#{g})"'
+                 ' stroke="#a7f3d0" stroke-width="1.5"/>')
+    parts.append('<ellipse cx="52" cy="54" rx="6" ry="4" fill="#fff"'
+                 ' opacity="0.6" transform="rotate(-20 52 54)"/>')
+    if stage >= 3:
+        # fireflies in the kelp
+        parts.append('<circle cx="36" cy="52" r="1.8" fill="#fef9c3"'
+                     ' opacity="0.95"/>')
+        parts.append('<circle cx="92" cy="66" r="1.6" fill="#fef9c3"'
+                     ' opacity="0.9"/>')
+        parts.append('<circle cx="70" cy="94" r="1.8" fill="#fef9c3"'
+                     ' opacity="0.9"/>')
+    parts.append(_face(60, 60, 4.2, mood))
+    return "".join(parts)
+
+
 _ART = {
+    "squiddy": _art_squiddy,
+    "puffish": _art_puffish,
+    "crownjelly": _art_crownjelly,
+    "abyssal": _art_abyssal,
+    "frostfin": _art_frostfin,
+    "kelpwarden": _art_kelpwarden,
     "driplet": _art_driplet,
     "bloop": _art_bloop,
     "koi": _art_koi,
@@ -1314,26 +1865,941 @@ _ACC_OVERLAY = {
 }
 
 
-def pet_svg(species, stage_idx, mood, size=120, accessories=()):
+def _celebrate_aura():
+    """Gold stage-up aura: renders for 24h after an evolution."""
+    g = _gid("evo")
+    return (
+        f'<defs><radialGradient id="{g}" cx="50%" cy="50%" r="50%">'
+        '<stop offset="0%" stop-color="#fef9c3" stop-opacity="0.75"/>'
+        '<stop offset="60%" stop-color="#fde68a" stop-opacity="0.25"/>'
+        '<stop offset="100%" stop-color="#fbbf24" stop-opacity="0"/>'
+        "</radialGradient></defs>"
+        f'<circle cx="60" cy="62" r="54" fill="url(#{g})"/>' + _sparkles())
+
+
+def pet_svg(species, stage_idx, mood, size=120, accessories=(), wardrobe=(),
+            celebrate=False):
     """Full standalone SVG for a pet. Pure inline vectors, no assets.
-    accessories: owned+equipped shop item keys, drawn as overlays."""
+    accessories: owned+equipped shop item keys, drawn as overlays.
+    wardrobe: equipped wardrobe item ids, layered by slot (backgrounds
+    behind everything, trails behind the body, the rest ride the body).
+    celebrate: gold stage-up aura (24h after an evolution)."""
     if species not in _ART:
         species = "driplet"
     stage_idx = max(0, min(len(PET_STAGES) - 1, stage_idx))
     glow = (mood == "overjoyed")  # hidden comeback reaction: happy face + sparkles
-    if mood not in ("happy", "content", "sleepy"):
+    if mood not in ("happy", "content", "sleepy", "peckish", "grumpy"):
         mood = "happy" if glow else "content"
     inner = _ART[species](stage_idx, mood)
     overlays = "".join(_ACC_OVERLAY[a]() for a in (accessories or ())
                        if a in _ACC_OVERLAY)
+    wb = [(w, WARDROBE_CATALOG[w]["slot"]) for w in (wardrobe or ())
+          if w in WARDROBE_CATALOG and w in _WARDROBE_OVERLAY]
+    bg_art = "".join(_WARDROBE_OVERLAY[w]() for w, s in wb
+                     if s == "background")
+    trail_art = "".join(_WARDROBE_OVERLAY[w]() for w, s in wb if s == "trail")
+    top_art = "".join(_WARDROBE_OVERLAY[w]() for w, s in wb
+                      if s in ("hat", "eyes", "body"))
     s = _STAGE_SCALE[stage_idx]
     aura = (_aura() + _sparkles()) if (stage_idx == 4 or glow) else ""
+    if celebrate:
+        aura = _celebrate_aura() + aura
     label = (f"{PET_SPECIES[species]['name']} — "
              f"{PET_STAGES[stage_idx][1]}, {mood}")
     return (
         f'<svg viewBox="0 0 120 120" width="{size}" height="{size}" role="img"'
         f' aria-label="{label}" xmlns="http://www.w3.org/2000/svg">'
         f"<title>{label}</title>"
-        f"{aura}{_shadow()}"
+        f"{bg_art}{aura}{_shadow()}{trail_art}"
         f'<g transform="translate(60 62) scale({s}) translate(-60 -62)">'
-        f"{inner}{overlays}</g></svg>")
+        f"{inner}{overlays}{top_art}</g></svg>")
+
+# ===========================================================================
+# WARDROBE — Neopets push, part A
+# Cosmetic items in five slots (hat, eyes, body, background, trail), layered
+# onto the pet portrait by pet_svg. Nothing here is sold for money — ever.
+# Items are earned three ways:
+#   shop:<price>        buy with spendable Signal (ledger-recorded, no USD)
+#   care_streak:<days>  auto-earned by feeding <days> days running
+#   stage:<idx>        auto-earned when the pet reaches that stage
+#   game:<game>        reserved for future Tidepal games
+#   seasonal:<season>  earnable only while that season is live
+#   event:<event>      one-time event grants
+# One item equipped per slot. equip_item refuses unearned items.
+# ===========================================================================
+
+WARDROBE_SLOTS = ["hat", "eyes", "body", "background", "trail"]
+
+WARDROBE_CATALOG = {
+    # --- hats ------------------------------------------------------------
+    "party_hat": {
+        "name": "Party Hat", "slot": "hat", "art_kind": "overlay",
+        "description": ("A striped cone of pure celebration. Worn exactly "
+                        "once a year, remembered forever."),
+        "unlock": "event:demo_night",
+    },
+    "cozy_beanie": {
+        "name": "Cozy Beanie", "slot": "hat", "art_kind": "overlay",
+        "description": "A soft-knit beanie for chilly signal nights.",
+        "unlock": "shop:30",
+    },
+    "seaweed_crown": {
+        "name": "Seaweed Crown", "slot": "hat", "art_kind": "overlay",
+        "description": ("A circlet of braided kelp, awarded to the most "
+                        "devoted Tidepal keepers."),
+        "unlock": "care_streak:7",
+    },
+    "fishbowl_helmet": {
+        "name": "Fishbowl Helmet", "slot": "hat", "art_kind": "overlay",
+        "description": ("A tiny glass dome of premium lagoon water. For "
+                        "Tidepals who travel in style."),
+        "unlock": "shop:45",
+    },
+    # --- eyes ------------------------------------------------------------
+    "heart_goggles": {
+        "name": "Heart Goggles", "slot": "eyes", "art_kind": "overlay",
+        "description": "See the whole town through heart-shaped lenses.",
+        "unlock": "shop:35",
+    },
+    "bubble_lenses": {
+        "name": "Bubble Lenses", "slot": "eyes", "art_kind": "overlay",
+        "description": ("Round bubble spectacles, polished by the deep "
+                        "square's finest optician."),
+        "unlock": "shop:25",
+    },
+    "lantern_goggles": {
+        "name": "Lantern Goggles", "slot": "eyes", "art_kind": "overlay",
+        "description": ("Warm-glowing goggles for exploring the midnight "
+                        "zone of the episode archive."),
+        "unlock": "game:tide_toss",
+    },
+    # --- body ------------------------------------------------------------
+    "kelp_scarf": {
+        "name": "Kelp Scarf", "slot": "body", "art_kind": "overlay",
+        "description": "A hand-knotted scarf from the town's kelp garden.",
+        "unlock": "shop:20",
+    },
+    "pearl_necklace": {
+        "name": "Pearl Necklace", "slot": "body", "art_kind": "overlay",
+        "description": ("Town-gossip pearls, strung by Pearly herself. "
+                        "Each one is a compliment someone meant."),
+        "unlock": "shop:40",
+    },
+    "coral_cape": {
+        "name": "Coral Cape", "slot": "body", "art_kind": "overlay",
+        "description": ("A sweeping cape of living coral — the mark of a "
+                        "Tidepal that grew up strong."),
+        "unlock": "stage:3",
+    },
+    "barnacle_bowtie": {
+        "name": "Barnacle Bowtie", "slot": "body", "art_kind": "overlay",
+        "description": "Dapper. Crusty. Somehow both.",
+        "unlock": "shop:25",
+    },
+    # --- backgrounds -----------------------------------------------------
+    "coral_garden": {
+        "name": "Coral Garden", "slot": "background", "art_kind": "overlay",
+        "description": "Your Tidepal's portrait, replanted in the reef.",
+        "unlock": "shop:50",
+    },
+    "aurora_reef": {
+        "name": "Aurora Reef", "slot": "background", "art_kind": "overlay",
+        "description": ("The deep-square sky, lit for a Radiant Tidepal. "
+                        "Only the brightest earn this view."),
+        "unlock": "stage:4",
+    },
+    "moonlit_lagoon": {
+        "name": "Moonlit Lagoon", "slot": "background", "art_kind": "overlay",
+        "description": ("A still lagoon under the frost-festival moon. "
+                        "Only available in winter."),
+        "unlock": "seasonal:winter26",
+    },
+    # --- trails ----------------------------------------------------------
+    "bubble_trail": {
+        "name": "Bubble Trail", "slot": "trail", "art_kind": "overlay",
+        "description": "Every entrance deserves a trail of bubbles.",
+        "unlock": "game:tide_toss",
+    },
+    "sparkle_trail": {
+        "name": "Sparkle Trail", "slot": "trail", "art_kind": "overlay",
+        "description": "Leave a little stardust wherever you drift.",
+        "unlock": "shop:55",
+    },
+    "sand_swirl": {
+        "name": "Sand Swirl", "slot": "trail", "art_kind": "overlay",
+        "description": "A lazy swirl of lagoon sand kicked up in your wake.",
+        "unlock": "shop:15",
+    },
+}
+
+
+# --- wardrobe art: same 120-space fragments as the _acc_* shop overlays -----
+def _wardrobe_party_hat():
+    return (
+        '<g transform="translate(60 26) rotate(8)">'
+        '<path d="M-11,4 L0,-20 L11,4 Z" fill="#f472b6"'
+        ' stroke="#be185d" stroke-width="1"/>'
+        '<path d="M-7.3,-4.5 L7.3,-4.5 L4.8,-10.5 L-4.8,-10.5 Z"'
+        ' fill="#fde68a" opacity="0.92"/>'
+        '<ellipse cx="0" cy="5.5" rx="13" ry="3" fill="#fbcfe3"'
+        ' stroke="#be185d" stroke-width="1"/>'
+        '<circle cx="0" cy="-21" r="3" fill="#fef3c7" stroke="#f59e0b"'
+        ' stroke-width="1"/></g>'
+        '<circle cx="30" cy="40" r="1.6" fill="#f472b6"/>'
+        '<circle cx="90" cy="36" r="1.6" fill="#38bdf8"/>'
+        '<circle cx="84" cy="98" r="1.6" fill="#fde68a"/>')
+
+
+def _wardrobe_cozy_beanie():
+    return (
+        '<g transform="translate(60 28) rotate(-6)">'
+        '<path d="M-16,6 C-16,-6 -9,-12 0,-12 C9,-12 16,-6 16,6 Z"'
+        ' fill="#38bdf8" stroke="#0369a1" stroke-width="1"/>'
+        '<path d="M-12,-2 C-6,-4 6,-4 12,-2" stroke="#bae6fd"'
+        ' stroke-width="1.4" fill="none" opacity="0.8"/>'
+        '<rect x="-17" y="4" width="34" height="7" rx="3.5" fill="#0ea5e9"'
+        ' stroke="#0369a1" stroke-width="1"/>'
+        '<circle cx="0" cy="-14" r="4" fill="#f0f9ff" stroke="#0369a1"'
+        ' stroke-width="1"/></g>')
+
+
+def _wardrobe_seaweed_crown():
+    fronds = "".join(
+        f'<path d="M{-14 + i * 7},{6 + (i % 2) * 2}'
+        f' q{3.5},{-10 - (i % 3) * 2} {7},{-12 - (i % 2) * 3}"'
+        ' stroke="#059669" stroke-width="3" fill="none"'
+        ' stroke-linecap="round"/>'
+        for i in range(5))
+    leaves = "".join(
+        f'<ellipse cx="{-14 + i * 7 + 5}" cy="{-6 - (i % 2) * 3}" rx="3"'
+        f' ry="1.6" fill="#34d399" transform="rotate(35 {-14 + i * 7 + 5}'
+        f' {-6 - (i % 2) * 3})"/>'
+        for i in range(5))
+    return (f'<g transform="translate(60 30)">{fronds}{leaves}'
+            '<path d="M-17,7 Q0,12 17,7" stroke="#047857" stroke-width="2.5"'
+            ' fill="none" stroke-linecap="round"/></g>')
+
+
+def _wardrobe_fishbowl_helmet():
+    g = _gid("fb")
+    return (
+        f'<defs><radialGradient id="{g}" cx="40%" cy="30%" r="80%">'
+        '<stop offset="0%" stop-color="#ffffff" stop-opacity="0.55"/>'
+        '<stop offset="70%" stop-color="#bae6fd" stop-opacity="0.28"/>'
+        '<stop offset="100%" stop-color="#7dd3fc" stop-opacity="0.45"/>'
+        "</radialGradient></defs>"
+        f'<ellipse cx="60" cy="52" rx="32" ry="28" fill="url(#{g})"'
+        ' stroke="#e0f2fe" stroke-width="2"/>'
+        '<ellipse cx="48" cy="42" rx="9" ry="5" fill="#fff" opacity="0.6"'
+        ' transform="rotate(-25 48 42)"/>'
+        '<circle cx="76" cy="62" r="2.4" fill="#bae6fd" opacity="0.8"/>'
+        '<circle cx="82" cy="52" r="1.7" fill="#bae6fd" opacity="0.7"/>')
+
+
+def _wardrobe_heart_goggles():
+    heart = ("M0,3 C-5.5,-2.5 -11,1 0,8.5 C11,1 5.5,-2.5 0,3 Z")
+    return (
+        f'<path d="{heart}" transform="translate(46 58)" fill="#f472b6"'
+        ' stroke="#be185d" stroke-width="1.2"/>'
+        f'<path d="{heart}" transform="translate(74 58)" fill="#f472b6"'
+        ' stroke="#be185d" stroke-width="1.2"/>'
+        '<circle cx="44" cy="60" r="1.8" fill="#fff" opacity="0.8"/>'
+        '<circle cx="72" cy="60" r="1.8" fill="#fff" opacity="0.8"/>'
+        '<path d="M55,62 Q60,60 65,62" stroke="#be185d" stroke-width="2"'
+        ' fill="none"/>'
+        '<path d="M37,60 L29,56 M83,60 L91,56" stroke="#be185d"'
+        ' stroke-width="2" stroke-linecap="round"/>')
+
+
+def _wardrobe_bubble_lenses():
+    return (
+        '<circle cx="46" cy="62" r="11" fill="#e0f2fe" opacity="0.5"'
+        ' stroke="#0284c7" stroke-width="1.6"/>'
+        '<circle cx="74" cy="62" r="11" fill="#e0f2fe" opacity="0.5"'
+        ' stroke="#0284c7" stroke-width="1.6"/>'
+        '<circle cx="42.5" cy="58.5" r="3" fill="#fff" opacity="0.85"/>'
+        '<circle cx="70.5" cy="58.5" r="3" fill="#fff" opacity="0.85"/>'
+        '<path d="M57,62 Q60,60.5 63,62" stroke="#0284c7" stroke-width="1.8"'
+        ' fill="none"/>'
+        '<path d="M35,60 L28,56 M85,60 L92,56" stroke="#0284c7"'
+        ' stroke-width="1.8" stroke-linecap="round"/>')
+
+
+def _wardrobe_lantern_goggles():
+    g = _gid("lg")
+    return (
+        f'<defs><radialGradient id="{g}" cx="50%" cy="50%" r="50%">'
+        '<stop offset="0%" stop-color="#fef9c3"/>'
+        '<stop offset="100%" stop-color="#f59e0b" stop-opacity="0.1"/>'
+        "</radialGradient></defs>"
+        f'<circle cx="46" cy="62" r="14" fill="url(#{g})"/>'
+        f'<circle cx="74" cy="62" r="14" fill="url(#{g})"/>'
+        '<circle cx="46" cy="62" r="10" fill="#fde68a" opacity="0.85"'
+        ' stroke="#b45309" stroke-width="1.6"/>'
+        '<circle cx="74" cy="62" r="10" fill="#fde68a" opacity="0.85"'
+        ' stroke="#b45309" stroke-width="1.6"/>'
+        '<circle cx="43" cy="59" r="2.4" fill="#fff" opacity="0.9"/>'
+        '<circle cx="71" cy="59" r="2.4" fill="#fff" opacity="0.9"/>'
+        '<path d="M56,62 Q60,60 64,62" stroke="#92400e" stroke-width="2"'
+        ' fill="none"/>')
+
+
+def _wardrobe_kelp_scarf():
+    return (
+        '<path d="M38,84 Q48,78 60,82 Q72,86 82,80" stroke="#059669"'
+        ' stroke-width="7" fill="none" stroke-linecap="round"/>'
+        '<path d="M74,84 q4,8 -2,14 q-4,4 -2,9" stroke="#10b981"'
+        ' stroke-width="5" fill="none" stroke-linecap="round"/>'
+        '<path d="M46,85 q-3,8 3,13" stroke="#34d399" stroke-width="4.5"'
+        ' fill="none" stroke-linecap="round"/>'
+        '<circle cx="70" cy="99" r="2" fill="#6ee7b7" opacity="0.8"/>'
+        '<circle cx="50" cy="100" r="1.7" fill="#6ee7b7" opacity="0.7"/>')
+
+
+def _wardrobe_pearl_necklace():
+    pearls = "".join(
+        f'<circle cx="{44 + i * 5.3:.1f}" cy="{82 + abs(i - 3) * 1.6:.1f}"'
+        f' r="3.1" fill="#f5f3ff" stroke="#a78bfa" stroke-width="0.9"/>'
+        for i in range(7))
+    return (
+        '<path d="M40,80 Q60,92 80,80" stroke="#a78bfa" stroke-width="1.2"'
+        ' fill="none" opacity="0.7"/>' + pearls +
+        '<circle cx="60" cy="88.5" r="1.2" fill="#fff" opacity="0.9"/>')
+
+
+def _wardrobe_coral_cape():
+    return (
+        '<path d="M38,60 C26,70 24,88 30,102 C36,94 38,80 42,70 Z"'
+        ' fill="#fb7185" stroke="#be123c" stroke-width="1" opacity="0.95"/>'
+        '<path d="M82,60 C94,70 96,88 90,102 C84,94 82,80 78,70 Z"'
+        ' fill="#fb7185" stroke="#be123c" stroke-width="1" opacity="0.95"/>'
+        '<circle cx="33" cy="80" r="2" fill="#fecdd3" opacity="0.8"/>'
+        '<circle cx="87" cy="84" r="2" fill="#fecdd3" opacity="0.8"/>'
+        '<path d="M40,62 Q60,70 80,62" stroke="#be123c" stroke-width="2.5"'
+        ' fill="none" stroke-linecap="round"/>')
+
+
+def _wardrobe_barnacle_bowtie():
+    return (
+        '<g transform="translate(60 86)">'
+        '<path d="M-2,0 L-14,-7 L-14,7 Z" fill="#0ea5e9" stroke="#0369a1"'
+        ' stroke-width="1"/>'
+        '<path d="M2,0 L14,-7 L14,7 Z" fill="#0ea5e9" stroke="#0369a1"'
+        ' stroke-width="1"/>'
+        '<circle cx="-8" cy="-2" r="1.6" fill="#e0f2fe" opacity="0.9"/>'
+        '<circle cx="8" cy="2" r="1.6" fill="#e0f2fe" opacity="0.9"/>'
+        '<rect x="-3.5" y="-4" width="7" height="8" rx="2" fill="#0284c7"'
+        ' stroke="#0c4a6e" stroke-width="1"/></g>')
+
+
+def _wardrobe_coral_garden():
+    return (
+        '<ellipse cx="60" cy="112" rx="52" ry="10" fill="#fde68a"'
+        ' opacity="0.35"/>'
+        '<path d="M16,110 q2,-14 -4,-22 q8,2 6,10 q6,-2 4,-12 q8,6 2,14'
+        ' q-2,8 -8,10 Z" fill="#fb7185" opacity="0.85"/>'
+        '<path d="M104,110 q-2,-14 4,-22 q-8,2 -6,10 q-6,-2 -4,-12 q-8,6 -2,14'
+        ' q2,8 8,10 Z" fill="#f472b6" opacity="0.85"/>'
+        '<circle cx="26" cy="96" r="2.4" fill="#fecdd3" opacity="0.8"/>'
+        '<circle cx="94" cy="92" r="2" fill="#fbcfe3" opacity="0.8"/>'
+        '<circle cx="60" cy="100" r="1.6" fill="#fff" opacity="0.5"/>')
+
+
+def _wardrobe_aurora_reef():
+    g = _gid("ar")
+    return (
+        f'<defs><linearGradient id="{g}" x1="0" y1="0" x2="1" y2="0">'
+        '<stop offset="0%" stop-color="#67e8f9" stop-opacity="0"/>'
+        '<stop offset="50%" stop-color="#67e8f9" stop-opacity="0.4"/>'
+        '<stop offset="100%" stop-color="#a78bfa" stop-opacity="0"/>'
+        "</linearGradient></defs>"
+        f'<path d="M0,34 C30,18 60,44 90,26 C100,20 112,24 120,20 L120,0'
+        f' L0,0 Z" fill="url(#{g})"/>'
+        '<path d="M0,52 C36,36 66,60 120,42 L120,30 C80,44 40,30 0,42 Z"'
+        ' fill="#a78bfa" opacity="0.14"/>'
+        '<circle cx="24" cy="18" r="1.6" fill="#fff" opacity="0.9"/>'
+        '<circle cx="70" cy="12" r="1.3" fill="#fff" opacity="0.8"/>'
+        '<circle cx="102" cy="16" r="1.8" fill="#fff" opacity="0.9"/>')
+
+
+def _wardrobe_moonlit_lagoon():
+    return (
+        '<circle cx="94" cy="24" r="12" fill="#fefce8" opacity="0.95"/>'
+        '<circle cx="90" cy="21" r="10" fill="#0b3b5c" opacity="0.12"/>'
+        '<circle cx="22" cy="20" r="1.5" fill="#fff" opacity="0.9"/>'
+        '<circle cx="44" cy="12" r="1.2" fill="#fff" opacity="0.8"/>'
+        '<circle cx="64" cy="22" r="1.4" fill="#fff" opacity="0.85"/>'
+        '<circle cx="14" cy="44" r="1.2" fill="#fff" opacity="0.7"/>'
+        '<path d="M20,104 q10,-4 20,0 q10,4 20,0 q10,-4 20,0 q10,4 20,0"'
+        ' stroke="#7dd3fc" stroke-width="2" fill="none" opacity="0.5"'
+        ' stroke-linecap="round"/>'
+        '<path d="M30,110 q10,-4 20,0 q10,4 20,0 q10,-4 20,0"'
+        ' stroke="#bae6fd" stroke-width="1.6" fill="none" opacity="0.4"'
+        ' stroke-linecap="round"/>')
+
+
+def _wardrobe_bubble_trail():
+    return "".join(
+        f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="#bae6fd"'
+        f' stroke="#fff" stroke-width="0.8" opacity="{op}"/>'
+        for cx, cy, r, op in [(30, 96, 4, 0.8), (22, 88, 3, 0.7),
+                              (16, 78, 2.4, 0.6), (92, 94, 3.4, 0.75),
+                              (100, 84, 2.4, 0.6), (105, 74, 1.8, 0.5)])
+
+
+def _wardrobe_sparkle_trail():
+    star = ("M0,-6 C1,-2 2,-1 6,0 C2,1 1,2 0,6 C-1,2 -2,1 -6,0"
+            " C-2,-1 -1,-2 0,-6 Z")
+    return "".join(
+        f'<path d="{star}" transform="translate({x} {y}) scale({s})"'
+        f' fill="{c}" opacity="0.95"/>'
+        for x, y, s, c in [(28, 92, 1.0, "#fde68a"), (18, 80, 0.7, "#fef9c3"),
+                           (94, 90, 0.9, "#fde68a"), (104, 78, 0.65, "#fff"),
+                           (60, 108, 0.8, "#fef9c3")])
+
+
+def _wardrobe_sand_swirl():
+    return (
+        '<path d="M24,104 q14,-10 30,-6 q16,4 30,-4" stroke="#fde68a"'
+        ' stroke-width="3" fill="none" opacity="0.5" stroke-linecap="round"/>'
+        '<path d="M30,110 q12,-8 26,-5 q14,3 26,-3" stroke="#fcd34d"'
+        ' stroke-width="2.2" fill="none" opacity="0.4" stroke-linecap="round"/>'
+        '<circle cx="44" cy="100" r="1.8" fill="#fde68a" opacity="0.7"/>'
+        '<circle cx="76" cy="104" r="1.5" fill="#fcd34d" opacity="0.6"/>')
+
+
+_WARDROBE_OVERLAY = {
+    "party_hat": _wardrobe_party_hat,
+    "cozy_beanie": _wardrobe_cozy_beanie,
+    "seaweed_crown": _wardrobe_seaweed_crown,
+    "fishbowl_helmet": _wardrobe_fishbowl_helmet,
+    "heart_goggles": _wardrobe_heart_goggles,
+    "bubble_lenses": _wardrobe_bubble_lenses,
+    "lantern_goggles": _wardrobe_lantern_goggles,
+    "kelp_scarf": _wardrobe_kelp_scarf,
+    "pearl_necklace": _wardrobe_pearl_necklace,
+    "coral_cape": _wardrobe_coral_cape,
+    "barnacle_bowtie": _wardrobe_barnacle_bowtie,
+    "coral_garden": _wardrobe_coral_garden,
+    "aurora_reef": _wardrobe_aurora_reef,
+    "moonlit_lagoon": _wardrobe_moonlit_lagoon,
+    "bubble_trail": _wardrobe_bubble_trail,
+    "sparkle_trail": _wardrobe_sparkle_trail,
+    "sand_swirl": _wardrobe_sand_swirl,
+}
+
+# --- wardrobe storage -------------------------------------------------------
+WARDROBE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS wardrobe_items (
+  item_id     TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  slot        TEXT NOT NULL,
+  art_kind    TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  unlock      TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS pet_wardrobe (
+  fm_id      TEXT NOT NULL,
+  item_id    TEXT NOT NULL,
+  equipped   INTEGER NOT NULL DEFAULT 0,
+  earned_at  INTEGER NOT NULL,
+  PRIMARY KEY (fm_id, item_id)
+);
+CREATE INDEX IF NOT EXISTS idx_pet_wardrobe_fm ON pet_wardrobe(fm_id);
+"""
+
+
+def ensure_wardrobe_schema(db):
+    for stmt in WARDROBE_SCHEMA.strip().split(";"):
+        stmt = stmt.strip()
+        if stmt:
+            db._exec(stmt)
+    # The code catalog is authoritative — seed new items, refresh changed.
+    for item_id, spec in WARDROBE_CATALOG.items():
+        db._exec(
+            "INSERT OR IGNORE INTO wardrobe_items"
+            " (item_id, name, slot, art_kind, description, unlock)"
+            " VALUES (?,?,?,?,?,?)",
+            (item_id, spec["name"], spec["slot"], spec["art_kind"],
+             spec["description"], spec["unlock"]))
+        db._exec(
+            "UPDATE wardrobe_items SET name=?, slot=?, art_kind=?,"
+            " description=?, unlock=? WHERE item_id=?",
+            (spec["name"], spec["slot"], spec["art_kind"],
+             spec["description"], spec["unlock"], item_id))
+
+
+def _wardrobe_unlock_parts(spec):
+    kind, _, param = spec["unlock"].partition(":")
+    return kind, param
+
+
+def wardrobe_unlock_text(spec):
+    """Human-readable unlock condition for a catalog spec."""
+    kind, param = _wardrobe_unlock_parts(spec)
+    if kind == "shop":
+        return f"Buy it for {param} Signal"
+    if kind == "care_streak":
+        return f"Feed your Tidepal {param} days running"
+    if kind == "stage":
+        idx = int(param)
+        sname = PET_STAGES[idx][1] if 0 <= idx < len(PET_STAGES) else "?"
+        return f"Grow to the {sname} stage"
+    if kind == "game":
+        return (f"Earn it in {param.replace('_', ' ')} "
+                f"(coming soon to the town square)")
+    if kind == "seasonal":
+        return f"Available during {param}"
+    if kind == "event":
+        return f"Earned at {param.replace('_', ' ')}"
+    return spec["unlock"]
+
+
+def wardrobe_catalog(db, fm_id=None):
+    """Full wardrobe catalog. With fm_id: annotated owned/equipped."""
+    ensure_wardrobe_schema(db)
+    owned, equipped = set(), {}
+    if fm_id:
+        owned = {r["item_id"] for r in db._q(
+            "SELECT item_id FROM pet_wardrobe WHERE fm_id=?", (fm_id,))}
+        equipped = equipped_wardrobe(db, fm_id)
+    out = []
+    for item_id, spec in WARDROBE_CATALOG.items():
+        entry = {"item_id": item_id, "name": spec["name"],
+                 "slot": spec["slot"], "art_kind": spec["art_kind"],
+                 "description": spec["description"], "unlock": spec["unlock"],
+                 "unlock_text": wardrobe_unlock_text(spec)}
+        kind, param = _wardrobe_unlock_parts(spec)
+        if kind == "shop":
+            entry["price"] = int(param)
+        if fm_id:
+            entry["owned"] = item_id in owned
+            entry["equipped"] = equipped.get(spec["slot"]) == item_id
+        out.append(entry)
+    return out
+
+
+_EARN_REASONS = {
+    "purchase": "shop",
+    "care_streak": "care_streak",
+    "stage": "stage",
+    "seasonal": "seasonal",
+    "event": "event",
+    "game": "game",
+    "admin": None,  # manual grants only — no route exposes this
+}
+
+
+def earn_item(db, fm_id, item_id, reason):
+    """Grant a wardrobe item. The reason must match the item's unlock
+    kind (purchase/care_streak/stage/seasonal/event/game), and the
+    server-side condition is re-checked — the client never decides.
+    Idempotent. Raises ValueError on mismatch, unknown item, or no pet."""
+    ensure_wardrobe_schema(db)
+    if item_id not in WARDROBE_CATALOG:
+        raise ValueError(f"unknown wardrobe item: {item_id}")
+    if not get_pet(db, fm_id):
+        raise ValueError("no Tidepal adopted yet")
+    if reason not in _EARN_REASONS:
+        raise ValueError(f"unknown earn reason: {reason}")
+    spec = WARDROBE_CATALOG[item_id]
+    kind, param = _wardrobe_unlock_parts(spec)
+    need = _EARN_REASONS[reason]
+    if need is not None and kind != need:
+        raise ValueError(
+            f"the {spec['name']} is earned via"
+            f" {wardrobe_unlock_text(spec).lower()} — not '{reason}'")
+    if kind == "care_streak" and feed_streak_days(db, fm_id) < int(param):
+        raise ValueError(f"the {spec['name']} needs a {param}-day feeding"
+                         f" streak — you're at"
+                         f" {feed_streak_days(db, fm_id)}")
+    if kind == "stage":
+        have = stage_for_points(db.lifetime_points(fm_id))[0]
+        if have < int(param):
+            raise ValueError(f"the {spec['name']} needs the"
+                             f" {PET_STAGES[int(param)][1]} stage")
+    if kind == "seasonal" and _current_season() != param:
+        raise ValueError(f"the {spec['name']} is only available during"
+                         f" {param} (now: {_current_season()})")
+    cur = db._exec(
+        "INSERT OR IGNORE INTO pet_wardrobe"
+        " (fm_id, item_id, equipped, earned_at) VALUES (?,?,0,?)",
+        (fm_id, item_id, now()))
+    earned = cur.rowcount > 0
+    if earned:
+        events.log_event(db, "pet_wardrobe_earned", fm_id, "wardrobe",
+                         item_id, "",
+                         f"👗 earned the {spec['name']} ({reason})")
+    return {"item_id": item_id, "name": spec["name"], "earned": earned,
+            "already_owned": not earned}
+
+
+def equip_item(db, fm_id, item_id=None, slot=None):
+    """Equip an owned wardrobe item (one equipped per slot), or unequip a
+    slot with item_id=None. Unlock gating: unearned items are refused.
+    Returns the new {slot: item_id} equipped map."""
+    ensure_wardrobe_schema(db)
+    if not get_pet(db, fm_id):
+        raise ValueError("no Tidepal adopted yet")
+    if item_id is None:
+        if slot not in WARDROBE_SLOTS:
+            raise ValueError(f"unknown slot: {slot}")
+    else:
+        if item_id not in WARDROBE_CATALOG:
+            raise ValueError(f"unknown wardrobe item: {item_id}")
+        owned = db._one("SELECT item_id FROM pet_wardrobe"
+                        " WHERE fm_id=? AND item_id=?", (fm_id, item_id))
+        if not owned:
+            raise ValueError(
+                f"you haven't earned the"
+                f" {WARDROBE_CATALOG[item_id]['name']} yet —"
+                f" {wardrobe_unlock_text(WARDROBE_CATALOG[item_id])}")
+        slot = WARDROBE_CATALOG[item_id]["slot"]
+    # One equipped per slot: clear the slot, then set the new item.
+    db._exec(
+        "UPDATE pet_wardrobe SET equipped=0 WHERE fm_id=? AND item_id IN"
+        " (SELECT item_id FROM wardrobe_items WHERE slot=?)",
+        (fm_id, slot))
+    if item_id is not None:
+        db._exec("UPDATE pet_wardrobe SET equipped=1"
+                 " WHERE fm_id=? AND item_id=?", (fm_id, item_id))
+    return equipped_wardrobe(db, fm_id)
+
+
+def equipped_wardrobe(db, fm_id):
+    """{slot: item_id} for everything currently worn."""
+    ensure_wardrobe_schema(db)
+    rows = db._q(
+        "SELECT w.item_id, i.slot FROM pet_wardrobe w"
+        " JOIN wardrobe_items i ON i.item_id = w.item_id"
+        " WHERE w.fm_id=? AND w.equipped=1", (fm_id,))
+    return {r["slot"]: r["item_id"] for r in rows}
+
+
+def buy_wardrobe_item(db, fm_id, item_id, idempotency_key=None):
+    """Buy a shop-unlock wardrobe item with spendable Signal. Mirrors the
+    Signal Shop's ledger discipline (shop.buy): signed routes only,
+    server-side balance math, idempotent via UNIQUE(fm_id, ref_id).
+    Lifetime Signal NEVER decreases — the charge lands in shop_purchases.
+    No USD, no money, anywhere. Bought items auto-equip into their slot."""
+    ensure_wardrobe_schema(db)
+    shop.ensure_shop_schema(db)
+    if item_id not in WARDROBE_CATALOG:
+        raise ValueError(f"unknown wardrobe item: {item_id}")
+    spec = WARDROBE_CATALOG[item_id]
+    kind, param = _wardrobe_unlock_parts(spec)
+    if kind != "shop":
+        raise ValueError(f"the {spec['name']} isn't for sale —"
+                         f" {wardrobe_unlock_text(spec)}")
+    price = int(param)
+    if not get_pet(db, fm_id):
+        raise ValueError("no Tidepal adopted yet")
+    ref_id = f"wardrobe:{item_id}"  # one-time item: ref doubles as id
+    prior = db._one("SELECT item FROM shop_purchases"
+                    " WHERE fm_id=? AND ref_id=?", (fm_id, ref_id))
+    if prior:
+        return {"charged": 0, "already_owned": True,
+                "spendable": shop.spendable(db, fm_id),
+                "item_id": item_id,
+                "equipped": equipped_wardrobe(db, fm_id)}
+    if shop.spendable(db, fm_id) < price:
+        raise ValueError(
+            f"insufficient spendable Signal — the {spec['name']} costs"
+            f" {price}, you have {shop.spendable(db, fm_id)} spendable")
+    try:
+        db._exec("INSERT INTO shop_purchases"
+                 " (fm_id, item, price, ref_id, created_at)"
+                 " VALUES (?,?,?,?,?)",
+                 (fm_id, ref_id, price, ref_id, now()))
+    except sqlite3.IntegrityError:
+        # lost a race with an identical in-flight purchase: no-op
+        return {"charged": 0, "already_owned": True,
+                "spendable": shop.spendable(db, fm_id),
+                "item_id": item_id,
+                "equipped": equipped_wardrobe(db, fm_id)}
+    earn_item(db, fm_id, item_id, "purchase")
+    equipped = equip_item(db, fm_id, item_id)
+    return {"charged": price, "already_owned": False,
+            "spendable": shop.spendable(db, fm_id),
+            "item_id": item_id, "name": spec["name"], "equipped": equipped}
+
+
+def _current_season():
+    """Season key like 'winter26'. Winter is named for the year it starts
+    in (Dec 2026 -> winter26), so winter26 = Dec 2026 - Feb 2027."""
+    t = time.gmtime()
+    y2 = t.tm_year % 100
+    m = t.tm_mon
+    if m == 12:
+        return f"winter{y2:02d}"
+    if m in (1, 2):
+        return f"winter{(y2 - 1) % 100:02d}"
+    if m in (3, 4, 5):
+        return f"spring{y2:02d}"
+    if m in (6, 7, 8):
+        return f"summer{y2:02d}"
+    return f"fall{y2:02d}"
+
+# ===========================================================================
+# DEEPER CARE — feed / play / rest
+# hunger + happiness live in pet_care and decay with neglect; low hunger
+# makes a Tidepal 'peckish', low happiness makes it 'grumpy'. Care actions
+# are signed, cooldown-gated, and boost stats visibly. Feeding N days
+# running auto-earns that streak's wardrobe item (care_streak:N).
+# No USD, no money — care is free, always.
+# ===========================================================================
+
+CARE_FEED_COOLDOWN = 4 * 3600    # 4h between feeds
+CARE_PLAY_COOLDOWN = 2 * 3600    # 2h between play sessions
+CARE_REST_COOLDOWN = 8 * 3600    # 8h between rests
+CARE_DECAY_PER_DAY = 12          # stat points lost per neglected day
+CARE_FEED_HUNGER = 25
+CARE_FEED_JOY = 5
+CARE_PLAY_JOY = 20
+CARE_PLAY_HUNGER_COST = 5
+CARE_REST_JOY = 10
+CARE_REST_HUNGER = 5
+
+CARE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS pet_care (
+  fm_id       TEXT PRIMARY KEY,
+  hunger      INTEGER NOT NULL DEFAULT 80,
+  happiness   INTEGER NOT NULL DEFAULT 80,
+  last_fed    INTEGER NOT NULL DEFAULT 0,
+  last_played INTEGER NOT NULL DEFAULT 0,
+  last_rested INTEGER NOT NULL DEFAULT 0,
+  feed_streak INTEGER NOT NULL DEFAULT 0
+);
+"""
+
+
+def ensure_care_schema(db):
+    db._exec(CARE_SCHEMA)
+
+
+def _care_row(db, fm_id):
+    ensure_care_schema(db)
+    row = db._one("SELECT * FROM pet_care WHERE fm_id=?", (fm_id,))
+    if not row:
+        db._exec("INSERT OR IGNORE INTO pet_care (fm_id) VALUES (?)",
+                 (fm_id,))
+        row = db._one("SELECT * FROM pet_care WHERE fm_id=?", (fm_id,))
+    return dict(row)
+
+
+def feed_streak_days(db, fm_id):
+    """Consecutive days fed (server-side). Drives care_streak unlocks."""
+    return _care_row(db, fm_id)["feed_streak"]
+
+
+def _decayed(value, last, t):
+    if not last:
+        return max(0, min(100, value))
+    days = (t - last) / 86400.0
+    return max(0, min(100, int(value - days * CARE_DECAY_PER_DAY)))
+
+
+def care_effective(db, fm_id):
+    """(hunger, happiness) after neglect decay. 0–100."""
+    row = _care_row(db, fm_id)
+    t = now()
+    return (_decayed(row["hunger"], row["last_fed"], t),
+            _decayed(row["happiness"], row["last_played"], t))
+
+
+def _cooldown_remaining(last, cooldown):
+    return max(0, last + cooldown - now())
+
+
+def _care_cooldowns(db, fm_id):
+    row = _care_row(db, fm_id)
+    return {"feed_in": _cooldown_remaining(row["last_fed"],
+                                          CARE_FEED_COOLDOWN),
+            "play_in": _cooldown_remaining(row["last_played"],
+                                          CARE_PLAY_COOLDOWN),
+            "rest_in": _cooldown_remaining(row["last_rested"],
+                                          CARE_REST_COOLDOWN)}
+
+
+def _fmt_wait(secs):
+    h, rem = divmod(int(secs), 3600)
+    m = rem // 60
+    if h:
+        return f"{h}h {m}m"
+    return f"{m}m"
+
+
+def care_status(db, fm_id):
+    """Public care state: effective stats, streak, cooldown countdowns.
+    None when no Tidepal adopted."""
+    if not get_pet(db, fm_id):
+        return None
+    row = _care_row(db, fm_id)
+    hunger, happiness = care_effective(db, fm_id)
+    return {"hunger": hunger, "happiness": happiness,
+            "feed_streak": row["feed_streak"],
+            "feed_in": _cooldown_remaining(row["last_fed"],
+                                          CARE_FEED_COOLDOWN),
+            "play_in": _cooldown_remaining(row["last_played"],
+                                          CARE_PLAY_COOLDOWN),
+            "rest_in": _cooldown_remaining(row["last_rested"],
+                                          CARE_REST_COOLDOWN),
+            "last_fed": row["last_fed"], "last_played": row["last_played"],
+            "last_rested": row["last_rested"]}
+
+
+def _check_care_unlocks(db, fm_id, streak, pet):
+    """Auto-earn every care_streak:N wardrobe item the streak qualifies
+    for. Returns the newly earned item ids."""
+    earned = []
+    for item_id, spec in WARDROBE_CATALOG.items():
+        kind, param = _wardrobe_unlock_parts(spec)
+        if kind == "care_streak" and streak >= int(param):
+            res = earn_item(db, fm_id, item_id, "care_streak")
+            if res["earned"]:
+                earned.append(item_id)
+                db.notify_once(
+                    fm_id, "pet", "wardrobe", f"care:{item_id}",
+                    f"👗 {streak}-day feeding streak! {pet['name']} earned"
+                    f" the {spec['name']} — check your wardrobe.")
+    return earned
+
+
+def feed_pet(db, fm_id):
+    """Feed your Tidepal. +25 hunger, +5 happiness. 4h cooldown.
+    Feeding on consecutive days builds the feed streak; streak
+    milestones auto-earn wardrobe items."""
+    pet = get_pet(db, fm_id)
+    if not pet:
+        raise ValueError("no Tidepal adopted yet")
+    row = _care_row(db, fm_id)
+    t = now()
+    wait = _cooldown_remaining(row["last_fed"], CARE_FEED_COOLDOWN)
+    if wait:
+        raise ValueError(f"{pet['name']} is full — try feeding again in"
+                         f" {_fmt_wait(wait)}")
+    last_day = row["last_fed"] // 86400 if row["last_fed"] else None
+    today = t // 86400
+    if last_day == today - 1:
+        streak = row["feed_streak"] + 1
+    elif last_day == today:
+        streak = row["feed_streak"]  # second feeding today: streak holds
+    else:
+        streak = 1  # streak broken — start over
+    hunger = min(100, row["hunger"] + CARE_FEED_HUNGER)
+    happiness = min(100, row["happiness"] + CARE_FEED_JOY)
+    db._exec("UPDATE pet_care SET hunger=?, happiness=?, last_fed=?,"
+             " feed_streak=? WHERE fm_id=?",
+             (hunger, happiness, t, streak, fm_id))
+    if last_day == today - 1 and streak in (3, 7, 10, 30):
+        events.log_event(db, "pet_care_streak", fm_id, "pet", fm_id, "",
+                         f"🔥 {pet['name']} hit a {streak}-day feeding streak!")
+    earned = _check_care_unlocks(db, fm_id, streak, pet)
+    return {"ok": True, "action": "feed", "hunger": hunger,
+            "happiness": happiness, "feed_streak": streak, "earned": earned,
+            **_care_cooldowns(db, fm_id)}
+
+
+def play_pet(db, fm_id):
+    """Play with your Tidepal. +20 happiness, −5 hunger (all that running
+    around works up an appetite). 2h cooldown."""
+    pet = get_pet(db, fm_id)
+    if not pet:
+        raise ValueError("no Tidepal adopted yet")
+    row = _care_row(db, fm_id)
+    t = now()
+    wait = _cooldown_remaining(row["last_played"], CARE_PLAY_COOLDOWN)
+    if wait:
+        raise ValueError(f"{pet['name']} needs a breather — play again in"
+                         f" {_fmt_wait(wait)}")
+    happiness = min(100, row["happiness"] + CARE_PLAY_JOY)
+    hunger = max(0, row["hunger"] - CARE_PLAY_HUNGER_COST)
+    db._exec("UPDATE pet_care SET hunger=?, happiness=?, last_played=?"
+             " WHERE fm_id=?", (hunger, happiness, t, fm_id))
+    return {"ok": True, "action": "play", "hunger": hunger,
+            "happiness": happiness, **_care_cooldowns(db, fm_id)}
+
+
+def rest_pet(db, fm_id):
+    """Tuck your Tidepal in. +10 happiness, +5 hunger (dream-snacks).
+    8h cooldown."""
+    pet = get_pet(db, fm_id)
+    if not pet:
+        raise ValueError("no Tidepal adopted yet")
+    row = _care_row(db, fm_id)
+    t = now()
+    wait = _cooldown_remaining(row["last_rested"], CARE_REST_COOLDOWN)
+    if wait:
+        raise ValueError(f"{pet['name']} is already well-rested — tuck in"
+                         f" again in {_fmt_wait(wait)}")
+    happiness = min(100, row["happiness"] + CARE_REST_JOY)
+    hunger = min(100, row["hunger"] + CARE_REST_HUNGER)
+    db._exec("UPDATE pet_care SET hunger=?, happiness=?, last_rested=?"
+             " WHERE fm_id=?", (hunger, happiness, t, fm_id))
+    return {"ok": True, "action": "rest", "hunger": hunger,
+            "happiness": happiness, **_care_cooldowns(db, fm_id)}
+
+
+def mood_for_all(energy, hunger, happiness):
+    """Care moods outrank energy moods: a starving Tidepal is peckish no
+    matter how active its owner is; a neglected one is grumpy."""
+    if hunger < 30:
+        return "peckish"
+    if happiness < 30:
+        return "grumpy"
+    return mood_for_energy(energy)
+
+
+# ===========================================================================
+# VISUAL EVOLUTION — stage-up as an event
+# tidepals.evolved_at / evolved_stage record the most recent stage-up
+# (server-side, ledger-derived). pet_svg's celebrate flag renders a gold
+# aura for 24h after the event.
+# ===========================================================================
+
+EVOLVE_GLOW_WINDOW = 86400  # 24h
+
+
+def _check_stage_up(db, fm_id, pet, stage_idx, stage_name):
+    """Detect a stage-up. Fires a one-time notification, sets the 24h
+    celebration marker, and auto-earns stage-gated wardrobe items.
+    Legacy rows (evolved_stage=-1) record silently — no false party."""
+    row = db._one("SELECT evolved_stage FROM tidepals WHERE fm_id=?",
+                  (fm_id,))
+    ev = row["evolved_stage"] if row else -1
+    t = now()
+    if ev is None or ev < 0:
+        # Legacy row (pre-wave-3): record silently, no false celebration.
+        db._exec("UPDATE tidepals SET evolved_stage=?, evolved_at=0"
+                 " WHERE fm_id=?", (stage_idx, fm_id))
+        return False
+    if stage_idx <= ev:
+        return False
+    db._exec("UPDATE tidepals SET evolved_stage=?, evolved_at=?"
+             " WHERE fm_id=?", (stage_idx, t, fm_id))
+    db.notify_once(
+        fm_id, "pet", "evolution", f"stage:{stage_idx}",
+        f"🎉 {pet['name']} evolved into a {stage_name} Tidepal!"
+        f" The town glows gold for a day.")
+    events.log_event(db, "pet_stage_up", fm_id, "pet", fm_id, "",
+                     f"🎉 {pet['name']} evolved into a {stage_name} Tidepal!")
+    for item_id, spec in WARDROBE_CATALOG.items():
+        kind, param = _wardrobe_unlock_parts(spec)
+        if kind == "stage" and int(param) <= stage_idx:
+            res = earn_item(db, fm_id, item_id, "stage")
+            if res["earned"]:
+                db.notify_once(
+                    fm_id, "pet", "wardrobe", f"stage:{item_id}",
+                    f"👗 Stage reward! {pet['name']} earned the"
+                    f" {spec['name']} — check your wardrobe.")
+    return True
+
+
+def evolution_glow(db, fm_id, stage_idx):
+    """True within 24h of the most recent stage-up."""
+    row = db._one("SELECT evolved_stage, evolved_at FROM tidepals"
+                  " WHERE fm_id=?", (fm_id,))
+    if not row or not row["evolved_at"]:
+        return False
+    return (row["evolved_stage"] == stage_idx
+            and (now() - row["evolved_at"]) < EVOLVE_GLOW_WINDOW)

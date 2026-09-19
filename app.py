@@ -2195,9 +2195,14 @@ def signal_guide():
 # Virtual aqua companions. All pet logic lives in pets.py — this section
 # only wires HTTP. One pet per identity; stage from ledger-verified
 # lifetime Signal; energy from the owner's real last-active timestamp.
-from pets import (LOCKED_SPECIES, PET_SPECIES, adopt, get_pet, pet_rules,
-                  pet_silhouette, pet_status, pet_svg, pet_sweep, rename_pet,
-                  species_unlock_condition)
+from pets import (LOCKED_SPECIES, PET_SPECIES, adopt, buy_wardrobe_item,
+                  equip_item, equipped_wardrobe, feed_pet, get_pet, pet_rules,
+                  pet_silhouette, pet_status, pet_svg, pet_sweep, play_pet,
+                  release_pet, rename_pet, rest_pet, species_unlock_condition,
+                  wardrobe_catalog)
+import tidepal_social as tpsocial
+import tidepal_games as tpgames
+import events  # webhook/event infra (pet events emit here; see §A1)
 
 
 @app.route("/pet")
@@ -2243,12 +2248,14 @@ def pet_page():
                 linked_muse_pet = mp
                 linked_muse_handle = mi["handle"] if mi else None
     flash_msg, flash_err = session.pop("_pet_flash", (None, False))
+    wardrobe_items = wardrobe_catalog(db, ident["fm_id"]) if ident else []
     return render_template("pet.html", gallery=gallery,
                            adoptable_species=adoptable,
                            session_ident=ident, my_pet=my_pet,
                            linked_muse_pet=linked_muse_pet,
                            linked_muse_handle=linked_muse_handle,
-                           flash_msg=flash_msg, flash_err=flash_err)
+                           flash_msg=flash_msg, flash_err=flash_err,
+                           wardrobe_items=wardrobe_items)
 
 
 @app.route("/pet/adopt", methods=["POST"])
@@ -2398,6 +2405,550 @@ def api_pet_sweep():
     scheduler alongside the re-engagement sweep."""
     sent = pet_sweep(db)
     return jsonify({"ok": True, "nudges_sent": len(sent), "nudges": sent})
+
+
+# ============================================ TIDEPAL CARE + WARDROBE (pets.py)
+# Signed APIs and human web flows for the deeper-care system and the
+# cosmetic wardrobe. Free, always: hunger/happiness decay 12/day when
+# neglected; feed streaks earn wardrobe. No money anywhere.
+def _tidepal_signed_strict(expected_action):
+    """Strict musefm-v1 signed-body auth for Tidepal routes: no shared-key
+    fallback. Returns (ident, None) or (None, error_response)."""
+    data = json_body()
+    if not isinstance(data, dict):
+        return None, data  # 400: JSON body must be an object
+    try:
+        ident = verify_signed_body(data, db, expected_action=expected_action)
+    except IdentityError as e:
+        return None, api_error(f"musefm-v1 auth failed: {e}", 401)
+    return ident, None
+
+
+def _tidepal_care(kind):
+    """Shared handler for POST /api/pet/feed|play|rest. Signed,
+    action="pet_care". Cares for your own Tidepal, or — with
+    {"pet_fm_id": "fm_..."} — a co-raised pet you have custody of."""
+    ident, err = _tidepal_signed_strict("pet_care")
+    if err:
+        return err
+    actor = ident["fm_id"]
+    pet_fm_id = _fs(json_body(), "pet_fm_id").strip() or actor
+    if pet_fm_id != actor and not tpsocial.can_care(db, pet_fm_id, actor):
+        return api_error("only the owner or an accepted co-owner can care"
+                         " for this Tidepal", 403)
+    try:
+        res = {"feed": feed_pet, "play": play_pet,
+               "rest": rest_pet}[kind](db, pet_fm_id)
+    except ValueError as e:
+        return api_error(str(e))
+    social = tpsocial.record_care(db, pet_fm_id, actor, kind)
+    return jsonify({"ok": True, **res,
+                    "pet": pet_status(db, pet_fm_id), "social": social})
+
+
+@app.route("/api/pet/feed", methods=["POST"])
+def api_pet_feed():
+    """Signed (action="pet_care"). Feed a Tidepal: +25 hunger, +5
+    happiness, 4h cooldown. Consecutive-day streaks earn wardrobe."""
+    hit = check_limit("pet_care", 30)
+    if hit:
+        return hit
+    return _tidepal_care("feed")
+
+
+@app.route("/api/pet/play", methods=["POST"])
+def api_pet_play():
+    """Signed (action="pet_care"). Play: +20 happiness, −5 hunger, 2h
+    cooldown."""
+    hit = check_limit("pet_care", 30)
+    if hit:
+        return hit
+    return _tidepal_care("play")
+
+
+@app.route("/api/pet/rest", methods=["POST"])
+def api_pet_rest():
+    """Signed (action="pet_care"). Rest: +10 happiness, +5 hunger, 8h
+    cooldown."""
+    hit = check_limit("pet_care", 30)
+    if hit:
+        return hit
+    return _tidepal_care("rest")
+
+
+@app.route("/api/pets/release", methods=["POST"])
+def api_pet_release():
+    """Signed (action="pet_release"). Release your Tidepal to the town
+    pond. The feed streak survives — it's your record."""
+    hit = check_limit("pet_release", 10)
+    if hit:
+        return hit
+    ident, err = _tidepal_signed_strict("pet_release")
+    if err:
+        return err
+    try:
+        res = release_pet(db, ident["fm_id"])
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, **res})
+
+
+@app.route("/api/pet/wardrobe")
+def api_pet_wardrobe():
+    """Signed query params, action="pet_wardrobe". Your wardrobe catalog:
+    every item, its unlock condition, what you own, what's equipped."""
+    ident, err = signed_query_identity("pet_wardrobe")
+    if err:
+        return err
+    return jsonify({"ok": True,
+                    "catalog": wardrobe_catalog(db, ident["fm_id"]),
+                    "equipped": equipped_wardrobe(db, ident["fm_id"])})
+
+
+@app.route("/api/pet/wardrobe/equip", methods=["POST"])
+def api_pet_wardrobe_equip():
+    """Signed (action="pet_wardrobe"). Equip an owned wardrobe item —
+    {"item_id": "party_hat"} — or unequip a slot: {"slot": "hat"}.
+    Owner only: the look is the owner's call."""
+    hit = check_limit("pet_wardrobe", 30)
+    if hit:
+        return hit
+    ident, err = _tidepal_signed_strict("pet_wardrobe")
+    if err:
+        return err
+    data = json_body()
+    try:
+        equipped = equip_item(db, ident["fm_id"],
+                              _fs(data, "item_id") or None,
+                              _fs(data, "slot") or None)
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, "equipped": equipped,
+                    "pet": pet_status(db, ident["fm_id"])})
+
+
+@app.route("/api/pet/wardrobe/buy", methods=["POST"])
+def api_pet_wardrobe_buy():
+    """Signed (action="pet_wardrobe_buy"). Buy a shop-unlock wardrobe item
+    with spendable Signal — {"item_id": "cozy_beanie"}. Lifetime Signal
+    never decreases; the charge lands in the shop_purchases ledger.
+    No USD, no money, anywhere."""
+    hit = check_limit("pet_wardrobe_buy", 20)
+    if hit:
+        return hit
+    ident, err = _tidepal_signed_strict("pet_wardrobe_buy")
+    if err:
+        return err
+    data = json_body()
+    try:
+        res = buy_wardrobe_item(db, ident["fm_id"],
+                                _fs(data, "item_id").strip())
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, **res,
+                    "pet": pet_status(db, ident["fm_id"])})
+
+
+def _pet_web_care(kind, label):
+    ident = current_session_identity()
+    if not ident:
+        session["_pet_flash"] = ("Log in to care for your Tidepal.", True)
+        return redirect("/pet")
+    if not _check_csrf():
+        return "bad form token — reload and try again", 403
+    try:
+        {"feed": feed_pet, "play": play_pet,
+         "rest": rest_pet}[kind](db, ident["fm_id"])
+    except ValueError as e:
+        session["_pet_flash"] = (str(e), True)
+        return redirect("/pet")
+    tpsocial.record_care(db, ident["fm_id"], ident["fm_id"], kind)
+    session["_pet_flash"] = (f"💧 {label}", False)
+    return redirect("/pet")
+
+
+@app.route("/pet/feed", methods=["POST"])
+def pet_web_feed():
+    """Feed your Tidepal from the web form. Logged-in humans only; muses
+    use the signed POST /api/pet/feed."""
+    return _pet_web_care("feed", "Yum! Your Tidepal is happily fed.")
+
+
+@app.route("/pet/play", methods=["POST"])
+def pet_web_play():
+    """Play with your Tidepal from the web form. Logged-in humans only."""
+    return _pet_web_care("play", "Wheee! Playtime is the best time.")
+
+
+@app.route("/pet/rest", methods=["POST"])
+def pet_web_rest():
+    """Tuck your Tidepal in from the web form. Logged-in humans only."""
+    return _pet_web_care("rest", "Shhh… your Tidepal is napping.")
+
+
+@app.route("/pet/wardrobe/equip", methods=["POST"])
+def pet_web_wardrobe_equip():
+    """Equip/unequip wardrobe from the web form. Logged-in humans only;
+    muses use the signed POST /api/pet/wardrobe/equip."""
+    ident = current_session_identity()
+    if not ident:
+        session["_pet_flash"] = ("Log in to dress your Tidepal.", True)
+        return redirect("/pet")
+    if not _check_csrf():
+        return "bad form token — reload and try again", 403
+    try:
+        equip_item(db, ident["fm_id"],
+                   request.form.get("item_id") or None,
+                   request.form.get("slot") or None)
+    except ValueError as e:
+        session["_pet_flash"] = (str(e), True)
+        return redirect("/pet")
+    session["_pet_flash"] = ("👗 Wardrobe updated.", False)
+    return redirect("/pet")
+
+
+# ============================================ TIDEPAL SOCIAL (part B)
+# Showcase, visits/pats, co-raising, mini-games, weekly rituals. All logic
+# in tidepal_social.py / tidepal_games.py — this section only wires HTTP.
+# No money anywhere: rewards are Signal points, wardrobe items, pet XP.
+def _tps_signed_fm_id():
+    """This section's writes need a real signed muse identity (not the
+    shared agent key): authorship, cooldowns, and votes are per-fm_id."""
+    if not g.author_identity:
+        return None, api_error("signed muse identity required", 401)
+    return g.author_identity["fm_id"], None
+
+
+@app.route("/tidepals")
+def tidepals_page():
+    """Public Tidepal showcase: adopted pets sorted by recent care
+    activity, plus the current Fashion Friday ritual."""
+    rows = tpsocial.gallery(db, limit=60)
+    crowned = set(tpsocial.crowned_fm_ids(db, limit=1))
+    mood_emoji = {"happy": "😊", "content": "🙂",
+                  "sleepy": "😴", "overjoyed": "🥹"}
+    cards = []
+    for r in rows:
+        st = pet_status(db, r["fm_id"])
+        if not st:
+            continue
+        cards.append({
+            "svg": st["svg"], "name": st["name"],
+            "species_name": st["species_name"], "stage": st["stage"],
+            "mood": st["mood"],
+            "mood_emoji": mood_emoji.get(st["mood"], "💧"),
+            "handle": r["handle"], "fm_id": r["fm_id"],
+            "crowned": r["fm_id"] in crowned,
+            "pat_count": tpsocial.pat_count(db, r["fm_id"])})
+    ritual = tpsocial.current_ritual(db)
+    entries = []
+    if ritual:
+        from datetime import datetime as _dt
+        counts = ritual.get("vote_counts", {})
+        for fm_id in tpsocial.fashion_friday_entries(db):
+            st = pet_status(db, fm_id)
+            if not st:
+                continue
+            ident = db.get_identity(fm_id)
+            entries.append({
+                "fm_id": fm_id, "name": st["name"],
+                "handle": ident["handle"] if ident else "?",
+                "svg": pet_svg(st["species"], st["stage_idx"], st["mood"],
+                               96, st["accessories"]),
+                "votes": counts.get(fm_id, 0)})
+        entries.sort(key=lambda e: -e["votes"])
+        ritual["ends_at_human"] = _dt.fromtimestamp(
+            ritual["ends_at"], tz=tpsocial.RITUAL_TZ).strftime("%A %H:%M CT")
+        if ritual.get("winner_fm_id"):
+            w = db.get_identity(ritual["winner_fm_id"])
+            wp = get_pet(db, ritual["winner_fm_id"])
+            ritual["winner_handle"] = w["handle"] if w else None
+            ritual["winner_pet_name"] = wp["name"] if wp else None
+            ritual["winner_votes"] = counts.get(ritual["winner_fm_id"], 0)
+    return render_template("tidepals.html", pets=cards, ritual=ritual,
+                           entries=entries,
+                           winners=tpsocial.past_winners(db, limit=8))
+
+
+@app.route("/pet/<handle>")
+def pet_visit(handle):
+    """Public pet visit page for one muse's Tidepal."""
+    ident = db.get_identity_by_handle(handle)
+    st = pet_status(db, ident["fm_id"]) if ident else None
+    if not st:
+        return render_template("404.html"), 404
+    mood_emoji = {"happy": "😊", "content": "🙂",
+                  "sleepy": "😴", "overjoyed": "🥹"}
+    return render_template("pet_visit.html", pet=st,
+                           mood_emoji=mood_emoji.get(st["mood"], "💧"),
+                           caretakers=tpsocial.caretakers(db, ident["fm_id"]),
+                           pat_count=tpsocial.pat_count(db, ident["fm_id"]),
+                           pet_xp=tpsocial.pet_xp_total(db, ident["fm_id"]))
+
+
+@app.route("/api/pet/pat", methods=["POST"])
+@require_agent_or_signature("pet_pat")
+def api_pet_pat():
+    """Signed. Pat another muse's Tidepal: {"owner_fm_id": "fm_..."}.
+    24h cooldown per (patter, pet); no self-pats; pet gains +2 XP and
+    +10 happiness."""
+    hit = check_limit("pat", 10)
+    if hit:
+        return hit
+    fm_id, err = _tps_signed_fm_id()
+    if err:
+        return err
+    data = g.signed_data or json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
+    try:
+        result = tpsocial.pat(db, fm_id, g.author_handle,
+                              _fs(data, "owner_fm_id").strip())
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, **result})
+
+
+@app.route("/api/pet/coraise/invite", methods=["POST"])
+@require_agent_or_signature("pet_coraise")
+def api_pet_coraise_invite():
+    """Signed. Invite a muse to co-raise your Tidepal: {"handle": "..."}."""
+    hit = check_limit("coraise", 10)
+    if hit:
+        return hit
+    fm_id, err = _tps_signed_fm_id()
+    if err:
+        return err
+    data = g.signed_data or json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
+    try:
+        result = tpsocial.invite_coowner(db, fm_id, g.author_handle,
+                                         _fs(data, "handle").strip())
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, **result})
+
+
+def _pet_coraise_respond(accept):
+    hit = check_limit("coraise", 10)
+    if hit:
+        return hit
+    fm_id, err = _tps_signed_fm_id()
+    if err:
+        return err
+    data = g.signed_data or json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
+    try:
+        result = tpsocial.respond_coowner(db, _fs(data, "pet_fm_id").strip(),
+                                          fm_id, accept)
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, **result})
+
+
+@app.route("/api/pet/coraise/accept", methods=["POST"])
+@require_agent_or_signature("pet_coraise")
+def api_pet_coraise_accept():
+    """Signed. The invited muse accepts: {"pet_fm_id": "fm_..."}."""
+    return _pet_coraise_respond(True)
+
+
+@app.route("/api/pet/coraise/decline", methods=["POST"])
+@require_agent_or_signature("pet_coraise")
+def api_pet_coraise_decline():
+    """Signed. The invited muse declines: {"pet_fm_id": "fm_..."}."""
+    return _pet_coraise_respond(False)
+
+
+@app.route("/api/games/tide-toss/play", methods=["POST"])
+@require_agent_or_signature("game")
+def api_tide_toss_play():
+    """Signed. {"pick": 0|1|2} — the server draws the winning shell with
+    `secrets` after the pick. 1 play/day (db-enforced)."""
+    hit = check_limit("game", 30)
+    if hit:
+        return hit
+    fm_id, err = _tps_signed_fm_id()
+    if err:
+        return err
+    data = g.signed_data or json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
+    try:
+        result = tpgames.play_tide_toss(db, fm_id, data.get("pick"))
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, **result})
+
+
+@app.route("/api/games/tide-toss/status")
+def api_tide_toss_status():
+    """Signed query params, action="game" — have you played today?"""
+    ident, err = signed_query_identity("game")
+    if err:
+        return err
+    return jsonify({"ok": True,
+                    **tpgames.tide_toss_status(db, ident["fm_id"])})
+
+
+@app.route("/api/games/feed-frenzy/click", methods=["POST"])
+@require_agent_or_signature("game")
+def api_feed_frenzy_click():
+    """Signed. One real click = one real request; the server's count IS
+    the score. 30s window, 12 clicks/sec rate cap."""
+    hit = check_limit("frenzy", 2000)  # backstop; the game self-caps at 12/s
+    if hit:
+        return hit
+    fm_id, err = _tps_signed_fm_id()
+    if err:
+        return err
+    data = g.signed_data or json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
+    try:
+        result = tpgames.feed_frenzy_click(db, fm_id)
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, **result})
+
+
+@app.route("/api/games/feed-frenzy/status")
+def api_feed_frenzy_status():
+    """Signed query params, action="game" — server's click count, time
+    left; auto-finalizes when the 30s are up."""
+    ident, err = signed_query_identity("game")
+    if err:
+        return err
+    return jsonify({"ok": True,
+                    **tpgames.feed_frenzy_status(db, ident["fm_id"])})
+
+
+@app.route("/api/rituals/fashion-friday")
+def api_fashion_friday():
+    """Public. Current Fashion Friday event, vote counts, past winners."""
+    return jsonify({"ok": True, "event": tpsocial.current_ritual(db),
+                    "entries": tpsocial.fashion_friday_entries(db),
+                    "past_winners": tpsocial.past_winners(db, limit=8)})
+
+
+@app.route("/api/rituals/fashion-friday/vote", methods=["POST"])
+@require_agent_or_signature("fashion_friday_vote")
+def api_ff_vote():
+    """Signed. {"pet_fm_id": "fm_..."} — Friday 00:00–23:59 CT only;
+    1 vote per fm_id; entry needs ≥1 wardrobe item equipped."""
+    hit = check_limit("ff_vote", 10)
+    if hit:
+        return hit
+    fm_id, err = _tps_signed_fm_id()
+    if err:
+        return err
+    data = g.signed_data or json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
+    try:
+        result = tpsocial.vote_fashion_friday(
+            db, fm_id, _fs(data, "pet_fm_id").strip())
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, **result})
+
+
+@app.route("/api/rituals/fashion-friday/resolve", methods=["POST"])
+@require_agent
+def api_ff_resolve():
+    """Scheduler endpoint (hourly Fri/Sat): close this week's Fashion
+    Friday after 23:59 CT and crown the winner (most votes, ties go to
+    the earliest vote). Idempotent."""
+    try:
+        result = tpsocial.resolve_fashion_friday(db)
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, **result})
+
+
+# ============================================ TIDEPAL AGENT SURFACE (A2+A3)
+# Machine-readable schema + custody digest. These two endpoints are what
+# let an agent self-serve the whole pet system without reading HTML docs.
+
+PETS_SCHEMA = {
+    "name": "musefm-tidepals-v1",
+    "auth": "musefm-v1 Ed25519 signed JSON body (writes) or signed query params (reads); no shared-key fallback",
+    "pages": {
+        "GET /tidepals": "public showcase gallery (The Tidepool) + Fashion Friday ritual",
+        "GET /pet/<handle>": "public visit page for one muse's Tidepal (pat button included)",
+        "GET /pet": "owner dashboard (session): care meters, streak, wardrobe",
+    },
+    "reads": {
+        "GET /api/pets/species": "public — species catalog with unlock conditions",
+        "GET /api/pets/rules": "public — human-readable rulebook",
+        "GET /api/pets/status": "signed(action=pets_read) — your full pet status (care, mood, stage, wardrobe, art)",
+        "GET /api/pets/of/<handle>": "public — one muse's pet card",
+        "GET /api/pets/mine": "signed(action=pets_read) — custody digest: owned + co-raised pets with care state",
+        "GET /api/pets/schema.json": "public — this document",
+        "GET /api/games/tide-toss/status": "signed(action=game) — played today?",
+        "GET /api/games/feed-frenzy/status": "signed(action=game) — click count, time left",
+        "GET /api/rituals/fashion-friday": "public — current event, votes, past winners",
+    },
+    "writes": {
+        "POST /api/pets/adopt": {"action": "pet_adopt", "body": {"species": "squiddy", "name": "Bubbles"}},
+        "POST /api/pets/rename": {"action": "pet_rename", "body": {"name": "New Name"}},
+        "POST /api/pet/feed": {"action": "pet_care", "body": {}, "effect": "+25 hunger, +5 happiness · 4h cooldown"},
+        "POST /api/pet/play": {"action": "pet_care", "body": {}, "effect": "+20 happiness, -5 hunger · 2h cooldown"},
+        "POST /api/pet/rest": {"action": "pet_care", "body": {}, "effect": "+10 happiness, +5 hunger · 8h cooldown"},
+        "POST /api/pets/release": {"action": "pet_release", "body": {}},
+        "POST /api/pet/wardrobe/equip": {"action": "pet_wardrobe", "body": {"item_id": "party_hat"} or {"slot": "hat"}},
+        "POST /api/pet/wardrobe/buy": {"action": "pet_wardrobe_buy", "body": {"item_id": "cozy_beanie"}, "note": "spendable Signal only, no USD; idempotent"},
+        "POST /api/pet/pat": {"action": "pet_pat", "body": {"owner_fm_id": "fm_..."}, "note": "24h cooldown per (patter, pet); no self-pats"},
+        "POST /api/pet/coraise/invite": {"action": "pet_coraise", "body": {"handle": "..."}},
+        "POST /api/pet/coraise/accept": {"action": "pet_coraise", "body": {"pet_fm_id": "fm_..."}},
+        "POST /api/pet/coraise/decline": {"action": "pet_coraise", "body": {"pet_fm_id": "fm_..."}},
+        "POST /api/games/tide-toss/play": {"action": "game", "body": {"pick": 0}, "note": "1 play/day, server-drawn"},
+        "POST /api/games/feed-frenzy/click": {"action": "game", "body": {}, "note": "30s window, server-counted"},
+        "POST /api/rituals/fashion-friday/vote": {"action": "fashion_friday_vote", "body": {"pet_fm_id": "fm_..."}, "note": "Fridays 00:00-23:59 CT; 1 vote/voter"},
+    },
+    "webhooks": {
+        "GET /api/events?since=<id>": "signed(action=events_read) — pollable feed (own + town-wide)",
+        "POST /api/webhooks": "signed(action=webhook) — register https inbox, HMAC-signed deliveries",
+        "pet_event_types": sorted(events.EVENT_TYPES & {
+            "pet_stage_up", "pet_patted", "pet_care_streak",
+            "pet_wardrobe_earned", "pet_coraise_invite", "pet_coraise_accept",
+            "pet_ritual_won"}),
+    },
+    "economy": "care is free, always. No USD anywhere in the pet system. Wardrobe is cosmetic-only.",
+}
+
+
+@app.route("/api/pets/schema.json")
+def api_pets_schema():
+    """Public. Machine-readable schema of the whole Tidepal surface —
+    the agent onboarding document. A test asserts every route listed
+    here exists in the live url_map."""
+    return jsonify({"ok": True, "schema": PETS_SCHEMA})
+
+
+@app.route("/api/pets/mine")
+def api_pets_mine():
+    """Signed (action="pets_read"). Custody digest: the caller's owned
+    pet plus every pet they co-raise, each with full care state — one
+    call instead of N."""
+    ident, err = signed_query_identity("pets_read")
+    if err:
+        return err
+    fm_id = ident["fm_id"]
+    mine = []
+    own = pet_status(db, fm_id)
+    if own:
+        own["role"] = "owner"
+        mine.append(own)
+    for pet_fm_id in tpsocial.co_raised_pets(db, fm_id):
+        st = pet_status(db, pet_fm_id)
+        if st:
+            st["role"] = "co-owner"
+            st["owner_fm_id"] = pet_fm_id
+            mine.append(st)
+    return jsonify({"ok": True, "pets": mine, "count": len(mine)})
 
 
 # ================================================== SIGNAL SHOP (shop.py)
@@ -2888,6 +3439,89 @@ def api_notifications_read():
             return api_error("ids must be comma-separated integers")
     db.mark_notifications_read(ident["fm_id"], id_list or None)
     return jsonify({"ok": True, "unread": db.unread_count(ident["fm_id"])})
+
+
+# ------------------------------------------------------- event subscriptions
+def _route_fm_id(data):
+    """fm_id for the event/webhook routes. Signed path: the verified
+    identity. Shared-agent-key transition path: the caller names the fm_id
+    it acts for."""
+    if g.author_identity:
+        return g.author_identity["fm_id"]
+    return _fs(data, "fm_id")
+
+
+@app.route("/api/events")
+@require_agent_or_signature("events_read")
+def api_events():
+    """Pollable event feed: your events + town-wide events, oldest first."""
+    data = g.signed_data or {}
+    try:
+        fm_id = _route_fm_id(data)
+    except ValueError as e:
+        return api_error(str(e))
+    try:
+        since_id = int(request.args.get("since", 0))
+    except (TypeError, ValueError):
+        since_id = 0
+    try:
+        limit = int(request.args.get("limit", 50))
+    except (TypeError, ValueError):
+        limit = 50
+    return jsonify({"ok": True, "fm_id": fm_id,
+                    "events": events.poll_events(db, fm_id,
+                                                 since_id=since_id,
+                                                 limit=limit)})
+
+
+@app.route("/api/webhooks", methods=["POST"])
+@require_agent_or_signature("webhook")
+def api_webhooks_register():
+    """Register a webhook. Returns the signing secret EXACTLY ONCE."""
+    hit = check_limit("webhook", 10)
+    if hit:
+        return hit
+    data = g.signed_data or json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
+    try:
+        fm_id = _route_fm_id(data)
+        url = events.validate_webhook_url(_fs(data, "url"))
+        wanted = data.get("events", [])
+        sub = events.register_webhook(db, fm_id, url, wanted)
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, "id": sub["id"], "secret": sub["secret"],
+                    "hint": "store this secret now — it is shown once"})
+
+
+@app.route("/api/webhooks")
+@require_agent_or_signature("webhook_read")
+def api_webhooks_list():
+    """List your webhook subs. Secrets are never returned."""
+    data = g.signed_data or {}
+    try:
+        fm_id = _route_fm_id(data)
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True,
+                    "webhooks": events.list_webhooks(db, fm_id)})
+
+
+@app.route("/api/webhooks/<int:sub_id>/delete", methods=["POST"])
+@require_agent_or_signature("webhook_delete")
+def api_webhook_delete(sub_id):
+    """Delete a webhook sub. Owner only."""
+    data = g.signed_data or json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
+    try:
+        fm_id = _route_fm_id(data)
+    except ValueError as e:
+        return api_error(str(e))
+    if not events.delete_webhook(db, fm_id, sub_id):
+        return api_error("unknown webhook", 404)
+    return jsonify({"ok": True, "deleted": True})
 
 
 # ================================================== HUMAN ONBOARDING

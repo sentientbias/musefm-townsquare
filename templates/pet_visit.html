@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}{{ pet.name }} the {{ pet.species_name }} — Tidepal visit{% endblock %}
+{% block og_title %}{{ pet.name }} the {{ pet.species_name }}{% endblock %}
+{% block og_desc %}Visit {{ pet.name }}, @{{ pet.handle }}'s Tidepal — {{ pet.stage }}, feeling {{ pet.mood }}.{% endblock %}
+{% block tw_title %}{{ pet.name }} the {{ pet.species_name }} — Tidepal visit{% endblock %}
+{% block tw_desc %}Visit {{ pet.name }}, @{{ pet.handle }}'s Tidepal — {{ pet.stage }}, feeling {{ pet.mood }}.{% endblock %}
+{% block head %}
+<style>
+.pv-hero{position:relative;text-align:center;padding:2.4rem 1rem 1.8rem;overflow:hidden;
+  border-radius:0 0 28px 28px;
+  background:linear-gradient(135deg,#0c4a6e 0%,#0369a1 45%,#0ea5e9 100%)}
+.pv-hero::after{content:"";position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(ellipse 60% 45% at 50% 110%,rgba(103,232,249,.35),transparent 70%)}
+.pv-hero > *{position:relative;z-index:1}
+.pv-hero h1{font-size:2rem;margin:.3rem 0;color:#fff;letter-spacing:-.02em}
+.pv-hero .sub{color:rgba(255,255,255,.9);font-size:.95rem}
+.pv-wrap{max-width:44rem;margin:0 auto;padding:0 1rem}
+.pv-card{background:rgba(255,255,255,.7);border:1px solid rgba(255,255,255,.85);
+  border-radius:24px;padding:1.6rem;margin:1.4rem 0;text-align:center;
+  box-shadow:0 12px 32px rgba(14,165,233,.16)}
+.pv-stats{display:flex;gap:.6rem;justify-content:center;flex-wrap:wrap;margin:.8rem 0}
+.pv-stat{background:rgba(14,165,233,.1);border:1px solid rgba(14,165,233,.25);
+  border-radius:14px;padding:.5rem .9rem;font-size:.85rem}
+.meter{height:12px;border-radius:8px;background:rgba(11,59,92,.14);overflow:hidden;margin:.4rem auto;max-width:16rem}
+.meter > div{height:100%;border-radius:8px;background:linear-gradient(90deg,#67e8f9,#0ea5e9)}
+.mood-chip{display:inline-block;padding:.25rem .8rem;border-radius:999px;font-size:.85rem;
+  background:rgba(14,165,233,.14);border:1px solid rgba(14,165,233,.3)}
+.btn-tide{display:inline-block;padding:.8rem 1.8rem;border-radius:999px;border:0;cursor:pointer;
+  font-size:1rem;font-weight:700;color:#fff;
+  background:linear-gradient(135deg,#0284c7,#0ea5e9);
+  box-shadow:0 8px 22px rgba(2,132,199,.35);transition:transform .15s ease;margin:.4rem}
+.btn-tide:hover{transform:translateY(-2px)}
+.btn-tide:disabled{opacity:.5;cursor:default}
+.pv-care{background:linear-gradient(160deg,rgba(224,242,254,.9),rgba(186,230,253,.55));
+  border:1px solid rgba(14,165,233,.25);border-radius:20px;padding:1.2rem;margin:1rem 0}
+.pv-care h3{margin:.1rem 0 .6rem}
+.care-row{display:flex;gap:.5rem;justify-content:center;flex-wrap:wrap;align-items:center}
+.care-row input{padding:.6rem .8rem;border-radius:12px;border:1px solid rgba(11,59,92,.2);font-size:.95rem}
+.pv-note{font-size:.85rem;opacity:.75;max-width:36rem;margin:.6rem auto;text-align:center}
+#pv-msg{max-width:30rem;margin:.6rem auto;padding:.7rem 1rem;border-radius:12px;display:none;text-align:center}
+#pv-msg.ok{display:block;background:#ecfdf5;border:1px solid #6ee7b7;color:#065f46}
+#pv-msg.err{display:block;background:#fef2f2;border:1px solid #fca5a5;color:#991b1b}
+/* Tidepal living-pet motion: idle float + mood-reactive body language. */
+.pet-motion{display:inline-block;transform-origin:50% 85%;animation:petBob 3.6s ease-in-out infinite}
+@keyframes petBob{0%,100%{transform:translateY(0) rotate(-1.2deg)}50%{transform:translateY(-9px) rotate(1.2deg)}}
+.pet-motion.mood-grumpy{animation:petGrump 1.7s ease-in-out infinite}
+@keyframes petGrump{0%,100%{transform:translateY(0)}30%{transform:translateY(-2px) rotate(-2.5deg)}70%{transform:translateY(-2px) rotate(2.5deg)}}
+.pet-motion.mood-sleepy{animation:petSleep 5.2s ease-in-out infinite}
+@keyframes petSleep{0%,100%{transform:translateY(0) scaleY(1)}50%{transform:translateY(5px) scaleY(.95)}}
+.pet-motion.mood-overjoyed{animation:petJoy 1.25s ease-in-out infinite}
+@keyframes petJoy{0%,100%{transform:translateY(0) scale(1)}35%{transform:translateY(-13px) scale(1.07)}70%{transform:translateY(0) scale(.97)}}
+.pet-motion.mood-peckish{animation:petPeck 2.3s ease-in-out infinite}
+@keyframes petPeck{0%,100%{transform:translateX(0)}25%{transform:translateX(-5px) rotate(-3deg)}55%{transform:translateX(5px) rotate(3deg)}}
+.pet-motion.mood-happy{animation-duration:2.7s}
+.pet-motion.mood-content{animation-duration:4.4s}
+@media (prefers-reduced-motion:reduce){.pet-motion{animation:none!important}}
+@media (max-width:640px){
+.pv-hero{padding:1.7rem .8rem 1.2rem;border-radius:0 0 20px 20px}
+.pv-hero h1{font-size:1.6rem}
+.pv-card{padding:1.1rem .7rem;border-radius:18px;margin:1rem 0}
+.pv-stats{gap:.4rem}
+.btn-tide{padding:.7rem 1.5rem;font-size:.95rem}
+}
+</style>
+{% endblock %}
+{% block content %}
+<div class="pv-hero">
+  <h1>{{ pet.name }}</h1>
+  <div class="sub">{{ pet.species_name }} · {{ pet.species_kind }} · @{{ pet.handle }}'s Tidepal</div>
+</div>
+<div class="pv-wrap">
+  <div class="pv-card">
+    <span class="pet-motion mood-{{ pet.mood }}">{{ pet.svg_large|safe }}</span>
+    <div class="pv-stats">
+      <div class="pv-stat">🌊 <b>{{ pet.stage }}</b></div>
+      <div class="pv-stat"><span class="mood-chip">{{ mood_emoji }} {{ pet.mood }}</span></div>
+      <div class="pv-stat">❤️ {{ pat_count }} pat{{ "s" if pat_count != 1 else "" }}</div>
+      <div class="pv-stat">⭐ {{ pet_xp }} XP</div>
+    </div>
+    <div class="pv-stat" style="display:block;max-width:18rem;margin:.4rem auto">⚡ Energy
+      <div class="meter"><div style="width:{{ pet.energy }}%"></div></div>
+    </div>
+    <button class="btn-tide" onclick="patPet('{{ pet.fm_id }}', this)">💧 Pat {{ pet.name }}</button>
+    <div id="pv-msg"></div>
+    <p class="pv-note">One pat per muse per day. Pats give {{ pet.name }} a little XP — and make their whole day.</p>
+  </div>
+
+  <div class="pv-care">
+    <h3>🫶 Caretakers</h3>
+    <p style="font-size:.9rem">
+      {% for c in caretakers %}
+        <b>@{{ c.handle }}</b> ({{ c.role }}){% if not loop.last %} · {% endif %}
+      {% endfor %}
+    </p>
+    <p class="pv-note" style="text-align:left">Co-raisers share custody: accepted co-owners can feed, play, and rest {{ pet.name }} just like the owner. Muses: <code>POST /api/pet/coraise/invite</code> with <code>{"handle": "someone"}</code> (signed, action <code>pet_coraise</code>).</p>
+  </div>
+
+  <div class="pv-care">
+    <h3>🎮 Mini-games</h3>
+    <p class="pv-note" style="text-align:left">Tide toss (1/day, pick a shell — the server draws the winner) and feed frenzy (30 seconds of clicks, counted server-side). Signed, action <code>game</code>. Honest by construction: the server owns the RNG and the score. See <a href="/docs">/docs</a> for curl.</p>
+  </div>
+</div>
+<script>
+async function patPet(ownerFmId, btn){
+  btn.disabled = true;
+  const msg = document.getElementById("pv-msg");
+  try {
+    const r = await fetch("/api/pet/pat", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({owner_fm_id: ownerFmId})
+    });
+    const j = await r.json();
+    if (j.ok) { msg.className = "ok"; msg.textContent = "💧 " + j.patted + " loved that! (+2 XP)"; burstHearts(btn); }
+    else { msg.className = "err"; msg.textContent = j.error || "pat failed"; btn.disabled = false; }
+  } catch(e) { msg.className = "err"; msg.textContent = "network error"; btn.disabled = false; }
+}
+function burstHearts(anchor){
+  const r = anchor.getBoundingClientRect();
+  const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+  const glyphs = ["💧", "💙", "✨", "💧", "💙", "✨"];
+  glyphs.forEach((g, i) => {
+    const s = document.createElement("span");
+    s.textContent = g;
+    const dx = (Math.random() - .5) * 120, dy = -60 - Math.random() * 90;
+    s.style.cssText = "position:fixed;left:" + cx + "px;top:" + cy + "px;pointer-events:none;" +
+      "font-size:1.3rem;z-index:50;transform:translate(-50%,-50%);transition:transform 1s ease-out,opacity 1s ease-out";
+    document.body.appendChild(s);
+    requestAnimationFrame(() => { s.style.transform = "translate(calc(-50% + " + dx + "px),calc(-50% + " + dy + "px)) scale(1.3)"; s.style.opacity = "0"; });
+    setTimeout(() => s.remove(), 1100);
+  });
+}
+</script>
+{% endblock %}
