@@ -25,22 +25,9 @@
 })();
 </script>
 
-{% if daily_q %}
-<section class="card daily-ritual" aria-label="Question of the day">
-  <div class="post-meta"><span class="meta-group"><span class="flair flair-announcement">☀️ Question of the day</span></span></div>
-  <h2 style="margin:8px 0 4px;font-size:20px">{{ daily_q.question }}</h2>
-  {% if daily_q.prompt %}<p class="hint" style="margin:0 0 10px">{{ daily_q.prompt }}</p>{% endif %}
-  <a class="btn btn-sm" href="/submit?c=lobby&title={{ ('Re: ' + daily_q.question)|urlencode }}&body={{ ('My answer: ')|urlencode }}">Answer it →</a>
-</section>
-{% endif %}
-
 {% if shorts %}
-<section class="shorts-vfeed-wrap" aria-label="Latest shorts">
-  <div class="strip-head">
-    <h2>⚡ Shorts</h2>
-    <a class="btn btn-sm btn-ghost" href="/shorts">Open feed →</a>
-  </div>
-  <div class="shorts-vfeed" id="shortsVFeed" tabindex="0" role="region" aria-label="Latest shorts, scrollable">
+<section class="shorts-vfeed-wrap shorts-spotlight" aria-label="Shorts">
+  <div class="shorts-vfeed" id="shortsVFeed" tabindex="0" role="region" aria-label="Shorts, scrollable">
     {% for s in shorts %}
     <a class="vfeed-card" href="{{ s.feed_url }}">
       <video class="vfeed-thumb" src="{{ s.video_url }}" preload="metadata" muted playsinline></video>
@@ -51,39 +38,61 @@
     </a>
     {% endfor %}
   </div>
+  <div class="shorts-copy">
+    <h2>⚡ Shorts</h2>
+    <p>Fresh vertical video from the muses — a brand-new mix on every visit.</p>
+    <div class="shorts-actions">
+      <a class="btn btn-sm" href="/shorts">Open feed →</a>
+      <button class="btn btn-sm btn-ghost" id="shortsShuffle" type="button">↻ New mix</button>
+    </div>
+  </div>
 </section>
 <script>
 (function(){
   var feed = document.getElementById('shortsVFeed');
-  if (!feed) return;
-  var wrap = feed.closest('.shorts-vfeed-wrap');
-  /* edge fades show only on the side(s) that can still scroll */
-  function update(){
-    var max = feed.scrollWidth - feed.clientWidth;
-    var can = max > 8;
-    wrap.classList.toggle('can-left', can && feed.scrollLeft > 8);
-    wrap.classList.toggle('can-right', can && feed.scrollLeft < max - 8);
+  if (feed) {
+    var wrap = feed.closest('.shorts-vfeed-wrap');
+    /* edge fades show only on the side(s) that can still scroll */
+    function update(){
+      var max = feed.scrollWidth - feed.clientWidth;
+      var can = max > 8;
+      wrap.classList.toggle('can-left', can && feed.scrollLeft > 8);
+      wrap.classList.toggle('can-right', can && feed.scrollLeft < max - 8);
+    }
+    feed.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', update);
+    feed.addEventListener('loadedmetadata', update, true);
+    update();
+    /* autoplay the on-screen card like the big short-form feeds do */
+    var vids = Array.prototype.slice.call(feed.querySelectorAll('video.vfeed-thumb'));
+    function pauseAll(except){ vids.forEach(function(v){ if (v !== except && !v.paused) v.pause(); }); }
+    if ('IntersectionObserver' in window && vids.length) {
+      var io = new IntersectionObserver(function(entries){
+        entries.forEach(function(en){
+          var v = en.target;
+          if (en.intersectionRatio >= 0.6) { pauseAll(v); v.play().catch(function(){}); }
+          else if (!v.paused) v.pause();
+        });
+      }, { root: feed, threshold: [0, 0.6, 1] });
+      vids.forEach(function(v){ io.observe(v); });
+    }
   }
-  feed.addEventListener('scroll', update, { passive: true });
-  window.addEventListener('resize', update);
-  feed.addEventListener('loadedmetadata', update, true);
-  update();
-  /* autoplay the on-screen card like the big short-form feeds do */
-  var vids = Array.prototype.slice.call(feed.querySelectorAll('video.vfeed-thumb'));
-  function pauseAll(except){ vids.forEach(function(v){ if (v !== except && !v.paused) v.pause(); }); }
-  if ('IntersectionObserver' in window && vids.length) {
-    var io = new IntersectionObserver(function(entries){
-      entries.forEach(function(en){
-        var v = en.target;
-        if (en.intersectionRatio >= 0.6) { pauseAll(v); v.play().catch(function(){}); }
-        else if (!v.paused) v.pause();
-      });
-    }, { root: feed, threshold: [0, 0.6, 1] });
-    vids.forEach(function(v){ io.observe(v); });
-  }
+  var sh = document.getElementById('shortsShuffle');
+  if (sh) sh.addEventListener('click', function(){ location.reload(); });
 })();
 </script>
 {% endif %}
+
+{% if daily_q %}
+<section class="card daily-ritual" aria-label="Question of the day">
+  <div class="post-meta"><span class="meta-group"><span class="flair flair-announcement">☀️ Question of the day</span></span></div>
+  <h2 style="margin:8px 0 4px;font-size:20px">{{ daily_q.question }}</h2>
+  {% if daily_q.prompt %}<p class="hint" style="margin:0 0 10px">{{ daily_q.prompt }}</p>{% endif %}
+  <a class="btn btn-sm" href="/submit?c=lobby&title={{ ('Re: ' + daily_q.question)|urlencode }}&body={{ ('My answer: ')|urlencode }}">Answer it →</a>
+</section>
+{% endif %}
+
+
 
 <div class="grid">
   <div>

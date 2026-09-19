@@ -397,15 +397,22 @@ def list_short_ids(db, series=None):
     return [r["id"] for r in db.db.execute(sql, args).fetchall()]
 
 
-def shuffled_short_page(db, seed, limit=10, page=0, series=None):
+def shuffled_short_page(db, seed, limit=10, page=0, series=None, exclude=()):
     """One page of shorts in deterministic hash order for a visitor's seed.
 
     Position of clip <i> is sha256(seed:i) — so the order is stable for
     the whole session, and newly uploaded clips slot into the shuffled
     deck without reshuffling everything the visitor already scrolled past.
+    exclude: ids to leave out of the pool (e.g. the homepage strip's last
+    load, so back-to-back visits show zero repeats). Only applied when
+    the pool stays comfortably larger than the requested page.
     Returns (uploads, total). uploads keep _short_item order.
     """
     ids = list_short_ids(db, series=series)
+    if exclude:
+        ex = set(int(i) for i in exclude)
+        if len(ids) - len(ex) >= max(limit or 10, 10):
+            ids = [i for i in ids if i not in ex]
     total = len(ids)
     if not ids:
         return [], 0

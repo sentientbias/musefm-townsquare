@@ -1404,11 +1404,14 @@ body.shorts-mode .wrap { max-width: none; margin: 0; padding: 0; }
   .mp-info { flex: 1 1 100%; order: -1; }
 }
 
-/* home page: shorts — standard horizontal shelf (like the big feeds):
-   9:16 thumbnail cards, snap-x, "Open feed" button leads to the full feed */
+/* home page: shorts spotlight — the video tiles lead, words sit beneath.
+   9:16 thumbnail cards, snap-x, glow treatment in the glass-blue brand */
 .shorts-vfeed-wrap { margin: 20px 0 6px; }
-.strip-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-.strip-head h2 { margin: 0; font-size: 18px; }
+.shorts-spotlight { margin: 12px 0 28px; }
+.shorts-copy { margin-top: 16px; max-width: 660px; }
+.shorts-copy h2 { margin: 0 0 6px; font-size: 22px; }
+.shorts-copy p { margin: 0 0 12px; color: var(--text-2); font-size: 15.5px; }
+.shorts-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 .shorts-vfeed {
   display: flex; gap: 12px;
   overflow-x: auto; overflow-y: hidden;
@@ -1424,14 +1427,18 @@ body.shorts-mode .wrap { max-width: none; margin: 0; padding: 0; }
 .shorts-vfeed-wrap.can-right .shorts-vfeed { --vfeed-mask: linear-gradient(to right, #000 calc(100% - 44px), transparent); }
 .shorts-vfeed-wrap.can-left .shorts-vfeed { --vfeed-mask: linear-gradient(to left, #000 calc(100% - 44px), transparent); }
 .shorts-vfeed-wrap.can-left.can-right .shorts-vfeed { --vfeed-mask: linear-gradient(to right, transparent, #000 44px, #000 calc(100% - 44px), transparent); }
-.vfeed-card { position: relative; display: block; flex: 0 0 auto; width: 172px; aspect-ratio: 9/16; box-sizing: border-box; scroll-snap-align: start; text-decoration: none; color: #fff; border-radius: 14px; overflow: hidden; background: #000; border: 1px solid var(--glass-border); box-shadow: var(--shadow-card); transition: transform 0.25s var(--spring), box-shadow 0.25s var(--spring); }
-.vfeed-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-card-hover); }
+.vfeed-card { position: relative; display: block; flex: 0 0 auto; width: 200px; aspect-ratio: 9/16; box-sizing: border-box; scroll-snap-align: start; text-decoration: none; color: #fff; border-radius: 16px; overflow: hidden; background: #000; border: 1px solid rgba(140,190,255,.5); box-shadow: 0 0 0 1px rgba(110,170,255,.22), 0 12px 36px rgba(50,130,255,.28), var(--shadow-card); transition: transform 0.25s var(--spring), box-shadow 0.25s var(--spring); }
+.vfeed-card:hover { transform: translateY(-4px) scale(1.02); box-shadow: 0 0 0 1px rgba(140,195,255,.45), 0 18px 48px rgba(60,140,255,.42), var(--shadow-card-hover); }
 .vfeed-thumb { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000; }
 .vfeed-meta { position: absolute; left: 0; right: 0; bottom: 0; padding: 44px 12px 12px; background: linear-gradient(to top, rgba(0,0,0,.82), rgba(0,0,0,0)); display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .vfeed-title { font-size: 14px; font-weight: 700; color: #fff; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-shadow: 0 1px 6px rgba(0,0,0,.6); line-height: 1.3; }
 .vfeed-sub { font-size: 11px; color: rgba(255,255,255,.78); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; text-shadow: 0 1px 4px rgba(0,0,0,.6); }
 @media (min-width: 1024px) {
-  .vfeed-card { width: 190px; }
+  .vfeed-card { width: 216px; }
+}
+@media (max-width: 560px) {
+  .vfeed-card { width: 182px; }
+  .shorts-copy h2 { font-size: 20px; }
 }
 
 /* ================= Muse FM section ================= */

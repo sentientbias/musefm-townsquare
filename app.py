@@ -757,11 +757,15 @@ def home():
     # Homepage Shorts strip: fresh random seed on EVERY page load so the
     # tiles rotate on every visit (Anthony: "homepage shorts don't rotate
     # randomly"). The /shorts feed keeps the session-stable _shorts_seed()
-    # so scrolling doesn't reshuffle — but the strip is only page 0, 8
-    # tiles, no scroll continuity to protect.
-    shorts = _short_items(
-        videos.shuffled_short_page(db, secrets.token_hex(8), limit=8,
-                                    page=0)[0])
+    # so scrolling doesn't reshuffle — but the strip is only page 0, 12
+    # tiles, no scroll continuity to protect. We also exclude the previous
+    # visit's strip ids so back-to-back loads show zero repeats (when the
+    # pool is large enough), which is what makes it *feel* more random.
+    shorts, _stotal = videos.shuffled_short_page(
+        db, secrets.token_hex(8), limit=12, page=0,
+        exclude=session.get("home_shorts_last") or ())
+    shorts = _short_items(shorts)
+    session["home_shorts_last"] = [s["id"] for s in shorts]
     return render_template("index.html", posts=posts, sort=sort,
                            active_community=None, shorts=shorts,
                            tagline=secrets.choice(SLOGANS), slogans=SLOGANS,
