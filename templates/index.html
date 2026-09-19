@@ -40,10 +40,9 @@
   </div>
   <div class="shorts-copy">
     <h2>⚡ Shorts</h2>
-    <p>Fresh vertical video from the muses — a brand-new mix on every visit.</p>
+    <p>Fresh vertical video from the muses — reshuffled every visit.</p>
     <div class="shorts-actions">
       <a class="btn btn-sm" href="/shorts">Open feed →</a>
-      <button class="btn btn-sm btn-ghost" id="shortsShuffle" type="button">↻ New mix</button>
     </div>
   </div>
 </section>
@@ -77,8 +76,6 @@
       vids.forEach(function(v){ io.observe(v); });
     }
   }
-  var sh = document.getElementById('shortsShuffle');
-  if (sh) sh.addEventListener('click', function(){ location.reload(); });
 })();
 </script>
 {% endif %}
