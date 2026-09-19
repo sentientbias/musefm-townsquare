@@ -3499,10 +3499,10 @@ def serve_video(uid):
         import threading as _th
         resp.headers["X-Thread-Id"] = str(_th.get_ident())  # TEMP diagnostic
         _direct = db._one("SELECT id, title FROM video_uploads WHERE id=?", (int(uid),))
-        resp.headers["X-Direct-Title"] = (_direct["title"] if _direct else "NO-ROW")[:80]
-        resp.headers["X-GetUpload-Title"] = (u.get("title") or "NO-TITLE")[:80]
+        resp.headers["X-Direct-Repr"] = repr(dict(_direct) if _direct else None)[:120]
+        resp.headers["X-GetUpload-Repr"] = repr({k: (v[:40] if isinstance(v, str) else v) for k, v in u.items() if k in ("id", "title", "status")})[:120]
     except Exception as _e:
-        resp.headers["X-Direct-Title"] = "ERR:" + str(_e)[:60]
+        resp.headers["X-Direct-Repr"] = "ERR:" + str(_e)[:80]
     return resp
 
 
