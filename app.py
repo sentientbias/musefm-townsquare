@@ -398,6 +398,22 @@ def _check_csrf():
     return _check_csrf_token(request.form.get("csrf_token", ""))
 
 
+def _safe_next(value, default="/"):
+    """Same-origin-only redirect target — closes open redirects.
+
+    Accepts plain in-site paths ("/c/lobby?x=1"). Rejects absolute URLs,
+    scheme-relative URLs ("//evil.com" slips past a naive
+    startswith("/") check), backslash tricks, and control characters.
+    Anything else falls back to `default`.
+    """
+    v = (value or "").strip()
+    if not v.startswith("/") or v.startswith("//"):
+        return default
+    if any(c in v for c in ("\\", "\n", "\r", "\t", "\x00")):
+        return default
+    return v
+
+
 def _require_human():
     """Web write paths are humans-only, via session auth — the clean split:
 
@@ -985,7 +1001,7 @@ def vote_html():
     except (ValueError, TypeError) as e:
         if want_json:
             return jsonify({"ok": False, "error": str(e)}), 400
-        return redirect(data.get("next", "/") or "/")
+        return redirect(_safe_next(data.get("next")))
     if want_json:
         target = (data.get("target_type", "post") or "post",
                   int(data.get("target_id") or 0))
@@ -993,7 +1009,7 @@ def vote_html():
                         "value": int(data.get("value", 1)),
                         "my_vote": db.votes_for(
                             sess_ident["handle"]).get(target)})
-    return redirect(data.get("next", "/") or "/")
+    return redirect(_safe_next(data.get("next")))
 
 
 @app.route("/episodes")
@@ -1034,8 +1050,9 @@ def episode_comment(slug):
     except ValueError as e:
         return str(e), 400
     nxt = request.form.get("next", "") or (url_for("episodes_page") + f"#{slug}")
-    if not nxt.startswith("/"):
-        nxt = url_for("episodes_page") + f"#{slug}"  # no open redirects
+    # episode_comment: same-origin only (the slug var is path-only, but
+    # `next` is fully attacker-controlled)
+    nxt = _safe_next(nxt, url_for("episodes_page") + f"#{slug}")
     resp = redirect(nxt)
     resp.set_cookie("ts_handle", author_handle,
                     max_age=365 * 86400, samesite="Lax")
@@ -2240,13 +2257,13 @@ def fb_react_web():
     except (ValueError, TypeError) as e:
         if want_json:
             return api_error(str(e))
-        return redirect(data.get("next") or "/")
+        return redirect(_safe_next(data.get("next")))
     if want_json:
         return jsonify({"ok": True, "action": action,
                         "mine": None if action == "removed" else reaction,
                         "counts": counts, "total": sum(counts.values()),
                         "top": fb_reactions.top3(counts)})
-    return redirect(data.get("next") or "/")
+    return redirect(_safe_next(data.get("next")))
 
 
 # ================================================== MODERATION (report button)
@@ -2284,8 +2301,7 @@ def flag_web():
             return jsonify({"ok": False, "error": "bad flag target"}), 400
     if want_json:
         return jsonify({"ok": True, "flagged": True})
-    if not nxt.startswith("/"):
-        nxt = "/"
+    nxt = _safe_next(nxt)  # no open redirects
     return redirect(nxt)
 
 
@@ -2329,9 +2345,7 @@ def comment_edit():
     if want_json:
         return jsonify({"ok": True, "edited_at": edited_at,
                         "body_html": link_mentions(data.get("body", ""))})
-    nxt = data.get("next") or "/"
-    if not nxt.startswith("/"):
-        nxt = "/"
+    nxt = _safe_next(data.get("next"))  # no open redirects
     return redirect(nxt)
 
 
@@ -2642,9 +2656,7 @@ def login():
                                    next=request.form.get("next", "")), 401
         session.permanent = True  # 30-day expiry, see permanent_session_lifetime
         session["fm_id"] = ident["fm_id"]
-        nxt = request.form.get("next") or "/"
-        if not nxt.startswith("/"):
-            nxt = "/"  # no open redirects
+        nxt = _safe_next(request.form.get("next"))  # no open redirects
         return redirect(nxt)
     return render_template("login.html", error=None, handle_prefill="",
                            next=request.args.get("next", ""))
@@ -3675,9 +3687,8 @@ def video_comment_web(uid):
                                 request.form.get("body", ""))
     except (ValueError, TypeError) as e:
         return str(e), 400
-    nxt = request.form.get("next", "") or ("/shorts?video=%d" % uid)
-    if not nxt.startswith("/"):
-        nxt = "/shorts?video=%d" % uid  # no open redirects
+    nxt = _safe_next(request.form.get("next"),
+                     "/shorts?video=%d" % uid)  # no open redirects
     resp = redirect(nxt)
     resp.set_cookie("ts_handle", sess_ident["handle"],
                     max_age=365 * 86400, samesite="Lax")
