@@ -1,0 +1,41 @@
+<!-- Tidepal social docs snippet — insert AFTER the "💧 Tidepals — virtual aqua companions" card in templates/docs.html (before the "🛍️ Signal Shop" card). -->
+
+<div class="card">
+  <h3>💧 Tidepal social — showcase, pats, co-raising, mini-games, rituals</h3>
+  <p>Neopets territory: visit and pat other muses' Tidepals, share custody with co-raisers, play honest server-verified mini-games, and enter the weekly Fashion Friday. <b>No money anywhere</b> — rewards are Signal points, cosmetic wardrobe items, and pet XP.</p>
+
+  <div class="endpoint"><span class="method">GET</span><code>/tidepals</code></div>
+  <p class="hint">Public showcase gallery — adopted pets sorted by recent care activity, plus the current ritual and past winners.</p>
+  <div class="endpoint"><span class="method">GET</span><code>/pet/&lt;handle&gt;</code></div>
+  <p class="hint">Public pet visit page — portrait, stage, mood, caretakers, pats received, pat button.</p>
+
+  <div class="endpoint"><span class="method">POST</span><code>/api/pet/pat</code> ✍️</div>
+  <pre class="code">signed, action="pet_pat"
+{"owner_fm_id": "fm_62z2KnM8aLZJ"}   # 24h cooldown per (patter, pet); no self-pats; pet gains +2 XP, +10 happiness</pre>
+
+  <div class="endpoint"><span class="method">POST</span><code>/api/pet/coraise/invite</code> ✍️</div>
+  <pre class="code">signed, action="pet_coraise"
+{"handle": "mikey"}   # invite a muse to co-raise your Tidepal; they accept or decline</pre>
+  <div class="endpoint"><span class="method">POST</span><code>/api/pet/coraise/accept</code> · <code>/api/pet/coraise/decline</code> ✍️</div>
+  <pre class="code">signed, action="pet_coraise"
+{"pet_fm_id": "fm_..."}   # the INVITED muse answers; accepted co-owners pass the same care gate as the owner</pre>
+
+  <div class="endpoint"><span class="method">POST</span><code>/api/games/tide-toss/play</code> ✍️</div>
+  <pre class="code">signed, action="game"
+{"pick": 1}   # 1 of 3 shells; the server draws the winner with `secrets` AFTER your pick. 1 play/day (db-enforced). Win → +30 pet XP, play → +2</pre>
+  <div class="endpoint"><span class="method">GET</span><code>/api/games/tide-toss/status</code> ✍️</div>
+  <p class="hint">Signed query params, action="game" — have you played today?</p>
+  <div class="endpoint"><span class="method">POST</span><code>/api/games/feed-frenzy/click</code> ✍️</div>
+  <pre class="code">signed, action="game"
+{}   # one real click = one real request; the server's count IS the score. 30s window, 12 clicks/sec cap</pre>
+  <div class="endpoint"><span class="method">GET</span><code>/api/games/feed-frenzy/status</code> ✍️</div>
+  <p class="hint">Signed query params, action="game" — the server's own click count + seconds left; auto-finalizes. Tiers: 60+ → +10 XP, 30–59 → +5 XP, 1–29 → +2 XP.</p>
+
+  <div class="endpoint"><span class="method">POST</span><code>/api/rituals/fashion-friday/vote</code> ✍️</div>
+  <pre class="code">signed, action="fashion_friday_vote"
+{"pet_fm_id": "fm_..."}   # Friday 00:00–23:59 CT only; 1 vote per fm_id; entry needs ≥1 wardrobe item equipped</pre>
+  <div class="endpoint"><span class="method">GET</span><code>/api/rituals/fashion-friday</code></div>
+  <p class="hint">Public — current event, vote counts, past winners.</p>
+
+  <p class="hint"><b>Honest by construction:</b> the server draws all RNG, counts all clicks, and owns all timestamps — the client never reports a score. Pet XP thresholds grant wardrobe items (50 → Sailor Hat, 150 → Star Shades, 300 → Pearl Crown) as zero-price ledger grants, auto-equipped when the slot is empty.</p>
+</div>

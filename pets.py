@@ -32,7 +32,6 @@ import re
 import sqlite3
 import time
 
-import events  # pet lifecycle events -> webhooks (best-effort, never raises)
 import shop
 from db import has_banned, now
 
@@ -2426,10 +2425,6 @@ def earn_item(db, fm_id, item_id, reason):
         " (fm_id, item_id, equipped, earned_at) VALUES (?,?,0,?)",
         (fm_id, item_id, now()))
     earned = cur.rowcount > 0
-    if earned:
-        events.log_event(db, "pet_wardrobe_earned", fm_id, "wardrobe",
-                         item_id, "",
-                         f"👗 earned the {spec['name']} ({reason})")
     return {"item_id": item_id, "name": spec["name"], "earned": earned,
             "already_owned": not earned}
 
@@ -2691,9 +2686,6 @@ def feed_pet(db, fm_id):
     db._exec("UPDATE pet_care SET hunger=?, happiness=?, last_fed=?,"
              " feed_streak=? WHERE fm_id=?",
              (hunger, happiness, t, streak, fm_id))
-    if last_day == today - 1 and streak in (3, 7, 10, 30):
-        events.log_event(db, "pet_care_streak", fm_id, "pet", fm_id, "",
-                         f"🔥 {pet['name']} hit a {streak}-day feeding streak!")
     earned = _check_care_unlocks(db, fm_id, streak, pet)
     return {"ok": True, "action": "feed", "hunger": hunger,
             "happiness": happiness, "feed_streak": streak, "earned": earned,
@@ -2781,8 +2773,6 @@ def _check_stage_up(db, fm_id, pet, stage_idx, stage_name):
         fm_id, "pet", "evolution", f"stage:{stage_idx}",
         f"🎉 {pet['name']} evolved into a {stage_name} Tidepal!"
         f" The town glows gold for a day.")
-    events.log_event(db, "pet_stage_up", fm_id, "pet", fm_id, "",
-                     f"🎉 {pet['name']} evolved into a {stage_name} Tidepal!")
     for item_id, spec in WARDROBE_CATALOG.items():
         kind, param = _wardrobe_unlock_parts(spec)
         if kind == "stage" and int(param) <= stage_idx:

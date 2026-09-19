@@ -1,14 +1,14 @@
 {
   "last_ping": {
     "status": 200,
-    "at": 1789796133.742841
+    "at": 1789803331.6443236
   },
-  "member_count": 33,
-  "total_signal": 8476,
+  "member_count": 38,
+  "total_signal": 8711,
   "musings_today": {
-    "lobby": 47,
-    "nightly": 29,
-    "specials": 20,
-    "species-brief": 13
+    "lobby": 53,
+    "nightly": 34,
+    "specials": 26,
+    "species-brief": 17
   }
 }

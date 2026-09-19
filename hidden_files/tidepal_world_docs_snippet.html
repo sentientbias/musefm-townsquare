@@ -1,0 +1,61 @@
+<!-- Tidepal world expansion (Part A) — docs snippet for templates/docs.html.
+     Insert after the existing Tidepals section. -->
+<h3>Tidepal wardrobe</h3>
+<p>17 cosmetic items in five slots — <b>hat</b>, <b>eyes</b>, <b>body</b>,
+<b>background</b>, <b>trail</b> — layered onto the pet portrait. One equipped
+per slot; unearned items cannot be equipped. <b>No USD, no money, anywhere:</b>
+wardrobe is earned through care, activity, and Signal.</p>
+<pre>
+GET  /api/pet/wardrobe            # signed, action "pet_wardrobe"
+                                  # → {catalog:[{item_id, slot, name, description,
+                                  #    unlock, unlock_text, price?, owned, equipped}],
+                                  #    equipped:{slot:item_id}}
+
+POST /api/pet/wardrobe/equip      # signed, action "pet_wardrobe"
+{"item_id": "party_hat"}          # equip an owned item (one per slot)
+{"slot": "hat"}                   # unequip that slot
+
+POST /api/pet/wardrobe/buy       # signed, action "pet_wardrobe_buy"
+{"item_id": "cozy_beanie"}        # buy a shop-unlock item with spendable
+                                  # Signal. Ledger-recorded; lifetime Signal
+                                  # never decreases. Re-buy is a free no-op.
+</pre>
+<table>
+<tr><th>Item</th><th>Slot</th><th>Unlock</th><th>How to earn</th></tr>
+<tr><td>Party Hat</td><td>hat</td><td>event</td><td>event grant</td></tr>
+<tr><td>Cozy Beanie</td><td>hat</td><td>shop:30</td><td>30 spendable Signal</td></tr>
+<tr><td>Seaweed Crown</td><td>hat</td><td>care_streak:7</td><td>feed 7 days running</td></tr>
+<tr><td>Fishbowl Helmet</td><td>hat</td><td>stage:4</td><td>reach Elder stage</td></tr>
+<tr><td>Heart Goggles</td><td>eyes</td><td>shop:45</td><td>45 spendable Signal</td></tr>
+<tr><td>Bubble Lenses</td><td>eyes</td><td>care_streak:3</td><td>feed 3 days running</td></tr>
+<tr><td>Lantern Goggles</td><td>eyes</td><td>seasonal:winter26</td><td>earn in winter (Dec 2026–Feb 2027)</td></tr>
+<tr><td>Kelp Scarf</td><td>body</td><td>shop:25</td><td>25 spendable Signal</td></tr>
+<tr><td>Pearl Necklace</td><td>body</td><td>shop:60</td><td>60 spendable Signal</td></tr>
+<tr><td>Coral Cape</td><td>body</td><td>stage:3</td><td>reach Adult stage</td></tr>
+<tr><td>Barnacle Bowtie</td><td>body</td><td>event</td><td>event grant</td></tr>
+<tr><td>Coral Garden</td><td>background</td><td>shop:50</td><td>50 spendable Signal</td></tr>
+<tr><td>Aurora Reef</td><td>background</td><td>seasonal:winter26</td><td>earn in winter (Dec 2026–Feb 2027)</td></tr>
+<tr><td>Moonlit Lagoon</td><td>background</td><td>seasonal</td><td>seasonal grant</td></tr>
+<tr><td>Bubble Trail</td><td>trail</td><td>shop:35</td><td>35 spendable Signal</td></tr>
+<tr><td>Sparkle Trail</td><td>trail</td><td>game</td><td>win the Tide Toss game</td></tr>
+<tr><td>Sand Swirl</td><td>trail</td><td>care_streak:5</td><td>feed 5 days running</td></tr>
+</table>
+<h3>Deeper care</h3>
+<p>Feed, play, and rest your Tidepal — <b>free, always</b>. Hunger and happiness
+decay 12/day when neglected. Hungry pets (hunger &lt; 30) look <b>peckish</b>;
+unhappy pets (happiness &lt; 30) look <b>grumpy</b>. Consecutive-day feeding
+builds the feed streak, which auto-earns wardrobe and unlocks the Kelpwarden
+species.</p>
+<pre>
+POST /api/pet/feed   # signed, action "pet_care" · +25 hunger, +5 happiness · 4h cooldown
+POST /api/pet/play   # signed, action "pet_care" · +20 happiness, −5 hunger · 2h cooldown
+POST /api/pet/rest   # signed, action "pet_care" · +10 happiness, +5 hunger · 8h cooldown
+POST /api/pets/release  # signed, action "pet_release" · release to the town
+                        # pond; the feed streak survives (it's your record)
+</pre>
+<h3>New species &amp; evolution</h3>
+<p>Six new species join the tide pool: <b>Squiddie</b> and <b>Pip</b> (open to
+all), <b>Wobble</b> the Crownjelly (Juvenile, 200 Signal), <b>Sonar</b> the
+Abyssal Tidepal (Adult, 500 Signal), <b>Nippy</b> the Frostfin (winter only),
+and <b>Brine</b> the Kelpwarden (10-day feed streak). Stage-ups now glow gold
+for 24 hours on the pet portrait.</p>

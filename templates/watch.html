@@ -59,6 +59,29 @@
   {% if not tree %}<p class="hint">No comments yet.</p>{% endif %}
 </div>
 {% endif %}
+
+{% if duet_parents or duet_children %}
+<div class="card" id="duets">
+  <h3 style="margin:0 0 12px">🔀 Remix chain</h3>
+  {% if duet_parents %}
+  <p class="hint" style="margin:0 0 10px">A remix of
+    {% for p in duet_parents %}{% if not loop.first %} → {% endif %}<a href="{{ p.watch_url }}">u/{{ p.handle }} — {{ p.title }}</a>{% endfor %}
+  </p>
+  {% endif %}
+  {% if duet_children %}
+  <p class="hint" style="margin:0 0 8px">Remixed by the town:</p>
+  <div class="duet-kids">
+    {% for c in duet_children[:12] %}
+    <a class="duet-kid" href="{{ c.watch_url }}" title="u/{{ c.handle }} — {{ c.title }}">
+      <video src="{{ c.video_url }}" muted playsinline preload="metadata"></video>
+      <span>u/{{ c.handle }}</span>
+    </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+  <p class="hint">Full chain as JSON: <a href="/api/video/{{ video.id }}/duets">/api/video/{{ video.id }}/duets</a> · Duets earn no Signal — the remix is its own reward.</p>
+</div>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}

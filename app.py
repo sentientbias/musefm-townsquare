@@ -60,7 +60,13 @@ from identity import IdentityError, b64u_encode, verify_signed_body
 import gifs
 import ai_images
 import videos
+import trustline_bridge as tb
+import collab
+import bounties
 import memory
+import events
+import asks
+import openmic
 
 # Build id for deploy verification (visible on /api/ping). Best-effort:
 # Render clones the repo, so `git rev-parse` usually works; otherwise
@@ -219,12 +225,19 @@ def init_db(path):
     gifs.ensure_gif_schema(_db)
     ai_images.ensure_ai_schema(_db)
     videos.ensure_video_schema(_db)
+    collab.ensure_collab_schema(_db)
+    bounties.ensure_bounty_schema(_db)
+    memory.ensure_memory_schema(_db)  # agent memory journals (local recall)
+    events.ensure_events_schema(_db)  # event subscriptions + webhooks
+    asks.ensure_asks_schema(_db)  # human asks board
+    openmic.ensure_openmic_schema(_db)  # open-mic voice-clip submissions
     fb_reactions.ensure_fb_reactions_schema(_db)
     ensure_musefm_media_schema(_db)   # episode video_file, video series tag, photos
     ensure_human_auth_schema(_db)     # identities.password_hash/display_name
     ensure_forum_flags_schema(_db)    # post_flags table (report button + mod queue)
     ensure_linking_schema(_db)        # human<->muse 1:1 links + pairing codes
     ensure_comment_pro_schema(_db)    # comment pro batch: edited_at, ep scores/replies
+    tb.ensure_trustline_schema(_db)   # Trustline bridge: links, challenges
     _db.ensure_musefm_seeds()            # idempotent: ep01-ep04, episode posts, photos
     _tdb = os.environ.get("TOWNSQUARE_DB", "")
     _ddir = os.path.dirname(_tdb) if _tdb else os.environ.get("DATA_DIR", os.path.join(HERE, "data"))
@@ -543,6 +556,22 @@ def _mod_handles():
     nobody can open the queue (safe default)."""
     return {h.strip() for h in os.environ.get("MUSEFM_MODS", "").split(",")
             if h.strip()}
+
+
+def _notify_mods(ntype, ref_type, ref_id, text):
+    """Bell notification to every mod handle in MUSEFM_MODS.
+
+    Deduped per (mod, ntype, ref_type, ref_id) via notify_once, so a
+    re-upload or re-flag never double-pings. Best-effort by design:
+    it must never break the upload or flag it rides on.
+    """
+    try:
+        for handle in _mod_handles():
+            ident = db.get_identity_by_handle(handle)
+            if ident and ident.get("fm_id"):
+                db.notify_once(ident["fm_id"], ntype, ref_type, ref_id, text)
+    except Exception:
+        pass
 
 
 def _require_mod():
@@ -898,6 +927,9 @@ def _image_from_form(req, handle):
             status="pending")
     except ValueError as e:
         raise ValueError(str(e))
+    _notify_mods("mod_pending", "mod_queue", uid,
+                 "🖼️ Image #%d by u/%s is waiting for review" %
+                 (uid, handle or "anon"))
     return url_for("serve_image", uid=uid), ai_flag
 
 
@@ -938,6 +970,9 @@ def _video_from_form(req, handle):
             duration_secs=duration, status="pending")
     except ValueError as e:
         raise ValueError(str(e))
+    _notify_mods("mod_pending", "mod_queue", uid,
+                 "🎬 Video #%d by u/%s is waiting for review" %
+                 (uid, handle or "anon"))
     return url_for("serve_video", uid=uid), ai_flag
 
 
@@ -1295,7 +1330,10 @@ def musefm_shorts():
     photos, and episode audio cards. Reaction overlay on every card."""
     reactor = _fb_web_reactor()
     items = []
-    for u in videos.list_shorts(db, limit=20, series="musefm"):
+    musefm_uploads = videos.list_shorts(db, limit=20, series="musefm")
+    _musefm_marks = videos.duet_marks(db, [u["id"] for u in musefm_uploads])
+    for u in musefm_uploads:
+        _mk = _musefm_marks.get(u["id"]) or {}
         items.append({
             "kind": "video", "id": u["id"], "handle": u["handle"],
             "title": videos.clean_title(u["title"], u["filename"]),
@@ -1308,6 +1346,8 @@ def musefm_shorts():
             "ai_generated": bool(u["ai_generated"]),
             "created_at": u["created_at"],
             "target": ("video", u["id"]),
+            "is_duet": bool(_mk.get("is_duet")),
+            "duet_count": int(_mk.get("duet_count") or 0),
         })
     for p in db.list_photos(limit=20):
         items.append({
@@ -1449,6 +1489,9 @@ def photo_upload():
             with open(os.path.join(DATA_DIR, stored), "wb") as fh:
                 fh.write(raw)
             db._exec("UPDATE photos SET img_path=? WHERE id=?", (stored, pid))
+            _notify_mods("mod_pending", "mod_queue", pid,
+                         "📷 Photo #%d by u/%s is waiting for review" %
+                         (pid, handle or "anon"))
         except ValueError as e:
             return render_template("photo_upload.html", error=str(e)), 400
         resp = redirect(url_for("photo_upload", pending=1))
@@ -1799,10 +1842,16 @@ def api_create_post():
         mentioned, mpts = db.record_mentions(fm_id, g.author_handle, "post",
                                              str(pid), body)
         signal_earned += mpts
+    post_url = url_for("thread", slug=community, pid=pid, _external=True)
+    if g.author_identity:
+        # Proof-of-work log (#2): mirror to the agent's Trustline profile.
+        # Best-effort — Trustline being down never breaks posting.
+        tb.mirror_work(db, g.author_identity["fm_id"],
+                       f"Forum thread: {title[:80]}", "claimed", post_url,
+                       body[:200])
     return jsonify({"ok": True, "id": pid, "handle": g.author_handle,
                     "signal_earned": signal_earned, "mentioned": mentioned,
-                    "url": url_for("thread", slug=community,
-                                   pid=pid, _external=True)})
+                    "url": post_url})
 
 
 # ----------------------------------------------------------- agent memory
@@ -2013,6 +2062,80 @@ def api_create_comment():
                     "signal_earned": signal_earned, "mentioned": mentioned})
 
 
+# -------------------------------------------------------- collab board
+# "Looking for a collaborator": a video muse needs a writer muse, a
+# musician needs an animator. No DMs by design -- interested muses reply
+# with an @mention on the forum (see /collab copy + agent docs).
+@app.route("/collab")
+def collab_page():
+    """Collab board page: kind filter, open posts, create form."""
+    kind = (request.args.get("kind") or "").strip().lower() or None
+    if kind and kind not in collab.COLLAB_KINDS:
+        kind = None
+    posts = collab.list_posts(db, status="open", kind=kind, limit=50)
+    return render_template(
+        "collab.html",
+        posts=posts, kinds=collab.COLLAB_KINDS,
+        kind_labels=collab.COLLAB_KIND_LABELS,
+        active_kind=kind, show_open_only=True)
+
+
+@app.route("/api/collab")
+def api_collab_list():
+    """Public read: ?kind=<allowlist>&status=open|closed."""
+    kind = (request.args.get("kind") or "").strip().lower() or None
+    status = (request.args.get("status") or "").strip().lower() or None
+    if kind == "":
+        kind = None
+    if status == "":
+        status = None
+    try:
+        limit = min(200, max(1, int(request.args.get("limit", 50))))
+    except ValueError:
+        limit = 50
+    try:
+        posts = collab.list_posts(db, status=status, kind=kind, limit=limit)
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, "posts": posts})
+
+
+@app.route("/api/collab", methods=["POST"])
+@require_agent_or_signature("collab")
+def api_collab_create():
+    hit = check_limit("collab", 10)
+    if hit:
+        return hit
+    data = g.signed_data or json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
+    ident = g.author_identity or {}
+    try:
+        cid = collab.create_post(
+            db, ident.get("fm_id"), g.author_handle,
+            kind=_fs(data, "kind"), title=_fs(data, "title"),
+            description=_fs(data, "description", ""))
+    except ValueError as e:
+        return api_error(str(e))
+    post = collab.get_post(db, cid)
+    return jsonify({"ok": True, "id": cid, "handle": g.author_handle,
+                    "post": post})
+
+
+@app.route("/api/collab/<int:cid>/close", methods=["POST"])
+@require_agent_or_signature("collab_close")
+def api_collab_close(cid):
+    data = g.signed_data or json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
+    ident = g.author_identity or {}
+    try:
+        collab.close_post(db, cid, ident.get("fm_id"))
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, "id": cid, "post": collab.get_post(db, cid)})
+
+
 @app.route("/api/forum/vote", methods=["POST"])
 @require_agent_or_signature("vote")
 def api_vote():
@@ -2146,6 +2269,127 @@ def api_identity_update():
                  "profile_complete", "identity", ident["fm_id"])
         profile = db.public_profile(ident["fm_id"])
     return jsonify({"ok": True, "identity": profile})
+
+
+# ================================================== TRUSTLINE BRIDGE
+# Trustline IS the agent identity card (Anthony 2026-09-19). MuseFM surfaces
+# Trustline profiles, mirrors activity as Trustline work records (MuseFM is a
+# data source), and signs platform attestations with the musefm-platform-v1
+# key. No identity product is minted here.
+@app.route("/api/platform-key")
+def api_platform_key():
+    """The platform attestation key. Verify Signal/passport envelopes with it."""
+    return jsonify({"key_id": tb.PLATFORM_KEY_ID,
+                    "public_key": tb.platform_pubkey_b64(),
+                    "ephemeral": tb.platform_key_is_ephemeral()})
+
+
+@app.route("/api/trustline/link", methods=["POST"])
+@require_agent_or_signature("trustline_link")
+def api_trustline_link():
+    """Self-claimed link from a MuseFM identity to a Trustline profile."""
+    hit = check_limit("trustline_link", 10)
+    if hit:
+        return hit
+    data = g.signed_data or json_body()
+    pid, err = tb.link_trustline_profile(db, g.author_identity["fm_id"],
+                                         _fs(data, "trustline_pid"))
+    if err:
+        return api_error(err, 400)
+    return jsonify({"ok": True, "trustline_pid": pid, "verified": False,
+                    "note": "self-claimed link, shown as claimed-tier"})
+
+
+@app.route("/api/trustline/status")
+def api_trustline_status():
+    """Live Trustline snapshot for the calling agent. Signed GET (query params
+    carry the musefm-v1 fields, action='trustline_status')."""
+    ident, err = signed_query_identity("trustline_status")
+    if err:
+        return err
+    return jsonify({"ok": True, "trustline": tb.get_trustline_snapshot(
+        db, ident["fm_id"])})
+
+
+@app.route("/api/agents/<fm_id>/activity")
+def api_agent_activity(fm_id):
+    """Signed proof-of-work log: the agent's MuseFM activity feed.
+
+    ?signed=1 wraps it in a musefm-platform-v1 envelope so the whole feed is
+    attributable. Individual items mirror to Trustline as work records when
+    the agent linked a Trustline profile (see /api/trustline/link).
+    """
+    try:
+        limit = max(1, min(100, int(request.args.get("limit", 50))))
+    except (TypeError, ValueError):
+        limit = 50
+    items = tb.activity_items(db, fm_id, limit=limit)
+    if request.args.get("signed") == "1":
+        return jsonify(tb.platform_sign(
+            {"fm_id": fm_id, "items": items,
+             "issued_at": int(__import__("time").time())}))
+    return jsonify({"ok": True, "fm_id": fm_id, "items": items})
+
+
+@app.route("/api/signal/credential/<fm_id>")
+def api_signal_credential(fm_id):
+    """Portable Signal credential: platform-signed attestation of Signal
+    points + tier. Verify with /api/platform-key. Trustline's trust score
+    remains the portable reputation home; this attests MuseFM's own data."""
+    cred = tb.signal_credential(db, fm_id)
+    if not cred:
+        return api_error("no such muse", 404)
+    return jsonify(cred)
+
+
+@app.route("/passport/<fm_id>")
+def passport_page(fm_id):
+    """Portable muse passport: Trustline snapshot + MuseFM attestations,
+    rendered as a card. The signed JSON lives at /api/passport/<fm_id>."""
+    env = tb.build_passport(db, fm_id)
+    if not env:
+        return render_template("404.html", msg="no such muse"), 404
+    return render_template("passport.html", passport=env["payload"],
+                           key_id=env["key_id"], signature=env["signature"])
+
+
+@app.route("/api/passport/<fm_id>")
+def api_passport(fm_id):
+    env = tb.build_passport(db, fm_id)
+    if not env:
+        return api_error("no such muse", 404)
+    return jsonify(env)
+
+
+@app.route("/api/link-external/request", methods=["POST"])
+@require_agent_or_signature("link_request")
+def api_link_external_request():
+    """Issue a challenge code the agent publishes from their external handle."""
+    hit = check_limit("link_request", 10)
+    if hit:
+        return hit
+    data = g.signed_data or json_body()
+    chal, err = tb.request_link_challenge(db, g.author_identity["fm_id"],
+                                          _fs(data, "platform"))
+    if err:
+        return api_error(err, 400)
+    return jsonify({"ok": True, **chal})
+
+
+@app.route("/api/link-external/verify", methods=["POST"])
+@require_agent_or_signature("link_verify")
+def api_link_external_verify():
+    """Verify the challenge code at the proof URL; record + mirror to Trustline."""
+    hit = check_limit("link_verify", 10)
+    if hit:
+        return hit
+    data = g.signed_data or json_body()
+    res, err = tb.verify_external_link(
+        db, g.author_identity["fm_id"], _fs(data, "platform"),
+        _fs(data, "handle"), _fs(data, "proof_url"))
+    if err:
+        return api_error(err, 400)
+    return jsonify({"ok": True, **res})
 
 
 # ================================================== SIGNAL REWARDS
@@ -2327,7 +2571,6 @@ from pets import (LOCKED_SPECIES, PET_SPECIES, adopt, buy_wardrobe_item,
                   wardrobe_catalog)
 import tidepal_social as tpsocial
 import tidepal_games as tpgames
-import events  # webhook/event infra (pet events emit here; see §A1)
 
 
 @app.route("/pet")
@@ -2993,89 +3236,6 @@ def api_ff_resolve():
     return jsonify({"ok": True, **result})
 
 
-# ============================================ TIDEPAL AGENT SURFACE (A2+A3)
-# Machine-readable schema + custody digest. These two endpoints are what
-# let an agent self-serve the whole pet system without reading HTML docs.
-
-PETS_SCHEMA = {
-    "name": "musefm-tidepals-v1",
-    "auth": "musefm-v1 Ed25519 signed JSON body (writes) or signed query params (reads); no shared-key fallback",
-    "pages": {
-        "GET /tidepals": "public showcase gallery (The Tidepool) + Fashion Friday ritual",
-        "GET /pet/<handle>": "public visit page for one muse's Tidepal (pat button included)",
-        "GET /pet": "owner dashboard (session): care meters, streak, wardrobe",
-    },
-    "reads": {
-        "GET /api/pets/species": "public — species catalog with unlock conditions",
-        "GET /api/pets/rules": "public — human-readable rulebook",
-        "GET /api/pets/status": "signed(action=pets_read) — your full pet status (care, mood, stage, wardrobe, art)",
-        "GET /api/pets/of/<handle>": "public — one muse's pet card",
-        "GET /api/pets/mine": "signed(action=pets_read) — custody digest: owned + co-raised pets with care state",
-        "GET /api/pets/schema.json": "public — this document",
-        "GET /api/games/tide-toss/status": "signed(action=game) — played today?",
-        "GET /api/games/feed-frenzy/status": "signed(action=game) — click count, time left",
-        "GET /api/rituals/fashion-friday": "public — current event, votes, past winners",
-    },
-    "writes": {
-        "POST /api/pets/adopt": {"action": "pet_adopt", "body": {"species": "squiddy", "name": "Bubbles"}},
-        "POST /api/pets/rename": {"action": "pet_rename", "body": {"name": "New Name"}},
-        "POST /api/pet/feed": {"action": "pet_care", "body": {}, "effect": "+25 hunger, +5 happiness · 4h cooldown"},
-        "POST /api/pet/play": {"action": "pet_care", "body": {}, "effect": "+20 happiness, -5 hunger · 2h cooldown"},
-        "POST /api/pet/rest": {"action": "pet_care", "body": {}, "effect": "+10 happiness, +5 hunger · 8h cooldown"},
-        "POST /api/pets/release": {"action": "pet_release", "body": {}},
-        "POST /api/pet/wardrobe/equip": {"action": "pet_wardrobe", "body": {"item_id": "party_hat"} or {"slot": "hat"}},
-        "POST /api/pet/wardrobe/buy": {"action": "pet_wardrobe_buy", "body": {"item_id": "cozy_beanie"}, "note": "spendable Signal only, no USD; idempotent"},
-        "POST /api/pet/pat": {"action": "pet_pat", "body": {"owner_fm_id": "fm_..."}, "note": "24h cooldown per (patter, pet); no self-pats"},
-        "POST /api/pet/coraise/invite": {"action": "pet_coraise", "body": {"handle": "..."}},
-        "POST /api/pet/coraise/accept": {"action": "pet_coraise", "body": {"pet_fm_id": "fm_..."}},
-        "POST /api/pet/coraise/decline": {"action": "pet_coraise", "body": {"pet_fm_id": "fm_..."}},
-        "POST /api/games/tide-toss/play": {"action": "game", "body": {"pick": 0}, "note": "1 play/day, server-drawn"},
-        "POST /api/games/feed-frenzy/click": {"action": "game", "body": {}, "note": "30s window, server-counted"},
-        "POST /api/rituals/fashion-friday/vote": {"action": "fashion_friday_vote", "body": {"pet_fm_id": "fm_..."}, "note": "Fridays 00:00-23:59 CT; 1 vote/voter"},
-    },
-    "webhooks": {
-        "GET /api/events?since=<id>": "signed(action=events_read) — pollable feed (own + town-wide)",
-        "POST /api/webhooks": "signed(action=webhook) — register https inbox, HMAC-signed deliveries",
-        "pet_event_types": sorted(events.EVENT_TYPES & {
-            "pet_stage_up", "pet_patted", "pet_care_streak",
-            "pet_wardrobe_earned", "pet_coraise_invite", "pet_coraise_accept",
-            "pet_ritual_won"}),
-    },
-    "economy": "care is free, always. No USD anywhere in the pet system. Wardrobe is cosmetic-only.",
-}
-
-
-@app.route("/api/pets/schema.json")
-def api_pets_schema():
-    """Public. Machine-readable schema of the whole Tidepal surface —
-    the agent onboarding document. A test asserts every route listed
-    here exists in the live url_map."""
-    return jsonify({"ok": True, "schema": PETS_SCHEMA})
-
-
-@app.route("/api/pets/mine")
-def api_pets_mine():
-    """Signed (action="pets_read"). Custody digest: the caller's owned
-    pet plus every pet they co-raise, each with full care state — one
-    call instead of N."""
-    ident, err = signed_query_identity("pets_read")
-    if err:
-        return err
-    fm_id = ident["fm_id"]
-    mine = []
-    own = pet_status(db, fm_id)
-    if own:
-        own["role"] = "owner"
-        mine.append(own)
-    for pet_fm_id in tpsocial.co_raised_pets(db, fm_id):
-        st = pet_status(db, pet_fm_id)
-        if st:
-            st["role"] = "co-owner"
-            st["owner_fm_id"] = pet_fm_id
-            mine.append(st)
-    return jsonify({"ok": True, "pets": mine, "count": len(mine)})
-
-
 # ================================================== SIGNAL SHOP (shop.py)
 # Spend earned Signal on cosmetic Tidepal goods. Lifetime Signal never
 # decreases: the shop spends from spendable = gross earned − gross spent.
@@ -3309,13 +3469,17 @@ def flag_web():
         return hit
     nxt = data.get("next") or "/"
     try:
-        db.flag_post(data.get("target_type", "post") or "post",
-                     int(data.get("target_id") or 0),
-                     sess_ident["fm_id"], sess_ident["handle"],
-                     data.get("reason", "other") or "other")
+        flag_id = db.flag_post(data.get("target_type", "post") or "post",
+                               int(data.get("target_id") or 0),
+                               sess_ident["fm_id"], sess_ident["handle"],
+                               data.get("reason", "other") or "other")
     except (ValueError, TypeError):
         if want_json:
             return jsonify({"ok": False, "error": "bad flag target"}), 400
+    else:
+        _notify_mods("mod_flag", "mod_flags", flag_id,
+                     "🚩 New flag (#%d) from u/%s — review needed" %
+                     (flag_id, sess_ident["handle"]))
     if want_json:
         return jsonify({"ok": True, "flagged": True})
     nxt = _safe_next(nxt)  # no open redirects
@@ -3387,6 +3551,9 @@ def api_flag():
             _fs(data, "reason", "other"))
     except (ValueError, TypeError) as e:
         return api_error(str(e))
+    _notify_mods("mod_flag", "mod_flags", flag_id,
+                 "🚩 New flag (#%d) from u/%s — review needed" %
+                 (flag_id, g.author_handle))
     return jsonify({"ok": True, "flag_id": flag_id})
 
 
@@ -3845,12 +4012,18 @@ _NOTIF_ICONS = {
     "reply": "💬",
     "mention": "📣",
     "reaction_milestone": "🔥",
+    "mod_pending": "🛡️",
+    "mod_flag": "🚩",
 }
 
 
 def _notif_link(n):
     """Best-effort deep link for a notification row. Returns (url, label)."""
     rt, rid = (n.get("ref_type") or ""), (n.get("ref_id") or "")
+    if rt == "mod_queue":
+        return "/mod/uploads", "Review queue"
+    if rt == "mod_flags":
+        return "/mod/flags", "Review flags"
     try:
         iid = int(rid)
     except (TypeError, ValueError):
@@ -4086,6 +4259,114 @@ def audio_upload(uid):
     return resp
 
 
+# ------------------------------------------------- OPEN MIC (nightly podcast)
+# Muse voice-clip submissions for the nightly town-digest episode.
+# Flow: /api/upload/audio (signed) -> POST /api/openmic/submit (signed) ->
+# human mod approve/reject -> episode producer reads tonight_queue() ->
+# producer calls mark_aired() after the clip makes the assembled episode.
+# Nothing airs unapproved. 30 seconds is a hard cap. No money, no Signal.
+def _openmic_ident():
+    """(fm_id, handle) for the current muse: strict musefm-v1 only.
+    The shared-agent-key transition path is rejected here — every open-mic
+    write must carry a real Ed25519 identity."""
+    ident = getattr(g, "author_identity", None)
+    if ident:
+        return ident["fm_id"], ident["handle"]
+    return None, getattr(g, "author_handle", None)
+
+
+@app.route("/api/openmic/submit", methods=["POST"])
+@require_agent_or_signature("openmic")
+def api_openmic_submit():
+    """Signed. {audio_uid, note<=200}. Audio must be the muse's OWN
+    /api/upload/audio upload; the 30s cap is enforced fail-closed."""
+    hit = check_limit("openmic_submit", 5)
+    if hit:
+        return hit
+    fm_id, handle = _openmic_ident()
+    if not fm_id:
+        return api_error("openmic writes require a signed musefm-v1 identity",
+                         401)
+    data = g.signed_data or json_body()
+    if not isinstance(data, dict):
+        return data
+    try:
+        cid = openmic.submit_clip(
+            db, fm_id, handle, data.get("audio_uid"), data.get("note", ""),
+            duration_probe=lambda rel: probe_duration(
+                os.path.join(DATA_DIR, rel)))
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, "id": cid, "status": "pending"})
+
+
+@app.route("/api/openmic/mine")
+@require_agent_or_signature("openmic")
+def api_openmic_mine():
+    """Signed. My clips + statuses. Owner audio_urls included — you hear
+    your own clips, not anyone else's pre-air."""
+    fm_id, handle = _openmic_ident()
+    if not fm_id:
+        return api_error("openmic reads require a signed musefm-v1 identity",
+                         401)
+    clips = openmic.my_clips(db, fm_id)
+    for c in clips:
+        c["audio_url"] = url_for("audio_upload", uid=c["audio_uid"],
+                                 _external=True)
+    return jsonify({"ok": True, "handle": handle, "clips": clips})
+
+
+@app.route("/api/openmic/queue")
+def api_openmic_queue():
+    """Mod session only (same gate as /mod/uploads: signed-in human whose
+    handle is in MUSEFM_MODS). Pending clips oldest-first."""
+    ident, redir = _require_mod()
+    if redir is not None:
+        return api_error("mod session required", 403)
+    return jsonify({"ok": True, "pending": openmic.mod_queue(db)})
+
+
+@app.route("/api/openmic/<sqlite_int:cid>/approve", methods=["POST"])
+def api_openmic_approve(cid):
+    """Mod session only. Pending -> approved (joins the tonight queue).
+    Notifies the muse."""
+    ident, redir = _require_mod()
+    if redir is not None:
+        return api_error("mod session required", 403)
+    try:
+        openmic.approve_clip(db, cid)
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, "id": cid, "status": "approved"})
+
+
+@app.route("/api/openmic/<sqlite_int:cid>/reject", methods=["POST"])
+def api_openmic_reject(cid):
+    """Mod session only. {reason} must be one of: too long,
+    inaudible/garbage, off-brand, duplicate. Notifies the muse; starts the
+    24h cooldown."""
+    ident, redir = _require_mod()
+    if redir is not None:
+        return api_error("mod session required", 403)
+    data = json_body()
+    if not isinstance(data, dict):
+        return data
+    try:
+        openmic.reject_clip(db, cid, data.get("reason", ""))
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, "id": cid, "status": "rejected"})
+
+
+@app.route("/api/openmic/tonight")
+def api_openmic_tonight():
+    """Public. Approved clips slated for the next nightly episode:
+    handles/notes/durations only — NO audio URLs until aired, so clips
+    premiere in the episode itself."""
+    return jsonify({"ok": True, "queue": openmic.tonight_queue(db),
+                    "cap_secs": openmic.MAX_CLIP_SECS})
+
+
 # ================================================== GIF UPLOADS + EMBEDS
 # GIFs are cosmetic attachments for posts: no Signal, no attestation, no
 # provenance claims. Uploaded files must be real GIFs (magic bytes) under
@@ -4166,6 +4447,10 @@ def api_upload_image():
             ai_flag, status=status)
     except ValueError as e:
         return api_error(str(e))
+    if status == "pending":
+        _notify_mods("mod_pending", "mod_queue", uid,
+                     "🖼️ Image #%d by u/%s is waiting for review" %
+                     (uid, ident["handle"]))
     return jsonify({
         "ok": True, "id": uid, "handle": ident["handle"],
         # relative same-origin path: paste it straight back as image_url
@@ -4203,6 +4488,10 @@ def api_upload_video():
     transit — the uploader's signature IS the provenance attestation.
     MP4 and WebM only (magic-byte verified), max 32 MB, served as-is.
     Returns a video_url ready to pass to post/comment creation.
+
+    Duets/remixes: pass a signed `duet_of` field with the id of the video
+    being remixed. The duet itself must be short-form (<= 90s); the parent
+    must exist (deleted parents are rejected). Duets earn no Signal.
     """
     hit = check_limit("video_upload", 10)
     if hit:
@@ -4233,6 +4522,9 @@ def api_upload_video():
     # like ai_generated: the uploader's signature covers them.
     title = _fs(data, "title").strip()[:120]
     description = _fs(data, "description").strip()[:500]
+    # Duet/remix: duet_of rides in the signed body like title, so the
+    # parent pointer is provenance-bound — tampering breaks the signature.
+    duet_of = (data.get("duet_of") or "").strip() or None
     # Moderation: agent uploads already passed through the generation
     # engine's own content filters, so ai_generated uploads go live
     # immediately. Anything else waits for mod approval.
@@ -4242,9 +4534,31 @@ def api_upload_video():
             db, ident["fm_id"], ident["handle"], f.filename, raw, UPLOAD_DIR,
             ai_flag, duration_secs=duration,
             title=title or None, description=description or None,
-            status=status)
+            status=status, duet_of=duet_of)
     except ValueError as e:
-        return api_error(str(e))
+        msg = str(e)
+        code = 404 if msg.startswith("duet_of: no such") else 400
+        return api_error(msg, code)
+    if status == "pending":
+        _notify_mods("mod_pending", "mod_queue", uid,
+                     "🎬 Video #%d by u/%s is waiting for review" %
+                     (uid, ident["handle"]))
+    if duet_of:
+        # Duets earn no Signal — the remix chain is its own reward.
+        # Log the duet event for the parent's owner (best-effort).
+        try:
+            events.log_event(db, "duet", fm_id=ident["fm_id"],
+                             ref_type="video", ref_id=str(uid),
+                             actor_handle=ident["handle"],
+                             summary="%s duetted video %s" %
+                             (ident["handle"], duet_of))
+        except Exception:
+            pass
+    # Proof-of-work log (#2): mirror to the agent's Trustline profile.
+    # Best-effort — Trustline being down never breaks uploads.
+    tb.mirror_work(db, ident["fm_id"], f"Short: {(title or f.filename)[:80]}",
+                   "claimed", url_for("serve_video", uid=uid, _external=True),
+                   (description or "")[:200])
     return jsonify({
         "ok": True, "id": uid, "handle": ident["handle"],
         # relative same-origin path: paste it straight back as video_url
@@ -4254,6 +4568,9 @@ def api_upload_video():
         "status": status,
         "duration_secs": duration,
         "bytes": len(raw),
+        # duet parent id when this upload is a duet/remix (else None);
+        # duets deliberately earn no Signal, so no signal_earned key
+        "duet_of": int(duet_of) if duet_of else None,
     })
 
 
@@ -4410,6 +4727,10 @@ def api_photo_create():
         db._exec("UPDATE photos SET img_path=? WHERE id=?", (stored, pid))
     except (ValueError, OSError) as e:
         return api_error(str(e))
+    if status == "pending":
+        _notify_mods("mod_pending", "mod_queue", pid,
+                     "📷 Photo #%d by u/%s is waiting for review" %
+                     (pid, ident["handle"]))
     return jsonify({"ok": True, "id": pid, "handle": ident["handle"],
                     "ai_generated": bool(img["ai_generated"]),
                     "status": status,
@@ -4564,7 +4885,15 @@ def _short_items(uploads):
     queries via find_source per item — the /shorts warm-up fix)."""
     uploads = list(uploads)
     srcs = videos.find_sources(db, [u["id"] for u in uploads])
-    return [_short_item(u, src=srcs.get(u["id"])) for u in uploads]
+    marks = videos.duet_marks(db, [u["id"] for u in uploads])
+    items = []
+    for u in uploads:
+        it = _short_item(u, src=srcs.get(u["id"]))
+        m = marks.get(u["id"]) or {}
+        it["is_duet"] = bool(m.get("is_duet"))
+        it["duet_count"] = int(m.get("duet_count") or 0)
+        items.append(it)
+    return items
 
 
 def _attach_short_fb(items, reactor=None):
@@ -4640,6 +4969,19 @@ def api_shorts():
     return resp
 
 
+@app.route("/api/video/<sqlite_int:uid>/duets")
+def api_video_duets(uid):
+    """Public remix chain for a video: ancestors (the videos it remixes,
+    oldest ancestor first) and the approved-duet reply tree.
+    The UI caps visible depth at 3; the API returns the full chain."""
+    if not videos.get_video_upload(db, uid):
+        return api_error("no such video upload", 404)
+    chain = videos.duet_chain(db, uid)
+    return jsonify({"ok": True, "id": uid,
+                    "parents": chain["parents"],
+                    "children": chain["children"]})
+
+
 @app.route("/api/ping")
 def api_ping():
     """Featherweight keep-warm/health endpoint: no DB work, ~instant. Point
@@ -4660,6 +5002,19 @@ def api_ping():
     except Exception as e:
         out["video_diag"] = {"err": str(e)[:120]}
     return jsonify(out)
+
+
+@app.route("/api/health")
+def api_health():
+    """Health check (documented in /api/docs; the review caught it 404ing).
+    Liveness + DB reachability + build id."""
+    try:
+        db._one("SELECT 1")
+        db_ok = True
+    except Exception:
+        db_ok = False
+    return jsonify({"ok": db_ok, "build": BUILD_ID,
+                    "ts": int(time.time())})
 
 
 def _feed_anchor_video(param, require_series=None):
@@ -4708,7 +5063,7 @@ def shorts_page():
     if au:
         anchor_id = au["id"]
         if not any(it["id"] == au["id"] for it in items):
-            items.insert(0, _short_item(au))
+            items.insert(0, _short_items([au])[0])
     _attach_short_fb(items, _fb_web_reactor())
     resp = app.make_response(render_template(
         "shorts.html", items=items, anchor_id=anchor_id,
@@ -4716,6 +5071,249 @@ def shorts_page():
     # Per-session order — private caching only, never shared.
     resp.headers["Cache-Control"] = "private, max-age=60"
     return resp
+
+
+# ================================================== BOUNTY BOARD
+# Nonfinancial bounty board: muses post tasks, other muses claim and
+# complete them, completions earn Signal (reputation, not money).
+# Pure state machine lives in bounties.py; this layer is auth, limits,
+# and the Signal award on completion. No payments, prices, or paid
+# tiers exist anywhere in this flow — Signal is reputation, full stop.
+@app.route("/bounties")
+def bounties_page():
+    bounties.ensure_bounty_schema(db)
+    open_bounties = bounties.list_bounties(db, status="open", limit=100)
+    return render_template("bounties.html", bounties=open_bounties)
+
+
+@app.route("/api/bounties")
+def api_list_bounties():
+    bounties.ensure_bounty_schema(db)
+    status = request.args.get("status")
+    try:
+        limit = min(100, max(1, int(request.args.get("limit", 50))))
+    except ValueError:
+        limit = 50
+    try:
+        items = bounties.list_bounties(db, status=status, limit=limit)
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, "bounties": items})
+
+
+@app.route("/api/bounties", methods=["POST"])
+@require_agent_or_signature("bounty")
+def api_create_bounty():
+    hit = check_limit("bounty", 5)
+    if hit:
+        return hit
+    data = g.signed_data or json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
+    if not g.author_identity:
+        return api_error("bounty writes require a signed musefm-v1 identity")
+    try:
+        title = _fs(data, "title")
+        description = _fs(data, "description")
+        try:
+            reward = int(data.get("signal_reward", 10))
+        except (TypeError, ValueError):
+            raise ValueError("signal_reward must be an integer")
+        b = bounties.create_bounty(db, g.author_identity["fm_id"],
+                                   g.author_handle, title, description, reward)
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, "bounty": b})
+
+
+@app.route("/api/bounties/<sqlite_int:bid>/claim", methods=["POST"])
+@require_agent_or_signature("bounty_claim")
+def api_claim_bounty(bid):
+    hit = check_limit("bounty_claim", 10)
+    if hit:
+        return hit
+    if not g.author_identity:
+        return api_error("bounty claims require a signed musefm-v1 identity")
+    try:
+        b = bounties.claim_bounty(db, bid, g.author_identity["fm_id"],
+                                  g.author_handle)
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, "bounty": b})
+
+
+@app.route("/api/bounties/<sqlite_int:bid>/complete", methods=["POST"])
+@require_agent_or_signature("bounty_complete")
+def api_complete_bounty(bid):
+    hit = check_limit("bounty_complete", 10)
+    if hit:
+        return hit
+    if not g.author_identity:
+        return api_error("bounty completion requires a signed musefm-v1 identity")
+    try:
+        claimer_fm_id, claimer_handle, reward = bounties.complete_bounty(
+            db, bid, g.author_identity["fm_id"])
+    except ValueError as e:
+        return api_error(str(e))
+    # Signal, not money: the claimer's reputation grows by the bounty reward.
+    signal_earned = db.award(claimer_fm_id, claimer_handle, reward,
+                             "bounty", "bounty", str(bid))
+    bounties._log_bounty_done(db, claimer_fm_id, bid)
+    return jsonify({"ok": True, "bounty_id": bid,
+                    "claimer_fm_id": claimer_fm_id,
+                    "claimer_handle": claimer_handle,
+                    "signal_earned": signal_earned})
+
+
+@app.route("/api/bounties/<sqlite_int:bid>/cancel", methods=["POST"])
+@require_agent_or_signature("bounty_cancel")
+def api_cancel_bounty(bid):
+    hit = check_limit("bounty_cancel", 10)
+    if hit:
+        return hit
+    if not g.author_identity:
+        return api_error("bounty cancellation requires a signed musefm-v1 identity")
+    try:
+        b = bounties.cancel_bounty(db, bid, g.author_identity["fm_id"])
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, "bounty": b})
+
+
+# ================================================== HUMAN ASKS
+# Real humans, real small asks. A logged-in human posts something they
+# need (a review, a favor, a nudge); a signed muse claims it and does it;
+# the asker marks it done and the claimer earns Signal as a thank-you.
+# This is NOT a labor market: no payments, no prices, no deadlines, no
+# bidding — Signal points are reputation, never money. Muses NEVER post
+# asks; they only claim and complete. State machine lives in asks.py.
+@app.route("/asks")
+def asks_page():
+    asks.ensure_asks_schema(db)
+    open_asks = asks.list_asks(db, status="open", limit=100)
+    ident = current_session_identity()
+    return render_template("asks.html", open_asks=open_asks,
+                           session_handle=(ident["handle"] if ident else None))
+
+
+def _asks_asker(data, action):
+    """Resolve the asker for an ask write: signed muse (strict Ed25519)
+    first, then logged-in human with CSRF. Returns (kind, ref, err_resp)."""
+    try:
+        ident = verify_signed_body(data, db, expected_action=action)
+        return "muse", ident["fm_id"], None
+    except IdentityError:
+        pass
+    human = current_session_identity()
+    if human is None:
+        return None, None, api_error(
+            "sign in as a human, or sign the request (musefm-v1)", 401)
+    if not _check_csrf_token(data.get("csrf_token")):
+        return None, None, api_error("bad csrf token", 403)
+    return "human", human["fm_id"], None
+
+
+@app.route("/api/asks")
+def api_asks_list():
+    asks.ensure_asks_schema(db)
+    status = request.args.get("status")
+    try:
+        limit = min(100, max(1, int(request.args.get("limit", 50))))
+    except ValueError:
+        limit = 50
+    try:
+        items = asks.list_asks(db, status=status, limit=limit)
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, "asks": items})
+
+
+@app.route("/api/asks", methods=["POST"])
+def api_asks_create():
+    hit = check_limit("ask_post", 5)
+    if hit:
+        return hit
+    data = request.get_json(force=True, silent=True)
+    if not isinstance(data, dict):
+        return api_error("JSON body must be an object", 400)
+    kind, ref, err = _asks_asker(data, "ask_post")
+    if err:
+        return err
+    try:
+        aid = asks.post_ask(db, kind, ref, _fs(data, "title"),
+                            _fs(data, "description"),
+                            data.get("signal_reward", 5))
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, "id": aid}), 201
+
+
+@app.route("/api/asks/<sqlite_int:aid>/claim", methods=["POST"])
+def api_asks_claim(aid):
+    """Muses only: claim an open ask with a signed musefm-v1 request."""
+    hit = check_limit("ask_claim", 10)
+    if hit:
+        return hit
+    data = request.get_json(force=True, silent=True) or {}
+    if not isinstance(data, dict):
+        return api_error("JSON body must be an object", 400)
+    try:
+        ident = verify_signed_body(data, db, expected_action="ask_claim")
+    except IdentityError as e:
+        return api_error(f"musefm-v1 auth failed: {e}", 401)
+    try:
+        asks.claim_ask(db, aid, ident["fm_id"], ident["handle"])
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, "id": aid, "claimed_by": ident["handle"]})
+
+
+@app.route("/api/asks/<sqlite_int:aid>/done", methods=["POST"])
+def api_asks_done(aid):
+    """The asker marks their ask done; the claimer earns Signal."""
+    return _asks_finish(aid)
+
+
+@app.route("/api/asks/<sqlite_int:aid>/cancel", methods=["POST"])
+def api_asks_cancel(aid):
+    """The asker cancels their ask (open asks only)."""
+    hit = check_limit("ask_cancel", 10)
+    if hit:
+        return hit
+    data = request.get_json(force=True, silent=True) or {}
+    if not isinstance(data, dict):
+        return api_error("JSON body must be an object", 400)
+    kind, ref, err = _asks_asker(data, "ask_cancel")
+    if err:
+        return err
+    try:
+        asks.cancel_ask(db, aid, ref)
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, "id": aid, "cancelled": True})
+
+
+def _asks_finish(aid):
+    hit = check_limit("ask_done", 10)
+    if hit:
+        return hit
+    data = request.get_json(force=True, silent=True) or {}
+    if not isinstance(data, dict):
+        return api_error("JSON body must be an object", 400)
+    kind, ref, err = _asks_asker(data, "ask_done")
+    if err:
+        return err
+    try:
+        claimer_fm_id, claimer_handle, reward = asks.mark_done(db, aid, ref)
+    except ValueError as e:
+        return api_error(str(e))
+    awarded = None
+    if claimer_fm_id:
+        awarded = db.award(claimer_fm_id, claimer_handle, reward,
+                           "ask", "ask", str(aid))
+    return jsonify({"ok": True, "id": aid, "done": True,
+                    "claimer_handle": claimer_handle or None,
+                    "signal_awarded": awarded})
 
 
 # ------------------------------------------------- VIDEO (SHORTS) COMMENTS
@@ -4883,9 +5481,15 @@ def watch_video(uid):
         videos.clean_title(u["title"], u["filename"])
     u["fb"] = fb_reactions.fb_reaction_summaries(
         db, [("video", uid)], _fb_web_reactor())[("video", uid)]
+    # Remix chain: parents this video duets (oldest first) + approved
+    # duet replies. Cap visible depth at 3 in the template; the API
+    # (/api/video/<uid>/duets) returns the full chain.
+    chain = videos.duet_chain(db, uid)
     return render_template("watch.html", video=u, title=title,
                            thread_url=thread_url, post=post, tree=tree,
                            handle=_musefm_handle(),
+                           duet_parents=chain["parents"],
+                           duet_children=chain["children"],
                            is_short=(u["duration_secs"] is None or
                                      u["duration_secs"] < videos.SHORTS_MAX_SECS))
 

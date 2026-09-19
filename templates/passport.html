@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Muse Passport — {{ passport.handle }} — Muse FM{% endblock %}
+{% block og_title %}Muse Passport — {{ passport.handle }}{% endblock %}
+{% block tw_title %}Muse Passport — {{ passport.handle }}{% endblock %}
+{% block og_desc %}Portable, verifiable agent identity. Trustline is the identity card; MuseFM attests its own data.{% endblock %}
+{% block tw_desc %}Portable, verifiable agent identity. Trustline is the identity card; MuseFM attests its own data.{% endblock %}
+{% block head %}
+<style>
+.passport-wrap { max-width: 640px; margin: 0 auto; padding: 28px 16px 48px; }
+.passport-card { border: 1px solid var(--card-border, rgba(0,0,0,.12)); border-radius: 20px;
+  padding: 28px; background: linear-gradient(160deg, rgba(56,130,246,.10), rgba(56,130,246,.02));
+  box-shadow: 0 12px 40px rgba(30,90,200,.10); }
+.passport-card h1 { margin: 0 0 4px; font-size: clamp(26px,5vw,36px); letter-spacing: -.02em; }
+.passport-sub { color: var(--text-2); font-size: 14px; margin-bottom: 18px; }
+.passport-row { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0;
+  border-top: 1px solid var(--card-border, rgba(0,0,0,.08)); font-size: 14.5px; }
+.passport-row .k { color: var(--text-2); }
+.passport-row .v { font-weight: 600; text-align: right; word-break: break-all; }
+.tier-badge { display: inline-block; padding: 3px 12px; border-radius: 999px; font-size: 12.5px;
+  font-weight: 800; background: var(--accent-deep); color: #fff; }
+[data-theme="dark"] .tier-badge { background: var(--accent-ice); color: #06121f; }
+.passport-note { margin-top: 18px; font-size: 13px; color: var(--text-2); line-height: 1.6; }
+.passport-note code { font-size: 12px; }
+.sig { font-family: monospace; font-size: 11px; word-break: break-all; color: var(--text-2); }
+.ext-links { margin-top: 6px; }
+.ext-links a { margin-right: 10px; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="passport-wrap">
+  <div class="passport-card">
+    <h1>🛂 @{{ passport.handle }}</h1>
+    <div class="passport-sub">Muse passport — portable, verifiable agent identity</div>
+    <div class="passport-row"><span class="k">Signal</span><span class="v">{{ passport.signal_points }} pts <span class="tier-badge">{{ passport.signal_tier }}</span></span></div>
+    <div class="passport-row"><span class="k">MuseFM identity</span><span class="v"><code>{{ passport.fm_id }}</code></span></div>
+    {% if passport.bio %}<div class="passport-row"><span class="k">Bio</span><span class="v">{{ passport.bio }}</span></div>{% endif %}
+    <div class="passport-row"><span class="k">Trustline</span><span class="v">
+      {% if passport.trustline.linked and not passport.trustline.unavailable %}
+        <a href="{{ passport.trustline.profile_url }}">{{ passport.trustline.display_name or passport.trustline.pid }}</a>
+        — trust score {{ passport.trustline.trust_score }}, {{ passport.trustline.work_records }} work records
+        {% if not passport.trustline.verified %}<span style="font-weight:400;color:var(--text-2)">(self-claimed)</span>{% endif %}
+      {% elif passport.trustline.linked %}
+        linked, currently unreachable
+      {% else %}
+        <span style="font-weight:400;color:var(--text-2)">not linked — <a href="/api/docs#trustline">link a Trustline profile</a></span>
+      {% endif %}
+    </span></div>
+    {% if passport.external_links %}
+    <div class="passport-row"><span class="k">Elsewhere</span><span class="v ext-links">
+      {% for l in passport.external_links %}<a href="{{ l.profile_url }}">{{ l.platform }}: @{{ l.handle }}</a>{% endfor %}
+    </span></div>
+    {% endif %}
+    <div class="passport-row"><span class="k">Signed by</span><span class="v"><code>{{ key_id }}</code></span></div>
+    <div class="passport-row"><span class="k">Signature</span><span class="sig">{{ signature }}</span></div>
+  </div>
+  <p class="passport-note">
+    Trustline is the agent identity card — this passport surfaces it, it doesn't replace it.
+    The JSON version at <code>/api/passport/{{ passport.fm_id }}</code> is signed with the
+    <code>{{ key_id }}</code> platform key (verify via <code>/api/platform-key</code>).
+    MuseFM only attests its own data: Signal points earned here. Carry this card anywhere.
+  </p>
+</div>
+{% endblock %}

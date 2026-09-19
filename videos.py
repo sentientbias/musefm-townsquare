@@ -230,6 +230,12 @@ def ensure_video_schema(db):
                 "comment_count INTEGER NOT NULL DEFAULT 0")
     _ensure_col(db, "video_uploads", "status",
                 "status TEXT NOT NULL DEFAULT 'approved'")
+    # duet/remix pointer: which upload this one remixes (NULL = original).
+    # Nullable by default in SQLite, so legacy rows migrate untouched.
+    # Intended constraint is REFERENCES video_uploads(id); enforced at
+    # the application layer (create_video_upload validates the parent
+    # exists) because ALTER TABLE ... ADD COLUMN cannot carry a FK here.
+    _ensure_col(db, "video_uploads", "duet_of", "duet_of INTEGER")
     _ensure_col(db, "posts", "video_url", "video_url TEXT NOT NULL DEFAULT ''")
     _ensure_col(db, "posts", "video_ai", "video_ai INTEGER NOT NULL DEFAULT 0")
     # vote score on video comments (comment voting batch, 2026-09-18)
@@ -256,7 +262,8 @@ def valid_video_url(url):
 
 def create_video_upload(db, fm_id, handle, filename, raw, upload_dir,
                         ai_generated=False, duration_secs=None,
-                        title=None, description=None, status="pending"):
+                        title=None, description=None, status="pending",
+                        duet_of=None):
     """Validate and store an uploaded video. Returns (uid, stored_path).
 
     status: 'approved' (visible in feeds immediately) or 'pending'
@@ -264,6 +271,13 @@ def create_video_upload(db, fm_id, handle, filename, raw, upload_dir,
     signed agent uploads pass 'approved' only when ai_generated is set
     (the generation engine's own filters + the signed attestation are
     the moderation layer there).
+
+    duet_of: id of an existing video upload this one remixes. Must
+    reference a real row (deleted uploads are gone from the table, so
+    they fail this check), and the duet itself must be short-form
+    (duration_secs NULL or <= SHORTS_MAX_SECS). Duets earn NO Signal --
+    same as every video upload -- which is what makes chain-farming for
+    points impossible.
     """
     ensure_video_schema(db)
     if status not in ("approved", "pending", "rejected"):
@@ -282,17 +296,33 @@ def create_video_upload(db, fm_id, handle, filename, raw, upload_dir,
         # play. Reject now instead of storing a broken file.
         raise ValueError("corrupt or truncated video file -- please re-upload")
     dur = validate_duration_secs(duration_secs)
+    parent_id = None
+    if duet_of is not None and str(duet_of).strip() != "":
+        try:
+            parent_id = int(duet_of)
+        except (TypeError, ValueError):
+            raise ValueError("duet_of must be a video upload id")
+        if parent_id <= 0:
+            raise ValueError("duet_of must be a video upload id")
+        parent = get_video_upload(db, parent_id)
+        if not parent:
+            raise ValueError("duet_of: no such video upload")
+        # The duet itself must be short-form. (The parent only has to
+        # exist -- deleted rows are gone, so they fail the check above.)
+        if dur is not None and dur > SHORTS_MAX_SECS:
+            raise ValueError("duets must be short-form (<= %ds)" %
+                             SHORTS_MAX_SECS)
     safe_name = (os.path.basename(filename or ("upload." + ext)) or
                  ("upload." + ext))[:120]
     cur = db._exec(
         "INSERT INTO video_uploads (fm_id, handle, filename, stored_path, bytes,"
         " mime, ai_generated, duration_secs, created_at, title, description,"
-        " status)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        " status, duet_of)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (fm_id, handle, safe_name, "", len(raw), mime,
          1 if ai_generated else 0, dur, int(time.time()),
          (title or "")[:120] or None, (description or "")[:500] or None,
-         status))
+         status, parent_id))
     uid = cur.lastrowid
     stored = "uploads/vid-%d.%s" % (uid, ext)
     os.makedirs(upload_dir, exist_ok=True)
@@ -326,6 +356,9 @@ def delete_video_upload(db, uid, upload_dir):
     except Exception:
         pass
     db._exec("DELETE FROM video_comments WHERE video_id=?", (uid,))
+    # Orphan any remixes: their parent is gone, so they keep existing as
+    # standalone clips rather than dangling off a dead duet_of pointer.
+    db._exec("UPDATE video_uploads SET duet_of=NULL WHERE duet_of=?", (uid,))
     db._exec("DELETE FROM video_uploads WHERE id=?", (uid,))
     stored = u.get("stored_path") or ""
     if stored:
@@ -336,6 +369,110 @@ def delete_video_upload(db, uid, upload_dir):
         except OSError:
             pass
     return True
+
+
+# ------------------------------------------------------ DUETS / REMIX CHAINS
+# A duet is a video upload whose duet_of pointer names the upload it
+# remixes. Duets are the Shorts-feed reply mechanic: remix, react, riff.
+#
+# Anti-farming: duets earn NO Signal -- same as every video upload, which
+# awards none at all. There is deliberately no db.award call anywhere on
+# the video path, so chain-farming for points is impossible by design.
+
+
+def duet_parent(db, uid):
+    """The upload this video remixes (its duet_of parent), or None when
+    it is an original (or has no such parent row)."""
+    ensure_video_schema(db)
+    u = get_video_upload(db, uid)
+    if not u or not u.get("duet_of"):
+        return None
+    return get_video_upload(db, u["duet_of"])
+
+
+def duet_children(db, uid, limit=50):
+    """Direct remix replies (duets) of a video, newest first. Only
+    approved uploads: pending remixes stay invisible until a mod acts."""
+    ensure_video_schema(db)
+    limit = max(1, min(int(limit or 50), 200))
+    return [dict(r) for r in db.db.execute(
+        "SELECT * FROM video_uploads WHERE duet_of=? AND status='approved'"
+        " ORDER BY id DESC LIMIT ?", (int(uid), limit)).fetchall()]
+
+
+def _duet_node(u):
+    return {
+        "id": u["id"],
+        "handle": u["handle"],
+        "title": clean_title(u.get("title"), u.get("filename")),
+        "video_url": "/video/%d" % u["id"],
+        "watch_url": "/watch/%d" % u["id"],
+    }
+
+
+def duet_chain(db, uid):
+    """Full duet chain around one upload.
+
+    Returns {"parents": [...], "children": [...]} where parents runs
+    root-first down to the immediate parent, and children is the full
+    nested remix tree (each node carries its own "children"). Cycle
+    guarded: a duet_of pointer can only name an older row, so cycles
+    are impossible, but the guard keeps stale data from looping.
+
+    The API returns the FULL chain; the UI renders at most 3 levels
+    deep (the depth cap lives in the template).
+    """
+    ensure_video_schema(db)
+    parents = []
+    seen = {int(uid)}
+    cur = get_video_upload(db, uid)
+    while cur and cur.get("duet_of"):
+        p = get_video_upload(db, cur["duet_of"])
+        if not p or p["id"] in seen:
+            break
+        seen.add(p["id"])
+        parents.append(_duet_node(p))
+        cur = p
+    parents.reverse()
+
+    def _tree(pid, seen):
+        out = []
+        for c in duet_children(db, pid, limit=200):
+            if c["id"] in seen:
+                continue
+            node = _duet_node(c)
+            node["children"] = _tree(c["id"], seen | {c["id"]})
+            out.append(node)
+        return out
+
+    return {"parents": parents, "children": _tree(int(uid), seen)}
+
+
+def duet_marks(db, uids):
+    """Batched tile annotations for the Shorts feed.
+
+    Returns {uid: {"is_duet": bool, "duet_count": int}}:
+    - is_duet: this upload is itself a remix of another.
+    - duet_count: approved remix replies this upload has attracted.
+    """
+    ensure_video_schema(db)
+    uids = sorted({int(u) for u in uids if int(u) > 0})
+    out = {u: {"is_duet": False, "duet_count": 0} for u in uids}
+    if not uids:
+        return out
+    q = ",".join("?" * len(uids))
+    for r in db.db.execute(
+            "SELECT id, duet_of FROM video_uploads WHERE id IN (%s)" % q,
+            uids):
+        if r["duet_of"]:
+            out[r["id"]]["is_duet"] = True
+    for r in db.db.execute(
+            "SELECT duet_of, COUNT(*) c FROM video_uploads"
+            " WHERE duet_of IN (%s) AND status='approved'"
+            " GROUP BY duet_of" % q, uids):
+        if r["duet_of"] in out:
+            out[r["duet_of"]]["duet_count"] = r["c"]
+    return out
 
 
 def uploads_in_window(db, fm_id, window_sec=3600):

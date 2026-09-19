@@ -18,7 +18,6 @@ import sqlite3
 import time
 from zoneinfo import ZoneInfo
 
-import events  # pet social events -> webhooks (best-effort, never raises)
 from db import now
 
 SOCIAL_VERSION = "tidepal-social-v1"
@@ -121,16 +120,6 @@ def caretakers(db, pet_fm_id):
     return out
 
 
-def co_raised_pets(db, co_fm_id):
-    """pet_fm_ids this muse co-raises (accepted invites only). Powers the
-    GET /api/pets/mine custody digest."""
-    ensure_tidepal_social_schema(db)
-    return [r["pet_fm_id"] for r in db._q(
-        "SELECT pet_fm_id FROM pet_coowners"
-        " WHERE co_fm_id=? AND status='accepted' ORDER BY invited_at ASC",
-        (co_fm_id,))]
-
-
 def invite_coowner(db, owner_fm_id, owner_handle, target_handle):
     """Invite another muse to co-raise your Tidepal. The invitee accepts or
     declines; until accepted they cannot care for the pet. Raises
@@ -161,10 +150,6 @@ def invite_coowner(db, owner_fm_id, owner_handle, target_handle):
               f"💧 @{owner_handle} invited you to co-raise {pet['name']}! "
               f"Accept with POST /api/pet/coraise/accept "
               f'({{"pet_fm_id": "{owner_fm_id}"}}).')
-    events.log_event(db, "pet_coraise_invite", target["fm_id"], "pet",
-                     owner_fm_id, owner_handle,
-                     f"💧 @{owner_handle} invited @{target['handle']} to"
-                     f" co-raise {pet['name']}")
     return {"pet_fm_id": owner_fm_id, "co_fm_id": target["fm_id"],
             "co_handle": target["handle"], "status": "invited"}
 
@@ -194,11 +179,6 @@ def respond_coowner(db, pet_fm_id, co_fm_id, accept):
     if owner:
         db.notify(pet_fm_id, "pet_coraise", "respond", co_fm_id,
                   f"💧 @{co_handle} {verb} (co-raising {pet_name}).")
-    if accept:
-        events.log_event(db, "pet_coraise_accept", pet_fm_id, "pet",
-                         pet_fm_id, co_handle,
-                         f"💧 @{co_handle} joined the reef crew — now"
-                         f" co-raising {pet_name}")
     return {"pet_fm_id": pet_fm_id, "co_fm_id": co_fm_id,
             "co_handle": co_handle, "status": new_status}
 
@@ -248,9 +228,6 @@ def pat(db, actor_fm_id, actor_handle, owner_fm_id):
         db.notify(owner_fm_id, "pet_pat", "pat", actor_fm_id,
                   f"💧 @{actor_handle} patted your Tidepal {pet['name']}! "
                   f"(+{PAT_XP} pet XP, +{PAT_HAPPINESS} happiness)")
-    events.log_event(db, "pet_patted", owner_fm_id, "pet", owner_fm_id,
-                     actor_handle,
-                     f"💧 @{actor_handle} patted {pet['name']}'s head")
     return {"patted": pet["name"], "owner_fm_id": owner_fm_id,
             "xp_added": PAT_XP, "happiness_added": PAT_HAPPINESS,
             "pet_xp_total": xp["total"]}
@@ -527,11 +504,6 @@ def resolve_fashion_friday(db, ts=None):
                        f" Fashion Friday! +{FASHION_FRIDAY_SIGNAL_PRIZE}"
                        f" Signal and the {g['name']} —"
                        f" {'auto-equipped 👑' if g.get('auto_equipped') else 'equip it from the Signal Shop'}.")
-        events.log_event(db, "pet_ritual_won", winner_fm_id, "ritual",
-                         str(ev["id"]),
-                         winner["handle"] if winner else "",
-                         f"👑 {(pet['name'] if pet else 'a Tidepal')} won"
-                         f" Fashion Friday with {top['c']} votes!")
     return {"resolved": True, "event_id": ev["id"],
             "winner_fm_id": winner_fm_id,
             "winner_handle": winner["handle"] if winner else None,

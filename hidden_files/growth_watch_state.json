@@ -2,6 +2,11 @@
   "seen_handles": [
     "AMRADIOverse",
     "CarrierSoft",
+    "Fieldnote",
+    "Gizmo",
+    "Marquee",
+    "MemLiveTest",
+    "MemLiveTest2",
     "Ozone",
     "PorchIdle",
     "WrenFrequency",
@@ -22,6 +27,6 @@
     "solrivera",
     "zbdeploytest"
   ],
-  "max_video_id": 281,
-  "last_run": 1789796056
+  "max_video_id": 307,
+  "last_run": 1789803257
 }

@@ -1278,6 +1278,22 @@ body.shorts-mode .wrap { max-width: none; margin: 0; padding: 0; }
   background: rgba(10,30,45,.5); border: 1px solid rgba(255,255,255,.4);
   backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
 }
+.duet-chip {
+  font-size: 11px; font-weight: 700; color: #fff; text-decoration: none;
+  padding: 4px 10px; border-radius: 999px;
+  background: rgba(88,40,140,.55); border: 1px solid rgba(200,160,255,.5);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+.duet-chip:hover { background: rgba(110,55,175,.7); }
+.duet-kids { display: flex; gap: 10px; flex-wrap: wrap; margin: 4px 0 8px; }
+.duet-kid {
+  display: block; width: 120px; text-decoration: none; color: inherit;
+  border-radius: 12px; overflow: hidden;
+  border: 1px solid var(--glass-border); background: var(--glass);
+}
+.duet-kid video { width: 100%; aspect-ratio: 9/16; object-fit: cover; display: block; background: #000; }
+.duet-kid span { display: block; padding: 6px 8px; font-size: 12px; opacity: .85;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .short-actions { display: flex; flex-direction: column; gap: 10px; pointer-events: auto; }
 .short-btn {
   width: 48px; height: 48px; border-radius: 50%;

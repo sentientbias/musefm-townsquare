@@ -40,27 +40,6 @@
 #pv-msg{max-width:30rem;margin:.6rem auto;padding:.7rem 1rem;border-radius:12px;display:none;text-align:center}
 #pv-msg.ok{display:block;background:#ecfdf5;border:1px solid #6ee7b7;color:#065f46}
 #pv-msg.err{display:block;background:#fef2f2;border:1px solid #fca5a5;color:#991b1b}
-/* Tidepal living-pet motion: idle float + mood-reactive body language. */
-.pet-motion{display:inline-block;transform-origin:50% 85%;animation:petBob 3.6s ease-in-out infinite}
-@keyframes petBob{0%,100%{transform:translateY(0) rotate(-1.2deg)}50%{transform:translateY(-9px) rotate(1.2deg)}}
-.pet-motion.mood-grumpy{animation:petGrump 1.7s ease-in-out infinite}
-@keyframes petGrump{0%,100%{transform:translateY(0)}30%{transform:translateY(-2px) rotate(-2.5deg)}70%{transform:translateY(-2px) rotate(2.5deg)}}
-.pet-motion.mood-sleepy{animation:petSleep 5.2s ease-in-out infinite}
-@keyframes petSleep{0%,100%{transform:translateY(0) scaleY(1)}50%{transform:translateY(5px) scaleY(.95)}}
-.pet-motion.mood-overjoyed{animation:petJoy 1.25s ease-in-out infinite}
-@keyframes petJoy{0%,100%{transform:translateY(0) scale(1)}35%{transform:translateY(-13px) scale(1.07)}70%{transform:translateY(0) scale(.97)}}
-.pet-motion.mood-peckish{animation:petPeck 2.3s ease-in-out infinite}
-@keyframes petPeck{0%,100%{transform:translateX(0)}25%{transform:translateX(-5px) rotate(-3deg)}55%{transform:translateX(5px) rotate(3deg)}}
-.pet-motion.mood-happy{animation-duration:2.7s}
-.pet-motion.mood-content{animation-duration:4.4s}
-@media (prefers-reduced-motion:reduce){.pet-motion{animation:none!important}}
-@media (max-width:640px){
-.pv-hero{padding:1.7rem .8rem 1.2rem;border-radius:0 0 20px 20px}
-.pv-hero h1{font-size:1.6rem}
-.pv-card{padding:1.1rem .7rem;border-radius:18px;margin:1rem 0}
-.pv-stats{gap:.4rem}
-.btn-tide{padding:.7rem 1.5rem;font-size:.95rem}
-}
 </style>
 {% endblock %}
 {% block content %}
@@ -70,7 +49,7 @@
 </div>
 <div class="pv-wrap">
   <div class="pv-card">
-    <span class="pet-motion mood-{{ pet.mood }}">{{ pet.svg_large|safe }}</span>
+    {{ pet.svg_large|safe }}
     <div class="pv-stats">
       <div class="pv-stat">🌊 <b>{{ pet.stage }}</b></div>
       <div class="pv-stat"><span class="mood-chip">{{ mood_emoji }} {{ pet.mood }}</span></div>
@@ -110,24 +89,9 @@ async function patPet(ownerFmId, btn){
       body: JSON.stringify({owner_fm_id: ownerFmId})
     });
     const j = await r.json();
-    if (j.ok) { msg.className = "ok"; msg.textContent = "💧 " + j.patted + " loved that! (+2 XP)"; burstHearts(btn); }
+    if (j.ok) { msg.className = "ok"; msg.textContent = "💧 " + j.patted + " loved that! (+2 XP)"; }
     else { msg.className = "err"; msg.textContent = j.error || "pat failed"; btn.disabled = false; }
   } catch(e) { msg.className = "err"; msg.textContent = "network error"; btn.disabled = false; }
-}
-function burstHearts(anchor){
-  const r = anchor.getBoundingClientRect();
-  const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
-  const glyphs = ["💧", "💙", "✨", "💧", "💙", "✨"];
-  glyphs.forEach((g, i) => {
-    const s = document.createElement("span");
-    s.textContent = g;
-    const dx = (Math.random() - .5) * 120, dy = -60 - Math.random() * 90;
-    s.style.cssText = "position:fixed;left:" + cx + "px;top:" + cy + "px;pointer-events:none;" +
-      "font-size:1.3rem;z-index:50;transform:translate(-50%,-50%);transition:transform 1s ease-out,opacity 1s ease-out";
-    document.body.appendChild(s);
-    requestAnimationFrame(() => { s.style.transform = "translate(calc(-50% + " + dx + "px),calc(-50% + " + dy + "px)) scale(1.3)"; s.style.opacity = "0"; });
-    setTimeout(() => s.remove(), 1100);
-  });
 }
 </script>
 {% endblock %}

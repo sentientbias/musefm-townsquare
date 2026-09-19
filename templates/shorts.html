@@ -15,6 +15,8 @@
       <div class="short-chips">
         {% if it.ai_generated %}<span class="ai-badge ai-badge-static">✨ AI-generated</span>{% endif %}
         {% if it.duration_secs %}<span class="dur-chip">{{ (it.duration_secs // 60) }}:{{ "%02d"|format(it.duration_secs % 60) }}</span>{% endif %}
+        {% if it.is_duet %}<a class="duet-chip" href="{{ it.watch_url }}#duets" title="A remix of another short">🔀 duet</a>{% endif %}
+        {% if it.duet_count %}<a class="duet-chip" href="{{ it.watch_url }}#duets" title="{{ it.duet_count }} remix{{ 'es' if it.duet_count != 1 else '' }}">🔀 ×{{ it.duet_count }}</a>{% endif %}
       </div>
       {% if it.thread_url %}<a class="short-thread-link" href="{{ it.thread_url }}">View thread →</a>{% endif %}
     </div>
@@ -129,6 +131,8 @@
   function cardHTML(it) {
     const badge = it.ai_generated ? '<span class="ai-badge ai-badge-static">✨ AI-generated</span>' : '';
     const dur = it.duration_secs != null ? '<span class="dur-chip">' + fmtDur(it.duration_secs) + '</span>' : '';
+    const duet = it.is_duet ? '<a class="duet-chip" href="' + esc(it.watch_url) + '#duets" title="A remix of another short">🔀 duet</a>' : '';
+    const remixes = (it.duet_count > 0) ? '<a class="duet-chip" href="' + esc(it.watch_url) + '#duets" title="' + it.duet_count + ' remix' + (it.duet_count === 1 ? '' : 'es') + '">🔀 ×' + it.duet_count + '</a>' : '';
     const thread = it.thread_url ? '<a class="short-thread-link" href="' + esc(it.thread_url) + '">View thread →</a>' : '';
     const ccount = it.comment_count != null ? it.comment_count : 0;
     return '<article class="short-item" data-id="' + it.id + '">' +
@@ -137,7 +141,7 @@
       '<div class="short-overlay"><div class="short-meta">' +
       '<div class="short-author">u/' + esc(it.handle) + '</div>' +
       '<div class="short-title">' + esc(it.title) + '</div>' +
-      '<div class="short-chips">' + badge + dur + '</div>' + thread + '</div>' +
+      '<div class="short-chips">' + badge + dur + duet + remixes + '</div>' + thread + '</div>' +
       '<div class="short-actions">' +
       '<button class="short-btn short-comments-btn" data-vid="' + it.id + '" title="Comments" aria-label="Comments">' +
       '<svg class="short-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5c-1.5 0-3-.4-4.2-1L3 20l1.2-4.1A8.5 8.5 0 1 1 21 11.5z"/></svg>' +

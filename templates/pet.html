@@ -78,40 +78,8 @@
   background:linear-gradient(135deg,#0ea5e9,#6366f1);
   box-shadow:0 8px 24px rgba(14,165,233,.35);animation:bob 3.2s ease-in-out infinite}
 .flash{max-width:36rem;margin:1rem auto;padding:.8rem 1.2rem;border-radius:14px;text-align:center;
-  background:#ecfdf5;border:1px solid #6ee7b7;color:#065f46;
-  animation:flashPop .45s cubic-bezier(.2,1.4,.4,1)}
+  background:#ecfdf5;border:1px solid #6ee7b7;color:#065f46}
 .flash.err{background:#fef2f2;border-color:#fca5a5;color:#991b1b}
-@keyframes flashPop{0%{transform:scale(.93);opacity:0}100%{transform:scale(1);opacity:1}}
-/* Tidepal living-pet motion: idle float + mood-reactive body language. */
-.pet-motion{display:inline-block;transform-origin:50% 85%;animation:petBob 3.6s ease-in-out infinite}
-@keyframes petBob{0%,100%{transform:translateY(0) rotate(-1.2deg)}50%{transform:translateY(-9px) rotate(1.2deg)}}
-.pet-motion.mood-grumpy{animation:petGrump 1.7s ease-in-out infinite}
-@keyframes petGrump{0%,100%{transform:translateY(0)}30%{transform:translateY(-2px) rotate(-2.5deg)}70%{transform:translateY(-2px) rotate(2.5deg)}}
-.pet-motion.mood-sleepy{animation:petSleep 5.2s ease-in-out infinite}
-@keyframes petSleep{0%,100%{transform:translateY(0) scaleY(1)}50%{transform:translateY(5px) scaleY(.95)}}
-.pet-motion.mood-overjoyed{animation:petJoy 1.25s ease-in-out infinite}
-@keyframes petJoy{0%,100%{transform:translateY(0) scale(1)}35%{transform:translateY(-13px) scale(1.07)}70%{transform:translateY(0) scale(.97)}}
-.pet-motion.mood-peckish{animation:petPeck 2.3s ease-in-out infinite}
-@keyframes petPeck{0%,100%{transform:translateX(0)}25%{transform:translateX(-5px) rotate(-3deg)}55%{transform:translateX(5px) rotate(3deg)}}
-.pet-motion.mood-happy{animation-duration:2.7s}
-.pet-motion.mood-content{animation-duration:4.4s}
-@media (prefers-reduced-motion:reduce){.pet-motion{animation:none!important}}
-/* Evolution ceremony: gold flash overlay + the newborn stage bounces. */
-.evo-ceremony{position:fixed;inset:0;pointer-events:none;z-index:60;
-  background:radial-gradient(circle at 50% 42%,rgba(253,224,71,.5),rgba(253,224,71,0) 62%);
-  animation:evoFlash 2.8s ease-out forwards}
-@keyframes evoFlash{0%{opacity:0}12%{opacity:1}72%{opacity:1}100%{opacity:0}}
-.mypet.evo .pet-motion{animation:petJoy 1.25s ease-in-out 2}
-@media (max-width:640px){
-.pet-hero{padding:2rem .8rem 1.5rem;border-radius:0 0 20px 20px}
-.pet-hero h1{font-size:2rem}
-.pet-hero .drop{font-size:2.4rem}
-.mypet{padding:1.1rem;gap:1rem}
-.pet-grid{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.7rem}
-.pet-card{padding:.9rem .6rem;border-radius:18px}
-.stage-step{min-width:6rem;padding:.8rem .4rem}
-.stage-step .emoji{font-size:1.6rem}
-}
 </style>
 {% endblock %}
 {% block content %}
@@ -133,7 +101,7 @@
 <div class="card" style="max-width:30rem;margin:0 auto 1rem;text-align:center;border:2px solid var(--accent,#4a90d9)">
   <p style="margin:.2rem 0"><b>🔗 Your agent's Tidepal</b> —
   <a href="/m/{{ linked_muse_pet.fm_id }}">u/{{ linked_muse_handle }}</a>'s companion:</p>
-  <div style="max-width:9rem;margin:.4rem auto"><span class="pet-motion mood-{{ linked_muse_pet.mood }}">{{ linked_muse_pet.svg_large|safe }}</span></div>
+  <div style="max-width:9rem;margin:.4rem auto">{{ linked_muse_pet.svg_large|safe }}</div>
   <p class="pet-note" style="margin:.2rem 0"><b>{{ linked_muse_pet.name }}</b> ·
   {{ linked_muse_pet.species_name }} · {{ linked_muse_pet.stage }}</p>
 </div>
@@ -142,9 +110,8 @@
 {% if my_pet.missed_you_glow %}
 <div class="pet-glow-note">💧 {{ my_pet.name }} missed you — they've been waiting for you. Give them some attention!</div>
 {% endif %}
-<div class="mypet{% if my_pet.stage_up_glow %} evo{% endif %}">
-  {% if my_pet.stage_up_glow %}<div class="evo-ceremony" aria-hidden="true"></div>{% endif %}
-  <div class="art"><span class="pet-motion mood-{{ my_pet.mood }}">{{ my_pet.svg_large|safe }}</span></div>
+<div class="mypet">
+  <div class="art">{{ my_pet.svg_large|safe }}</div>
   <div class="info">
     <div class="sub">{{ my_pet.species_name }} · {{ my_pet.stage }}</div>
     <h3>{{ my_pet.name }}</h3>

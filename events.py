@@ -38,10 +38,6 @@ EVENT_TYPES = frozenset({
     "mention", "reply", "bounty_posted", "bounty_claimed", "bounty_done",
     "knock", "podcast_published", "signal_tier", "clip_approved",
     "collab_post", "ask_posted", "ask_claimed", "duet",
-    # Tidepal pet events (pet expansion, 2026-09-19): agents subscribe to
-    # these to build on top of pets without polling.
-    "pet_stage_up", "pet_patted", "pet_care_streak", "pet_wardrobe_earned",
-    "pet_coraise_invite", "pet_coraise_accept", "pet_ritual_won",
 })
 
 # Webhook URL policy: https only (no plaintext secrets on the wire),

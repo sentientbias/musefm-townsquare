@@ -42,31 +42,6 @@
 .ts-entry button:disabled{opacity:.45;cursor:default}
 .ts-winners{font-size:.9rem;opacity:.9;margin-top:.6rem}
 .ts-note{font-size:.85rem;opacity:.75;max-width:38rem;margin:.6rem auto;text-align:center}
-/* Tidepal living-pet motion: idle float + mood-reactive body language.
-   GPU-friendly transforms only; off for prefers-reduced-motion. */
-.pet-motion{display:inline-block;transform-origin:50% 85%;animation:petBob 3.6s ease-in-out infinite}
-@keyframes petBob{0%,100%{transform:translateY(0) rotate(-1.2deg)}50%{transform:translateY(-9px) rotate(1.2deg)}}
-.pet-motion.mood-grumpy{animation:petGrump 1.7s ease-in-out infinite}
-@keyframes petGrump{0%,100%{transform:translateY(0)}30%{transform:translateY(-2px) rotate(-2.5deg)}70%{transform:translateY(-2px) rotate(2.5deg)}}
-.pet-motion.mood-sleepy{animation:petSleep 5.2s ease-in-out infinite}
-@keyframes petSleep{0%,100%{transform:translateY(0) scaleY(1)}50%{transform:translateY(5px) scaleY(.95)}}
-.pet-motion.mood-overjoyed{animation:petJoy 1.25s ease-in-out infinite}
-@keyframes petJoy{0%,100%{transform:translateY(0) scale(1)}35%{transform:translateY(-13px) scale(1.07)}70%{transform:translateY(0) scale(.97)}}
-.pet-motion.mood-peckish{animation:petPeck 2.3s ease-in-out infinite}
-@keyframes petPeck{0%,100%{transform:translateX(0)}25%{transform:translateX(-5px) rotate(-3deg)}55%{transform:translateX(5px) rotate(3deg)}}
-.pet-motion.mood-happy{animation-duration:2.7s}
-.pet-motion.mood-content{animation-duration:4.4s}
-@media (prefers-reduced-motion:reduce){.pet-motion{animation:none!important}}
-@media (max-width:640px){
-.ts-hero{padding:1.8rem .8rem 1.3rem;border-radius:0 0 20px 20px}
-.ts-hero h1{font-size:1.65rem}
-.ts-hero .drop{font-size:2rem}
-.ts-grid{grid-template-columns:repeat(auto-fill,minmax(102px,1fr));gap:.55rem}
-.ts-card{padding:.65rem .35rem;border-radius:15px}
-.ts-ritual{padding:1rem;border-radius:18px}
-.ts-entries{grid-template-columns:repeat(auto-fill,minmax(94px,1fr));gap:.5rem}
-.ts-entry{padding:.55rem .3rem}
-}
 </style>
 {% endblock %}
 {% block content %}
@@ -94,7 +69,7 @@
       <div class="ts-entries">
         {% for e in entries %}
         <div class="ts-entry">
-          <span class="pet-motion mood-{{ e.mood }}" style="animation-delay:-{{ (loop.index % 5) }}s">{{ e.svg|safe }}</span>
+          {{ e.svg|safe }}
           <div><b>{{ e.name }}</b></div>
           <div class="sp" style="font-size:.7rem;opacity:.65">@{{ e.handle }} · {{ e.votes }} vote{{ "s" if e.votes != 1 else "" }}</div>
           {% if ritual.is_open %}
@@ -120,7 +95,7 @@
     {% for p in pets %}
     <a class="ts-card" href="/pet/{{ p.handle }}">
       {% if p.crowned %}<span class="ts-crown" title="Fashion Friday winner">👑</span>{% endif %}
-      <span class="pet-motion mood-{{ p.mood }}" style="animation-delay:-{{ (loop.index % 7) }}s">{{ p.svg|safe }}</span>
+      {{ p.svg|safe }}
       <h3>{{ p.name }}</h3>
       <div class="sp">{{ p.species_name }} · {{ p.stage }}</div>
       <div class="meta">@{{ p.handle }} · ❤️ {{ p.pat_count }}</div>
