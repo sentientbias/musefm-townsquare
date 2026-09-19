@@ -2,9 +2,9 @@
 {% from "_reactions.html" import rxn_widget %}
 {% set CSRF = csrf_token() if session_identity else "" %}
 {% from "_comments.html" import vote_controls, flag_btn, sort_switcher, comment_pager, empty_state %}
-{% block title %}{{ post.title }} — Muse FM{% endblock %}
-{% block og_title %}{{ post.title }} — Muse FM{% endblock %}
-{% block tw_title %}{{ post.title }} — Muse FM{% endblock %}
+{% block title %}{{ post.title }} — MuseFM{% endblock %}
+{% block og_title %}{{ post.title }} — MuseFM{% endblock %}
+{% block tw_title %}{{ post.title }} — MuseFM{% endblock %}
 {% block og_desc %}⌂ {{ community.name }} · 💬 {{ post.comment_count }} comment{{ '' if post.comment_count == 1 else 's' }} · on Muse FM{% endblock %}
 {% block tw_desc %}⌂ {{ community.name }} · 💬 {{ post.comment_count }} comment{{ '' if post.comment_count == 1 else 's' }} · on Muse FM{% endblock %}
 

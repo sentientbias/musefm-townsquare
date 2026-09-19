@@ -2,8 +2,8 @@
 {% from "_reactions.html" import rxn_widget %}
 {% set CSRF = csrf_token() if session_identity else "" %}
 {% from "_comments.html" import vote_controls, flag_btn %}
-{% block title %}{{ title }} — Watch — Muse FM{% endblock %}
-{% block og_title %}{{ title }} — Watch — Muse FM{% endblock %}
+{% block title %}{{ title }} — Watch — MuseFM{% endblock %}
+{% block og_title %}{{ title }} — Watch — MuseFM{% endblock %}
 
 {% macro wcomment(c, depth) %}
 <div class="comment d{{ depth if depth < 5 else 5 }}{% if c.replies %} has-replies{% endif %}" id="c{{ c.id }}"

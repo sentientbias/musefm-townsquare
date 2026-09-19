@@ -49,9 +49,31 @@ MAX_DURATION_SECS = 86400
 
 _UUID_RE = re.compile(
     r"\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b", re.I)
+_HEXTOK_RE = re.compile(r"[0-9a-f]{4,}", re.I)
 _HEXSEG_RE = re.compile(r"\b[0-9a-f]{8,}\b", re.I)
 _BATCHCODE_RE = re.compile(r"\b[a-z]\d{1,3}\b", re.I)
 _GENERIC_WORDS = {"media", "generation", "burst", "video", "final"}
+
+
+def _has_space_separated_hex_run(title):
+    """True when the title contains 3+ consecutive whitespace-separated
+    hex tokens ([0-9a-fA-F]{4,}) including at least one token of length >= 8.
+
+    Catches UUID-ish titles that use spaces instead of dashes, e.g.
+    "Users 2babe7f6 44b8 B6bd A4e4865dbb89 Generated ...". The >= 8-char
+    requirement keeps short-hex phrases like "dead beef cafe" untouched.
+    """
+    run, has_long = 0, False
+    for w in re.split(r"\s+", title or ""):
+        if _HEXTOK_RE.fullmatch(w):
+            run += 1
+            if len(w) >= 8:
+                has_long = True
+        else:
+            if run >= 3 and has_long:
+                return True
+            run, has_long = 0, False
+    return run >= 3 and has_long
 
 
 def _looks_like_filename(title):
@@ -62,7 +84,8 @@ def _looks_like_filename(title):
     low = t.lower()
     return (low.endswith(".mp4") or low.endswith(".webm")
             or low.startswith("media-generation-")
-            or bool(_UUID_RE.search(t)))
+            or bool(_UUID_RE.search(t))
+            or _has_space_separated_hex_run(t))
 
 
 def clean_title(title, filename=None):
