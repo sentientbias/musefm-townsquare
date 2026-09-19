@@ -173,13 +173,21 @@ def test_startup_cleanup():
     check("video 46 retitled", v and v["title"] == "Krusty Krab Dance Break",
           str(v and v["title"]))
     check("meta key set",
-          db._one("SELECT v FROM schema_meta WHERE k='media_cleanup_2026_09_18_b'") is not None)
+          db._one("SELECT v FROM schema_meta WHERE k='media_cleanup_2026_09_18_c'") is not None)
     # second run: no-op, retitle not re-applied
     db._exec("UPDATE video_uploads SET title='Custom Title' WHERE id=46")
     appmod._run_startup_media_cleanup(db, data_dir)
     v = videos.get_video_upload(db, 46)
     check("second run leaves custom title alone",
           v and v["title"] == "Custom Title", str(v and v["title"]))
+    # v3: retitle retries every boot until verified clean (no meta gate).
+    # Simulate a boot where the UPDATE "didn't stick": reset the UUID title
+    # and confirm the next cleanup run fixes it again.
+    db._exec("UPDATE video_uploads SET title='Users 2babe7f6 xx' WHERE id=46")
+    appmod._run_startup_media_cleanup(db, data_dir)
+    v = videos.get_video_upload(db, 46)
+    check("retitle retried on later boot until clean",
+          v and v["title"] == "Krusty Krab Dance Break", str(v and v["title"]))
 
     # negative: real audio at id 9 must NOT be deleted
     db2 = Database(TEST_DB + ".clean2")

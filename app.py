@@ -60,6 +60,21 @@ from identity import IdentityError, b64u_encode, verify_signed_body
 import gifs
 import ai_images
 import videos
+
+# Build id for deploy verification (visible on /api/ping). Best-effort:
+# Render clones the repo, so `git rev-parse` usually works; otherwise
+# fall back to the RENDER_GIT_COMMIT env var, else "unknown".
+BUILD_ID = "unknown"
+try:
+    _git = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
+                          capture_output=True, text=True, timeout=5,
+                          cwd=os.path.dirname(os.path.abspath(__file__)))
+    if _git.returncode == 0 and _git.stdout.strip():
+        BUILD_ID = _git.stdout.strip()
+    elif os.environ.get("RENDER_GIT_COMMIT"):
+        BUILD_ID = os.environ["RENDER_GIT_COMMIT"][:7]
+except Exception:
+    pass
 import fb_reactions
 
 # Rotating hero taglines — a mix of slogans, per Anthony.
@@ -109,57 +124,73 @@ DB_PATH = os.path.join(HERE, os.environ.get("TOWNSQUARE_DB", "townsquare.db"))
 
 
 def _run_startup_media_cleanup(_db, data_dir):
-    """One-time owner-authorized media cleanup (Anthony, 2026-09-18).
+    """Owner-authorized media cleanup (Anthony, 2026-09-18).
 
     Removes clear junk and fixes media presentation that doesn't sell the
-    product. Runs once per database, guarded by schema_meta; every op is
-    content-verified (never blind by id) and wrapped so a failure can never
-    break boot. Failures print a traceback to the Render logs.
+    product. The audio-9 sweep is one-time, guarded by schema_meta. The
+    video-46 retitle is INTENTIONALLY not key-gated: it retries on every
+    boot until the stored title is verified clean, so a transient boot
+    failure can never strand it behind a poisoned "done" marker. Both ops
+    are content-verified (never blind by id) and wrapped so a failure can
+    never break boot. Failures print a traceback to the Render logs.
+
+    NOTE (2026-09-19): the v1/v2 retitle did not stick in production for
+    an undiagnosed reason even though the same SQL verifies fine through
+    a full local init_db repro. v3 therefore (a) uses raw SQL instead of
+    videos.get_video_upload (skips ensure_video_schema/executescript at
+    boot), (b) retries every boot, (c) verify-by-reads and warns loudly.
     """
-    KEY = "media_cleanup_2026_09_18_b"  # v2: v1's video-46 retitle did not
-    # stick in production (audio-9 delete did) for an undiagnosed reason;
-    # v2 retries the retitle with verify-by-read.
+    KEY = "media_cleanup_2026_09_18_c"
+    FIXED_TITLE_46 = "Krusty Krab Dance Break"
     try:
         _db._exec("CREATE TABLE IF NOT EXISTS schema_meta (k TEXT PRIMARY KEY, v TEXT)")
-        if _db._one("SELECT v FROM schema_meta WHERE k=?", (KEY,)):
-            return
-        try:
-            # 1. Audio upload #9 "canary": a 1x1 PNG mislabeled as audio/mpeg,
-            #    left behind by the readiness test run. Delete file + row, but
-            #    only if the stored bytes are still that exact junk.
-            u = _db.get_upload(9)
-            if u and u.get("title") == "canary" and (u.get("bytes") or 0) < 1000:
-                sp = u.get("stored_path") or ""
-                full = os.path.join(data_dir, sp) if sp and ".." not in sp else ""
-                is_png = False
-                try:
-                    with open(full, "rb") as fh:
-                        is_png = fh.read(8) == b"\x89PNG\r\n\x1a\n"
-                except OSError:
+        if not _db._one("SELECT v FROM schema_meta WHERE k=?", (KEY,)):
+            try:
+                # 1. Audio upload #9 "canary": a 1x1 PNG mislabeled as
+                #    audio/mpeg, left behind by the readiness test run.
+                #    Delete file + row, but only if the stored bytes are
+                #    still that exact junk.
+                u = _db.get_upload(9)
+                if u and u.get("title") == "canary" and (u.get("bytes") or 0) < 1000:
+                    sp = u.get("stored_path") or ""
+                    full = os.path.join(data_dir, sp) if sp and ".." not in sp else ""
                     is_png = False
-                if is_png:
-                    _db.delete_upload(9, data_dir)
-                    print("[cleanup] removed junk audio upload id 9"
-                          " ('canary', 1x1 PNG mislabeled as audio)")
+                    try:
+                        with open(full, "rb") as fh:
+                            is_png = fh.read(8) == b"\x89PNG\r\n\x1a\n"
+                    except OSError:
+                        is_png = False
+                    if is_png:
+                        _db.delete_upload(9, data_dir)
+                        print("[cleanup] removed junk audio upload id 9"
+                              " ('canary', 1x1 PNG mislabeled as audio)")
+                    else:
+                        print("[cleanup] SKIP audio 9: stored file is not the expected PNG junk")
+            except Exception:
+                traceback.print_exc()
+            _db._exec("INSERT OR REPLACE INTO schema_meta (k, v) VALUES (?, ?)",
+                      (KEY, "done"))
+        try:
+            # 2. Video #46: Anthony's upload carried a raw OS filename as
+            #    its title. The clip itself is a legit 10s dancing short,
+            #    so keep it and give it a real title worthy of the feed.
+            #    Raw SQL on purpose: no videos-module schema ensure at boot.
+            r = _db._one("SELECT title FROM video_uploads WHERE id=46")
+            cur_title = r["title"] if r else None
+            if cur_title and "2babe7f6" in cur_title:
+                _db._exec("UPDATE video_uploads SET title=? WHERE id=46",
+                          (FIXED_TITLE_46,))
+                r2 = _db._one("SELECT title FROM video_uploads WHERE id=46")
+                now_title = r2["title"] if r2 else None
+                if now_title == FIXED_TITLE_46:
+                    print("[cleanup] video 46 retitled -> %r" % FIXED_TITLE_46)
                 else:
-                    print("[cleanup] SKIP audio 9: stored file is not the expected PNG junk")
-            # 2. Video #46: Anthony's upload carried a raw OS filename as its
-            #    title. The clip itself is a legit 10s dancing short, so keep
-            #    it and give it a real title worthy of the feed.
-            v = videos.get_video_upload(_db, 46)
-            if v and "2babe7f6" in (v.get("title") or ""):
-                cur = _db._exec("UPDATE video_uploads SET title=? WHERE id=?",
-                                ("Krusty Krab Dance Break", 46))
-                v2 = videos.get_video_upload(_db, 46)
-                print("[cleanup] video 46 retitle: rows=%s now=%r"
-                      % (cur.rowcount, (v2 or {}).get("title")))
-            else:
-                print("[cleanup] video 46 already clean: %r"
-                      % ((v or {}).get("title")))
+                    print("[cleanup] WARNING: video 46 retitle did NOT persist"
+                          " (still %r)" % (now_title,))
+            elif cur_title:
+                print("[cleanup] video 46 title already clean: %r" % (cur_title,))
         except Exception:
             traceback.print_exc()
-        _db._exec("INSERT OR REPLACE INTO schema_meta (k, v) VALUES (?, ?)",
-                  (KEY, "done"))
     except Exception:
         traceback.print_exc()
 
@@ -3651,7 +3682,7 @@ def api_ping():
     """Featherweight keep-warm/health endpoint: no DB work, ~instant. Point
     an uptime monitor (or the 5-min site reprobe) at this to keep Render
     from cold-starting the Shorts feeds on real visitors."""
-    return jsonify({"ok": True, "ts": int(time.time())})
+    return jsonify({"ok": True, "ts": int(time.time()), "build": BUILD_ID})
 
 
 def _feed_anchor_video(param, require_series=None):
