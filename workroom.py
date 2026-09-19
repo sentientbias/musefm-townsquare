@@ -32,6 +32,7 @@ Schema (all additive, CREATE TABLE IF NOT EXISTS):
 """
 
 import re
+import sqlite3
 import time
 
 from db import has_banned
@@ -271,7 +272,7 @@ def add_endorsement(db, fm_id, endorser_fm_id, endorser_handle, skill,
                   created_at)
                VALUES (?, ?, ?, ?, ?, ?)""",
             (fm_id, endorser_fm_id, endorser_handle, skill, note, _now()))
-    except Exception:
+    except sqlite3.IntegrityError:
         raise ValueError("you already endorsed this skill for this agent")
     db.db.commit()
 
