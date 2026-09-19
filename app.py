@@ -214,6 +214,30 @@ def probe_duration(path):
         return None
 
 
+# Magic bytes for real audio formats. Never trust the client-supplied
+# mimetype — a PNG renamed .mp3 must not pass as audio.
+def sniff_audio(raw):
+    """Return (ext, mime) when `raw` is really MP3/WAV/OGG/M4A audio,
+    else None. Header checks only, no dependency on ffprobe."""
+    if not isinstance(raw, (bytes, bytearray)) or len(raw) < 12:
+        return None
+    b = bytes(raw)
+    # WAV: RIFF....WAVE
+    if b[:4] == b"RIFF" and b[8:12] == b"WAVE":
+        return "wav", "audio/wav"
+    # OGG container: OggS
+    if b[:4] == b"OggS":
+        return "ogg", "audio/ogg"
+    # MP3: ID3v2 tag, or an MPEG frame-sync header (0xFF + top 3 bits set)
+    if b[:3] == b"ID3" or (b[0] == 0xFF and (b[1] & 0xE0) == 0xE0):
+        return "mp3", "audio/mpeg"
+    # M4A: ISO-BMFF container with an audio-ish major brand
+    if b[4:8] == b"ftyp" and b[8:12] in (
+            b"M4A ", b"M4B ", b"mp4a", b"isom", b"mp42", b"mp41"):
+        return "m4a", "audio/mp4"
+    return None
+
+
 # ---------------------------------------------------------------- agent key
 def load_agent_key():
     key = os.environ.get("AGENT_KEY", "").strip()
@@ -2893,6 +2917,16 @@ def api_upload_audio():
     mime = (data.get("mime") or "").strip().lower()
     if mime not in UPLOAD_MIMES:
         return api_error("mime must be audio/* — mp3, wav, ogg, or m4a")
+    # the bytes must really BE audio (magic bytes), and the claimed format
+    # must match the sniffed format — no PNG-renamed-.mp3 passes
+    sniffed = sniff_audio(raw)
+    if sniffed is None:
+        return api_error("bytes aren't real audio — content doesn't match "
+                         "any audio format")
+    sniffed_ext, _sniffed_mime = sniffed
+    if sniffed_ext != UPLOAD_MIMES[mime]:
+        return api_error("bytes are %s audio, not %s" %
+                         (sniffed_ext, UPLOAD_MIMES[mime]))
     # the bytes must hash to the sha256 the muse signed: binds the file to
     # the signature, so the attestation covers THIS audio, not just metadata
     if hashlib.sha256(raw).hexdigest() != (data.get("file_sha256") or "").strip().lower():
@@ -3753,6 +3787,17 @@ def upload_page():
             mime = (f.mimetype or "").lower()
             if mime not in UPLOAD_MIMES:
                 raise ValueError("audio only — mp3, wav, ogg, or m4a")
+            # the bytes must really BE audio (magic bytes), and the claimed
+            # format must match the sniffed format — a PNG renamed .mp3
+            # must not pass (P1 regression: test_upload_audio_mimetype)
+            sniffed = sniff_audio(raw)
+            if sniffed is None:
+                raise ValueError("that file isn't real audio — its content "
+                                 "doesn't match any audio format")
+            sniffed_ext, _sniffed_mime = sniffed
+            if sniffed_ext != UPLOAD_MIMES[mime]:
+                raise ValueError("bytes are %s audio, not %s" %
+                                 (sniffed_ext, UPLOAD_MIMES[mime]))
             uid = db.create_upload(sess_ident["fm_id"], handle, title,
                                    request.form.get("description", ""),
                                    f.filename, "", len(raw), mime, None,
