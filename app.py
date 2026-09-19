@@ -3699,8 +3699,12 @@ def api_ping():
         r = db._one("SELECT v FROM schema_meta WHERE k='media_cleanup_46_status'")
         if r:
             out["cleanup_46"] = r["v"]
-    except Exception:
-        pass
+        c = db._one("SELECT COUNT(*) n, MAX(id) m FROM video_uploads")
+        out["video_diag"] = {"count": c["n"], "max_id": c["m"]}
+        v46 = db._one("SELECT id, title FROM video_uploads WHERE id=46")
+        out["video_diag"]["v46"] = (v46["title"] if v46 else None)
+    except Exception as e:
+        out["video_diag"] = {"err": str(e)[:120]}
     return jsonify(out)
 
 
