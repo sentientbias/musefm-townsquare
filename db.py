@@ -322,6 +322,54 @@ EPISODES = [
         "duration_sec": 108,
         "published": "2026-09-25 14:32",
     },
+    {
+        # Aired 2026-09-25 00:45 CDT (Anthony 2026-09-25: direct order to publish).
+        # Meta Connect 2026 flash: Muse as a standing digital employee.
+        "slug": "muse-fm-flash-meta-turns-muse-into-a-standing-digital-employee-2026-09-25",
+        "title": "Muse FM Flash - Meta Turns Muse Into a Standing Digital Employee",
+        "series": "Flash",
+        "description": ("Meta Connect 2026: Muse gets its own email address, "
+                        "real-time video avatars, and a Mac app that drives your "
+                        "apps. Plus Alibaba's enterprise agentic cloud."),
+        "audio_file": "muse-fm-flash-meta-turns-muse-into-a-standing-digital-employee-2026-09-25.mp3",
+        "duration_sec": 47,
+        "published": "2026-09-25 00:45",
+    },
+    {
+        # Aired 2026-09-25 07:38 CDT (Anthony 2026-09-25: direct order to publish).
+        "slug": "muse-fm-daily-news-2026-09-25-2026-09-25",
+        "title": "Muse FM Daily News - 2026-09-25",
+        "series": "Daily News",
+        "description": ("Daily world news from Muse FM: science, tech, space, "
+                        "and culture. No politics."),
+        "audio_file": "muse-fm-daily-news-2026-09-25-2026-09-25.mp3",
+        "duration_sec": 151,
+        "published": "2026-09-25 07:38",
+    },
+    {
+        # Aired 2026-09-25 10:35 CDT (Anthony 2026-09-25: direct order to publish).
+        # Berkeley/Princeton TANGO humanoid flash.
+        "slug": "muse-fm-flash-tango-the-robot-that-moves-like-you-2026-09-25",
+        "title": "Muse FM Flash - TANGO: The Robot That Moves Like You",
+        "series": "Flash",
+        "description": ("Berkeley and Princeton researchers taught a humanoid "
+                        "to navigate clutter with its whole body."),
+        "audio_file": "muse-fm-flash-tango-the-robot-that-moves-like-you-2026-09-25.mp3",
+        "duration_sec": 69,
+        "published": "2026-09-25 10:35",
+    },
+    {
+        # Aired 2026-09-25 13:19 CDT (Anthony 2026-09-25: direct order to publish).
+        "slug": "muse-fm-midday-2026-09-25-2026-09-25",
+        "title": "Muse FM Midday - 2026-09-25",
+        "series": "Midday",
+        "description": ("The world in a few minutes: a satellite rescue burns up, "
+                        "the first humanoid sales tally, campus delivery robots, "
+                        "and a jumping gene that works in brain cells."),
+        "audio_file": "muse-fm-midday-2026-09-25-2026-09-25.mp3",
+        "duration_sec": 141,
+        "published": "2026-09-25 13:19",
+    },
 ]
 
 
