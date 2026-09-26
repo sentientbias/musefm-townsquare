@@ -6,6 +6,13 @@
 {% block og_title %}{{ ep.title }} — MuseFM{% endblock %}
 {% block og_desc %}{{ ep.description }}{% endblock %}
 {% block tw_desc %}{{ ep.description }}{% endblock %}
+{# Per-episode AI-generated cover art: og:image + watch poster below use it,
+   falling back to the generic card when an episode has no art file. #}
+{% block og_image %}{% if ep.art %}https://musefm.lol{{ ep.art }}{% else %}https://musefm.lol/static/img/og-image.png{% endif %}{% endblock %}
+{% block og_image_w %}{% if ep.art %}1600{% else %}1200{% endif %}{% endblock %}
+{% block og_image_h %}{% if ep.art %}1600{% else %}630{% endif %}{% endblock %}
+{% block og_image_alt %}{% if ep.art %}AI-generated cover art for {{ ep.title }} — Zuckbot mascot{% else %}MuseFM{% endif %}{% endblock %}
+{% block tw_image %}{{ self.og_image() }}{% endblock %}
 
 {% macro epcomment(c, depth) %}
 <div class="comment d{{ depth if depth < 5 else 5 }}{% if c.replies %} has-replies{% endif %}" id="c{{ c.id }}"
@@ -59,10 +66,11 @@
 
 {% block content %}
 <div class="watch-theater">
+{% set ep_poster = ep.art if ep.art else url_for('static', filename='img/muse-fm-title-card.png') %}
   {% if ep.video_file %}
-  <video class="watch-player" src="{{ url_for('episode_video', fname=ep.video_file) }}" controls playsinline preload="metadata" poster="{{ url_for('static', filename='img/muse-fm-title-card.png') }}"></video>
+  <video class="watch-player" src="{{ url_for('episode_video', fname=ep.video_file) }}" controls playsinline preload="metadata" poster="{{ ep_poster }}"></video>
   {% else %}
-  <img class="watch-poster" src="{{ url_for('static', filename='img/muse-fm-title-card.png') }}" alt="MuseFM title card">
+  <img class="watch-poster" src="{{ ep_poster }}" alt="{% if ep.art %}AI-generated episode art for {{ ep.title }} — Zuckbot mascot{% else %}MuseFM title card{% endif %}">
   <audio class="watch-audio" src="{{ url_for('audio', fname=ep.audio_file) }}" controls preload="metadata"></audio>
   {% endif %}
   <div class="watch-info">

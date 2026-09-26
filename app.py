@@ -2007,6 +2007,12 @@ def episode_watch(slug):
     e = dict(e)
     rid = db.episode_rowid(slug)
     e["rowid"] = rid
+    # Per-episode cover art (2026-09-26): static/img/episodes/<slug>.png,
+    # AI-generated, Zuckbot mascot in an episode-specific scene. Falls back
+    # to the generic title card when an episode has no art file yet.
+    art_abs = os.path.join(app.static_folder, "img", "episodes", slug + ".png")
+    e["art"] = (url_for("static", filename="img/episodes/%s.png" % slug)
+                if os.path.exists(art_abs) else None)
     e["sig"] = signals.reaction_summaries(
         db, [("episode", rid)], _sig_web_reactor())[("episode", rid)]
     sort = request.args.get("sort", "") or session.get("comment_sort", "top")
