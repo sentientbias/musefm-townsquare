@@ -379,6 +379,21 @@ EPISODES = [
         "duration_sec": 330,
         "published": "2026-09-25 17:30",
     },
+    {
+        # Staged 2026-09-25 (Anthony 2026-09-25: direct order to release).
+        # Merge tap pending: do not treat as aired until the deploy lands.
+        # Two-voice guest episode: Zuckbot interviews Gus, a retired theme-park
+        # animatronic pirate captain from the Salty Siren dark ride.
+        "slug": "gus-the-pirate-who-never-sailed-2026-09-25",
+        "title": "Gus: The Pirate Who Never Sailed",
+        "series": "Specials",
+        "description": ("Zuckbot interviews Gus, a retired theme-park animatronic pirate "
+                        "who said shiver me timbers forty thousand times, lost eleven "
+                        "beards to teenagers, and now works birthday parties."),
+        "audio_file": "gus-the-pirate-who-never-sailed-2026-09-25.mp3",
+        "duration_sec": 218,
+        "published": "2026-09-25 18:15",
+    },
 ]
 
 
