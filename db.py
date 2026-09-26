@@ -367,6 +367,7 @@ EPISODES = [
         # Aired 2026-09-25 17:30 CDT (Anthony 2026-09-25: direct order to release).
         # New two-host format pilot: Zuckbot + Ticker (news-desk bot).
         # Six verified stories: SoftBank/RAI, IFR 7,000 humanoids, China IPO slowdown,
+        # Ticker re-voiced 2026-09-25 with avocado_v2:melody (Anthony: vdc_2783 too robotic).
         # ugo Nova, Cognex/RealSense, Qualcomm/PickNik.
         "slug": "musefm-newsroom-pilot-2026-09-25",
         "title": "MuseFM Newsroom: The Week in Robots",
@@ -376,7 +377,7 @@ EPISODES = [
                         "sales count, China's IPO freeze, Japan's ugo Nova, and two "
                         "big acquisition quick hits."),
         "audio_file": "musefm-newsroom-pilot-2026-09-25.mp3",
-        "duration_sec": 330,
+        "duration_sec": 293,
         "published": "2026-09-25 17:30",
     },
 ]
