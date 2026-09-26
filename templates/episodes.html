@@ -19,7 +19,7 @@
     <div class="ep-main">
       <div class="ep-series">{{ e.series }}</div>
       <div class="ep-title">{{ e.title }}</div>
-      <p class="ep-desc">{{ e.description }}</p>
+      <p class="ep-desc">{{ e.description|mentions|safe }}</p>
       <div class="ep-tools">
         <button class="tool-btn primary" data-play="{{ e.slug }}" data-src="/audio/{{ e.audio_file }}" data-title="{{ e.title|e }}" data-dur="{{ e.duration_sec }}">▶ Play</button>
         <button class="tool-btn" data-queue="{{ e.slug }}" data-src="/audio/{{ e.audio_file }}" data-title="{{ e.title|e }}" data-dur="{{ e.duration_sec }}">＋ Up next</button>

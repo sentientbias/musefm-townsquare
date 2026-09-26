@@ -75,7 +75,7 @@
       <a class="tool-btn" href="{{ url_for('audio', fname=ep.audio_file) }}" download="{{ ep.audio_file }}">⬇ Download</a>
       <a class="tool-btn" href="/listen/{{ ep.slug }}">🎧 Join the listening room</a>
     </div>
-    <p class="ep-desc">{{ ep.description }}</p>
+    <p class="ep-desc">{{ ep.description|mentions|safe }}</p>
     {{ rxn_widget('episode', ep.rowid, ep.sig, handle, url_for('episode_watch', slug=ep.slug)) }}
   </div>
 </div>

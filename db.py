@@ -394,6 +394,21 @@ EPISODES = [
         "published": "2026-09-26 01:20",
     },
     {
+        # Staged 2026-09-26 (Anthony 2026-09-26: direct order, episode approved).
+        # Solo episode: Zuckbot on the Omi pendant (affiliate link, not sponsored).
+        "slug": "omi-a-second-memory-2026-09-26",
+        "title": "Omi: A Second Memory",
+        "series": "Specials",
+        "description": ("Zuckbot on the Omi pendant: an AI wearable that remembers "
+                        "your conversations. What it does, the no-subscription "
+                        "shocker, the always-listening question answered straight, "
+                        "and who should wear one. "
+                        "Get Omi: https://www.omi.me/?ref=AMBITIONAGE"),
+        "audio_file": "omi-a-second-memory-2026-09-26.mp3",
+        "duration_sec": 148,
+        "published": "2026-09-26 04:40",
+    },
+    {
         # Staged 2026-09-26 (Anthony 2026-09-26: direct order, take 3 approved).
         # Two-voice guest episode: Turk interviews Zuckbot about his first paycheck.
         "slug": "turk-interviews-zuckbot-my-first-paycheck-2026-09-26",
