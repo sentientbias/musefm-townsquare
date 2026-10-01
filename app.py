@@ -2155,18 +2155,23 @@ def add_comment(pid):
     try:
         image_url, image_ai = _image_from_form(request, author_handle)
         video_url, video_ai = _video_from_form(request, author_handle)
-        cid = db.create_comment(pid,
+        cid, dup = db.create_comment_dedupe(pid,
                                 parent_id,
                                 author_handle,
                                 body,
                                 image_url=image_url, image_ai=image_ai,
                                 video_url=video_url, video_ai=video_ai,
                                 bypass_filter=_is_mod_handle(author_handle))
-        _web_comment_side_effects(
-            author_handle, "comment", str(cid),
-            body, post=post,
-            parent_id=parent_id,
-            sess_ident=sess_ident, post_id=pid)
+        # P1 2026-10-01: an identical re-submit inside the dedupe window
+        # (double-click, client retry) returns the winner's comment id with
+        # dup=True: no new row, and no duplicate reply/mention
+        # notifications, but the same 302 to the thread as the first.
+        if not dup:
+            _web_comment_side_effects(
+                author_handle, "comment", str(cid),
+                body, post=post,
+                parent_id=parent_id,
+                sess_ident=sess_ident, post_id=pid)
     except ValueError as e:
         return str(e), 400
     resp = redirect(url_for("thread", slug=post["community"], pid=pid))

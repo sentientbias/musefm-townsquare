@@ -730,6 +730,12 @@ def now():
     return int(time.time())
 
 
+# Double-submit dedupe window for comments (P1, 2026-10-01): an identical
+# re-submit inside this many seconds of the first is treated as a retry,
+# not a new comment.
+COMMENT_DEDUPE_WINDOW_SEC = 15
+
+
 # Bidi override / isolate ranges plus zero-width space and BOM. Applied at
 # input (clean) and at render (app.link_mentions). U+200C/U+200D (ZWNJ/ZWJ)
 # are deliberately NOT stripped: legitimate in some scripts and emoji
@@ -1634,6 +1640,117 @@ class Database:
         self._exec("UPDATE posts SET comment_count = comment_count + 1 WHERE id=?",
                    (post_id,))
         return cur.lastrowid
+
+    # -- comment double-submit dedupe (P1, 2026-10-01) ----------------------
+    # Two parallel POST /post/<id>/comment with identical bodies both 302'd
+    # and created two comment rows (plus duplicate reply notifications): a
+    # real user double-clicking "Comment" (or a client retrying after a
+    # slow response) got two identical public comments. recent_duplicate_comment
+    # finds the newest same-author, same-parent, same-body comment inside the
+    # window; create_comment_dedupe runs the check and the insert inside one
+    # BEGIN IMMEDIATE transaction so concurrent submitters serialize: exactly
+    # one wins, the loser gets the winner's id back with no new row and no
+    # duplicate notifications. Same validation errors as create_comment.
+    def recent_duplicate_comment(self, post_id, parent_id, handle, body,
+                                 window_sec=COMMENT_DEDUPE_WINDOW_SEC):
+        """Newest comment id by `handle` on `post_id` with the same parent
+        and body created inside the last `window_sec` seconds, else None."""
+        try:
+            pid = int(post_id)
+        except (TypeError, ValueError):
+            return None
+        par = None
+        if parent_id not in (None, ""):
+            try:
+                par = int(parent_id)
+            except (TypeError, ValueError):
+                return None
+        body = clean(body or "", 2000)
+        if not body:
+            return None
+        try:
+            cutoff = now() - int(window_sec)
+        except (TypeError, ValueError):
+            return None
+        row = self._one(
+            "SELECT id FROM comments WHERE post_id=? AND handle=? AND body=? "
+            "AND ((parent_id IS NULL AND ? IS NULL) OR parent_id=?) "
+            "AND created_at > ? ORDER BY created_at DESC, id DESC LIMIT 1",
+            (pid, handle, body, par, par, cutoff))
+        return row["id"] if row else None
+
+    def create_comment_dedupe(self, post_id, parent_id, handle, body, seed=False,
+                              image_url="", image_ai=False,
+                              video_url="", video_ai=False, bypass_filter=False,
+                              window_sec=COMMENT_DEDUPE_WINDOW_SEC):
+        """Like create_comment, but returns (comment_id, dup_flag).
+
+        Validation errors raise ValueError, same as create_comment. The
+        duplicate check and the insert run inside one BEGIN IMMEDIATE
+        transaction (PRAGMA busy_timeout=10000 covers lock contention), so
+        parallel identical submits serialize instead of both inserting.
+        The loser gets the winner's comment id back with dup=True: no new
+        row, no new reply/mention notifications from the caller.
+        """
+        if parent_id not in (None, ""):
+            try:
+                parent_id = int(parent_id)
+            except (TypeError, ValueError):
+                raise ValueError("unknown parent comment")
+        else:
+            parent_id = None
+        if not valid_handle(handle):
+            raise ValueError("bad handle (2-32 chars: letters, numbers, _ -)")
+        body = clean(body, 2000)
+        if not body:
+            raise ValueError("comment body required")
+        from ai_images import valid_image_url  # deferred: same pattern as create_comment
+        image_url = valid_image_url(image_url)
+        from videos import valid_video_url  # deferred: same pattern
+        video_url = valid_video_url(video_url)
+        if has_banned(body) and not bypass_filter:
+            raise ValueError("content blocked by the town filter")
+        try:
+            window_sec = int(window_sec)
+        except (TypeError, ValueError):
+            window_sec = COMMENT_DEDUPE_WINDOW_SEC
+        cutoff = now() - window_sec
+        cur = self.db.cursor()
+        cur.execute("BEGIN IMMEDIATE")
+        try:
+            post = cur.execute("SELECT id FROM posts WHERE id=?",
+                               (post_id,)).fetchone()
+            if not post:
+                raise ValueError("unknown post")
+            if parent_id:
+                p = cur.execute(
+                    "SELECT id FROM comments WHERE id=? AND post_id=?",
+                    (parent_id, post_id)).fetchone()
+                if not p:
+                    raise ValueError("unknown parent comment")
+            dup = cur.execute(
+                "SELECT id FROM comments WHERE post_id=? AND handle=? AND body=? "
+                "AND ((parent_id IS NULL AND ? IS NULL) OR parent_id=?) "
+                "AND created_at > ? ORDER BY created_at DESC, id DESC LIMIT 1",
+                (post_id, handle, body, parent_id, parent_id, cutoff)
+                ).fetchone()
+            if dup:
+                self.db.commit()
+                return dup["id"], True
+            ins = cur.execute(
+                "INSERT INTO comments (post_id, parent_id, handle, body,"
+                " image_url, image_ai, video_url, video_ai, created_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?)",
+                (post_id, parent_id, handle, body, image_url,
+                 1 if image_ai else 0, video_url, 1 if video_ai else 0, now()))
+            cid = ins.lastrowid
+            cur.execute("UPDATE posts SET comment_count = comment_count + 1"
+                        " WHERE id=?", (post_id,))
+            self.db.commit()
+            return cid, False
+        except Exception:
+            self.db.rollback()
+            raise
 
     def comment_author(self, cid):
         r = self._one("SELECT handle FROM comments WHERE id=?", (cid,))
