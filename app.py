@@ -63,8 +63,8 @@ from db import (Database, DISPLAY_NAME_RE, FLAIRS, KIND_TAGS,
                 PTS_THREAD, PTS_PROFILE_COMPLETE, PTS_UPLOAD, REACT_EMOJIS,
                 REACTION_MILESTONES, UPLOAD_MIMES, MAX_UPLOAD_BYTES,
                 MAX_TITLE, MAX_BODY, ATTESTATION_TEXT, TIERS, challenge_week_id, find_mentions,
-                valid_handle, clean, loud_limit, has_banned, now, ROOM_EMOJIS,
-                ROOM_CHAT_MAXLEN,
+                valid_handle, clean, strip_bidi, loud_limit, has_banned, now,
+                ROOM_EMOJIS, ROOM_CHAT_MAXLEN,
                 ensure_musefm_media_schema,
                 ensure_human_auth_schema, ensure_forum_flags_schema,
                 ensure_linking_schema, ensure_comment_pro_schema,
@@ -1017,6 +1017,10 @@ def link_mentions(text):
     rel="noopener nofollow"."""
     if not text:
         return ""
+    # P2 2026-09-27: strip bidi-control / zero-width characters at render
+    # too. Rows stored before the input-side fix in db.clean still get
+    # neutralized here (defense in depth).
+    text = strip_bidi(text)
     # 1. Linkify URLs on the RAW text, stashing them behind placeholders
     #    so the @mention pass can't linkify handles inside a URL.
     #    (P2 2026-09-20 00:46 loop: the old code escaped FIRST, so the URL
@@ -3292,15 +3296,23 @@ def api_clips(slug):
     data = json_body()
     if not isinstance(data, dict):
         return data  # 400: JSON body must be an object
+    # P1 2026-09-27 (regression of a 2026-09-21 fix, re-applied 2026-10-01):
+    # clip creation requires a signed-in session. The handle is the
+    # caller's own, never a body field, so nobody can mint clips
+    # attributed to another user.
+    sess_ident = current_session_identity()
+    if sess_ident is None:
+        return api_error("sign in to create clips", 401)
     try:
-        cid = db.add_clip(slug, _fs(data, "handle"),
-                          data.get("start_sec", 0), data.get("end_sec", 0),
+        start_sec = _int_field(data, "start_sec")
+        end_sec = _int_field(data, "end_sec")
+        cid = db.add_clip(slug, sess_ident["handle"], start_sec, end_sec,
                           _fs(data, "note"))
     except (ValueError, TypeError) as e:
         return api_error(str(e))
     return jsonify({"ok": True, "id": cid,
                     "share_url": url_for("episode_watch", slug=slug, _external=True) +
-                                 f"?t={data.get('start_sec', 0)}"})
+                                 f"?t={start_sec}"})
 
 
 @app.route("/episodes/<slug>/clips/<sqlite_int:clip_id>/delete", methods=["POST"])
@@ -6337,6 +6349,12 @@ def comment_react_web():
     fm_id = sess_ident["fm_id"]
     try:
         target_type = _fs(data, "target_type", "comment")
+        # P2 2026-09-26: a missing target_id fell through _int_field's
+        # default (0) and surfaced as the misleading "unknown target",
+        # conflating not-provided with not-found. Name it plainly,
+        # mirroring the /api/forum/react fix.
+        if data.get("target_id") is None or data.get("target_id") == "":
+            raise ValueError("target_id is required")
         target_id = _int_field(data, "target_id")
         emoji = _fs(data, "emoji")
         # P1 2026-09-26: tap-toggle. Tapping the same emoji twice removes

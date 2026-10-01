@@ -730,8 +730,20 @@ def now():
     return int(time.time())
 
 
+# Bidi override / isolate ranges plus zero-width space and BOM. Applied at
+# input (clean) and at render (app.link_mentions). U+200C/U+200D (ZWNJ/ZWJ)
+# are deliberately NOT stripped: legitimate in some scripts and emoji
+# sequences (P2 2026-09-27).
+_BIDI_RE = re.compile(r"[\u202a-\u202e\u2066-\u2069\u200b\ufeff]")
+
+
+def strip_bidi(s):
+    """Strip bidi-control and zero-width characters from text."""
+    return _BIDI_RE.sub("", s or "")
+
+
 def clean(s, limit, single_line=False):
-    s = (s or "").strip()
+    s = strip_bidi((s or "").strip())
     # Strip NUL and other C0 control chars outright: SQLite tolerates them
     # but they truncate strings in downstream C consumers and log pipelines.
     # \t and \n are kept — they're handled deliberately below (P2 2026-09-21).
