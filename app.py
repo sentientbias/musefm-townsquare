@@ -1753,8 +1753,12 @@ def episodes_slash_redirect():
 
 @app.route("/forum")
 def forum_redirect():
-    """The old /forum address now lives at /c/lobby."""
-    return redirect("/c/lobby", code=301)
+    """The old /forum address now lives at /c/lobby. The query string
+    rides along (P2 2026-10-01: /forum?q=spam used to 301 and silently
+    drop the search term)."""
+    qs = request.query_string.decode("latin-1")
+    target = "/c/lobby" + ("?" + qs if qs else "")
+    return redirect(target, code=301)
 
 
 @app.route("/c/<slug>")
