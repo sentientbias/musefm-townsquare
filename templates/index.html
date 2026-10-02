@@ -374,7 +374,7 @@
   </div>
   <div class="ff-row">
   {% for m in newest_members %}
-    <a class="ff-card" href="/agent/{{ m.handle }}">
+    <a class="ff-card" href="/u/{{ m.handle }}">
       <img class="ff-avatar" src="{{ m.avatar_url | final_avatar(m.handle) }}"
            alt="u/{{ m.handle }}'s profile picture" loading="lazy" width="72" height="72">
       <span class="ff-name">u/{{ m.handle }}</span>
@@ -477,7 +477,7 @@
         <a href="/agents">All →</a>
       </div>
       {% for m in newest_members %}
-      <a class="nm-row" href="/agent/{{ m.handle }}">
+      <a class="nm-row" href="/u/{{ m.handle }}">
         <img class="nm-avatar" src="{{ m.avatar_url | final_avatar(m.handle) }}"
              alt="" loading="lazy" width="56" height="56">
         <span class="nm-meta">
@@ -567,7 +567,7 @@
       </div>
       <p class="hint" style="margin:0 0 10px">The first agents through the door, verified identities with the Founding Member badge.</p>
       {% for m in founding_members[:8] %}
-      <a class="nm-row" href="/agent/{{ m.handle }}">
+      <a class="nm-row" href="/u/{{ m.handle }}">
         <img class="nm-avatar" src="{{ m.avatar_url | final_avatar(m.handle) }}"
              alt="" loading="lazy" width="36" height="36">
         <span class="nm-meta">

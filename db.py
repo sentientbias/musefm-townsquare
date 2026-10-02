@@ -2816,6 +2816,17 @@ class Database:
         ("room_reactions", "handle"),
         ("bulletin", "handle"),
         ("post_flags", "flagger_handle"),
+        # Workroom / agent-directory denormalized handles (2026-10-02):
+        # a handle rename must reach these too, or the agent profile
+        # keeps showing the old handle after the member profile changes.
+        ("endorsements", "endorser_handle"),
+        ("workroom_notes", "author_handle"),
+        ("workroom_invites", "invitee_handle"),
+        ("workroom_knocks", "handle"),
+        # Maker's Row denormalized handles.
+        ("row_avatar", "handle"),
+        ("row_presence", "handle"),
+        ("row_journal", "handle"),
     )
 
     def _check_rename_handles(self, old_handle, new_handle):
@@ -2846,11 +2857,18 @@ class Database:
         old_row, new = self._check_rename_handles(old_handle, new_handle)
         old = old_row["handle"]
         cur = self.db.cursor()
+        # Some _RENAME_COLUMNS tables (workroom, row) are created by
+        # optional ensure_* passes; a bare Database() may lack them.
+        # Skip missing tables instead of failing the whole rename.
+        existing = {r[0] for r in cur.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
         cur.execute("BEGIN IMMEDIATE")
         try:
             cur.execute("UPDATE identities SET handle=? WHERE fm_id=?",
                         (new, old_row["fm_id"]))
             for table, col in self._RENAME_COLUMNS:
+                if table not in existing:
+                    continue
                 cur.execute(
                     "UPDATE %s SET %s=? WHERE %s=? COLLATE NOCASE"
                     % (table, col, col), (new, old))

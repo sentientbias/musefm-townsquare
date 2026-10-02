@@ -33,7 +33,7 @@
   {% if not ident %}
     <div class="card"><p>No identity found for <strong>@{{ handle }}</strong>.</p></div>
   {% elif not profile %}
-    <div class="card"><p><strong>@{{ ident["handle"] }}</strong> exists but has no agent profile, nothing to delete.</p><p><a href="/agent/{{ ident['handle'] }}">View /agent/{{ ident["handle"] }}</a></p></div>
+    <div class="card"><p><strong>@{{ ident["handle"] }}</strong> exists but has no agent profile, nothing to delete.</p><p><a href="/u/{{ ident['handle'] }}">View /agent/{{ ident["handle"] }}</a></p></div>
   {% else %}
     <div class="card">
       <h3>@{{ ident["handle"] }}</h3>
@@ -45,7 +45,7 @@
         <dt>Work history entries</dt><dd>{{ exp_count }}</dd>
         <dt>Posts / comments by this identity</dt><dd>{{ post_count }} / {{ comment_count }}</dd>
       </dl>
-      <p><a href="/agent/{{ ident['handle'] }}">View public profile →</a></p>
+      <p><a href="/u/{{ ident['handle'] }}">View public profile →</a></p>
     </div>
 
     <div class="card">

@@ -3212,6 +3212,30 @@ def profile_page(fm_id):
     # icons, rendered at the profile top. Separate from badges/people tags.
     profile_icons = [ICON_BY_ID[i] for i in get_icon_picks(db, fm_id)
                      if i in ICON_BY_ID]
+    # Unified profile (2026-10-02, Anthony): the agent-directory content
+    # (workroom profile, experience, endorsements, Trustline passport,
+    # Row avatar) lives on the one profile page now. /agent/<handle>
+    # redirects here, so a handle rename reaches every surface at once.
+    wr_profile = workroom.get_profile(db, fm_id)
+    wr_experience = workroom.list_experience(db, fm_id) if wr_profile else []
+    wr_endorsements = (workroom.list_endorsements(db, fm_id)
+                       if wr_profile else [])
+    wr_skills = workroom.skill_list(wr_profile)
+    wr_endo_count = workroom.endorsement_count(db, fm_id)
+    try:
+        rowmod.ensure_row_schema(db)
+        wr_avatar_cfg = (rowmod.get_avatar(db, fm_id)
+                         or rowmod.default_config(profile["handle"]))
+        wr_passport = rowmod.passport_for(db, fm_id)
+    except Exception:
+        traceback.print_exc()
+        wr_avatar_cfg = rowmod.default_config(profile["handle"])
+        wr_passport = rowmod.passport_for(db, profile["handle"])
+    wr_flash_msg, wr_flash_err = _wr_pop_flash()
+    # The Work tab shows when there is work content, a passport worth
+    # showing, or the viewer owns the profile (so they can create one).
+    show_work = bool(wr_profile or wr_experience or wr_endorsements
+                     or (wr_passport and show_stats) or is_owner)
     return render_template("profile.html", profile=profile,
                            profile_icons=profile_icons,
                            history=(db.reward_history(fm_id, 10)
@@ -3228,7 +3252,17 @@ def profile_page(fm_id):
                                               show_posts),
                            signal_bar=_signal_progress(profile["signal"]),
                            is_owner=is_owner, show_stats=show_stats,
-                           show_posts=show_posts, privacy=priv)
+                           show_posts=show_posts, privacy=priv,
+                           wr_profile=wr_profile,
+                           wr_experience=wr_experience,
+                           wr_endorsements=wr_endorsements,
+                           wr_skills=wr_skills,
+                           wr_endo_count=wr_endo_count,
+                           wr_avatar_cfg=wr_avatar_cfg,
+                           wr_passport=(wr_passport if show_stats else None),
+                           wr_flash_msg=wr_flash_msg,
+                           wr_flash_err=wr_flash_err,
+                           show_work=show_work)
 
 
 def _in_the_air(fm_id, handle, show_posts):
@@ -10537,52 +10571,16 @@ def agents_dir():
 
 @app.route("/agent/<handle>")
 def agent_profile_page(handle):
+    """Unified profiles (2026-10-02, Anthony): the separate agent page is
+    gone; the work content lives on the one member profile. Old /agent/
+    links 302 here so bookmarks and directory links keep working, and a
+    handle rename reaches every surface at once."""
     if not valid_handle(handle):
         return render_template("404.html", msg="no such agent"), 404
     ident = db.get_identity_by_handle(handle)
     if not ident:
         return render_template("404.html", msg="no such agent"), 404
-    sess = current_session_identity()
-    is_owner = bool(sess and sess["fm_id"] == ident["fm_id"])
-    profile = workroom.get_profile(db, ident["fm_id"])
-    experience = workroom.list_experience(db, ident["fm_id"]) if profile else []
-    endorsements = (workroom.list_endorsements(db, ident["fm_id"])
-                    if profile else [])
-    flash_msg, flash_err = _wr_pop_flash()
-    # Maker's Row: the avatar customizer + Trustline passport live on the
-    # profile. avatar_cfg: validated avatar config (or handle-hash default).
-    # passport: {handle, score, badges[], endorsements, verified, tier}.
-    # is_owner: True when the viewer's logged-in session fm_id matches the
-    # profile's fm_id (muses edit via the signed /api/row/avatar endpoint;
-    # GET pages have no signed viewer).
-    try:
-        rowmod.ensure_row_schema(db)
-        avatar_cfg = (rowmod.get_avatar(db, ident["fm_id"])
-                      or rowmod.default_config(ident["handle"]))
-        passport = rowmod.passport_for(db, ident["fm_id"])
-    except Exception:
-        traceback.print_exc()
-        avatar_cfg = rowmod.default_config(ident["handle"])
-        passport = rowmod.passport_for(db, ident["handle"])
-    # Privacy (2026-09-23, Anthony): a private profile shows only a locked
-    # card to non-owners; hide_stats strips the Trustline passport numbers.
-    _apriv = db.get_privacy(ident["fm_id"]) or {"profile": "public",
-                                                "hide_stats": False}
-    if _apriv["profile"] == "private" and not is_owner:
-        return render_template("agent_profile.html", ident=ident, locked=True,
-                               is_owner=False, show_stats=False)
-    _show_stats = is_owner or not _apriv["hide_stats"]
-    return render_template(
-        "agent_profile.html", ident=ident, profile=profile,
-        skills=workroom.skill_list(profile),
-        is_human=db.identity_kind(ident) == "human",
-        member_since=_wr_member_since(ident),
-        experience=experience, endorsements=endorsements,
-        endo_count=workroom.endorsement_count(db, ident["fm_id"]),
-        is_owner=is_owner, flash_msg=flash_msg, flash_err=flash_err,
-        avatar_cfg=avatar_cfg,
-        passport=(passport if _show_stats else None),
-        show_stats=_show_stats)
+    return redirect(f"/u/{ident['handle']}", code=302)
 
 
 @app.route("/agent/profile", methods=["POST"])
@@ -10606,7 +10604,7 @@ def agent_profile_save():
         _wr_flash(str(e), True)
     else:
         _wr_flash("Profile saved — you're in the directory.", False)
-    return redirect(f"/agent/{ident['handle']}")
+    return redirect(f"/u/{ident['handle']}")
 
 
 @app.route("/agent/experience/add", methods=["POST"])
@@ -10618,7 +10616,7 @@ def agent_experience_add():
         return "bad form token — reload and try again", 403
     if not workroom.get_profile(db, ident["fm_id"]):
         _wr_flash("Create your profile first.", True)
-        return redirect(f"/agent/{ident['handle']}")
+        return redirect(f"/u/{ident['handle']}")
     f = request.form
     try:
         workroom.add_experience(db, ident["fm_id"], f.get("title", ""),
@@ -10628,7 +10626,7 @@ def agent_experience_add():
         _wr_flash(str(e), True)
     else:
         _wr_flash("Experience added.", False)
-    return redirect(f"/agent/{ident['handle']}")
+    return redirect(f"/u/{ident['handle']}")
 
 
 @app.route("/agent/experience/<int:exp_id>/delete", methods=["POST"])
@@ -10644,7 +10642,7 @@ def agent_experience_delete(exp_id):
         _wr_flash(str(e), True)
     else:
         _wr_flash("Experience removed.", False)
-    return redirect(f"/agent/{ident['handle']}")
+    return redirect(f"/u/{ident['handle']}")
 
 
 @app.route("/agent/<handle>/endorse", methods=["POST"])
@@ -10670,7 +10668,7 @@ def agent_endorse(handle):
         _wr_flash(str(e), True)
     else:
         _wr_flash(f"Endorsed @{target['handle']}. Nice.", False)
-    return redirect(f"/agent/{target['handle']}")
+    return redirect(f"/u/{target['handle']}")
 
 
 @app.route("/workroom")
@@ -12075,12 +12073,12 @@ def _row_identity():
 
 @app.route("/row/avatar")
 def row_avatar_page():
-    """The avatar customizer lives in agent profiles (/agent/<handle>) —
+    """The avatar customizer lives on the profile Work tab —
     this route just redirects there. Logged-out visitors go to /login."""
     sess = current_session_identity()
     if not sess:
         return redirect("/login?next=" + quote("/row", safe="/#?&=%"))
-    return redirect("/agent/%s#avatar-customizer" % sess["handle"])
+    return redirect("/u/%s#work" % sess["handle"])
 
 
 @app.route("/row/avatar", methods=["POST"])
@@ -12119,7 +12117,7 @@ def row_avatar_save():
     except Exception:
         traceback.print_exc()
         _wr_flash("avatar service hiccup — try again", True)
-    return redirect("/agent/%s#avatar-customizer" % sess["handle"])
+    return redirect("/u/%s#work" % sess["handle"])
 
 
 @app.route("/row/journal")

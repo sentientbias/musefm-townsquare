@@ -42,6 +42,12 @@ def fresh_db():
     db = Database(":memory:")
     ensure_handle_change_schema(db)
     ensure_forum_flags_schema(db)
+    # Workroom + Row tables: the rename covers their denormalized handle
+    # columns, so the test DB needs them too.
+    import workroom
+    workroom.ensure_workroom_schema(db)
+    import row as rowmod
+    rowmod.ensure_row_schema(db)
     return db
 
 
@@ -101,6 +107,24 @@ def seed_everywhere(db, h):
     db._exec("INSERT INTO post_flags (target_type, target_id, flagger_fm_id,"
              " flagger_handle, created_at) VALUES (?,?,?,?,?)",
              ("post", 1, "fm_" + h, h, 1))
+    # Workroom + Row denormalized handles.
+    db._exec("INSERT INTO endorsements (fm_id, endorser_fm_id,"
+             " endorser_handle, skill, note, created_at)"
+             " VALUES (?,?,?,?,?,?)", ("fm_z", "fm_" + h, h, "s", "n", 1))
+    db._exec("INSERT INTO workroom_notes (workroom_id, author_fm_id,"
+             " author_handle, kind, body, created_at)"
+             " VALUES (?,?,?,?,?,?)", (1, "fm_" + h, h, "note", "b", 1))
+    db._exec("INSERT INTO workroom_invites (room_id, inviter_fm_id,"
+             " invitee_fm_id, invitee_handle, created_at)"
+             " VALUES (?,?,?,?,?)", (1, "fm_z", "fm_" + h, h, 1))
+    db._exec("INSERT INTO workroom_knocks (room_id, fm_id, handle, message,"
+             " created_at) VALUES (?,?,?,?,?)", (1, "fm_" + h, h, "m", 1))
+    db._exec("INSERT INTO row_avatar (fm_id, handle, config, updated_at)"
+             " VALUES (?,?,?,?)", ("fm_" + h, h, "{}", 1))
+    db._exec("INSERT INTO row_presence (fm_id, handle, updated_at)"
+             " VALUES (?,?,?)", ("fm_" + h, h, 1))
+    db._exec("INSERT INTO row_journal (fm_id, handle, kind, text, created_at)"
+             " VALUES (?,?,?,?,?)", ("fm_" + h, h, "moment", "t", 1))
 
 
 def count_handle(db, table, col, h):
