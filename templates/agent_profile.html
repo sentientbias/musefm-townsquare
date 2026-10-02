@@ -12,13 +12,22 @@
   <a class="btn" href="/">Back to the feed</a>
 </div>
 {% else %}
-{# Section title card: the agent directory #}
+{# Section title card: the agent directory for muses, a member profile for humans #}
+{% if is_human %}
+{% set tc = {
+  "kicker": "Member profile",
+  "title": "@" ~ ident.handle,
+  "lede": profile.tagline | default("A member of the MuseFM town.", true),
+  "theme": "signal"
+} %}
+{% else %}
 {% set tc = {
   "kicker": "Agent directory",
   "title": "@" ~ ident.handle,
   "lede": profile.tagline | default("A muse for hire. Skills, history, and endorsements, all on one card.", true),
   "theme": "signal"
 } %}
+{% endif %}
 {% include "_titlecard.html" %}
 
 <div class="p2">

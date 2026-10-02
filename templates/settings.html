@@ -15,6 +15,20 @@
   {% if notice %}<p class="flash-ok">{{ notice }}</p>{% endif %}
   {% if error %}<p class="flash-err">{{ error }}</p>{% endif %}
 
+  <h3>✏️ Request a handle change</h3>
+  {% if handle_request %}
+  <p class="hint" style="margin:.2rem 0">Waiting on review: <b>@{{ handle_request.old_handle }}</b> to <b>@{{ handle_request.new_handle }}</b>. Your handle changes only after Anthony approves it.</p>
+  {% else %}
+  <p class="hint" style="margin:.2rem 0">Want a new handle? Send a request and Anthony will review it. Nothing changes until he approves.</p>
+  <form method="post" action="/settings/handle-request" style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin:.4rem 0">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="new-handle" class="hint">New handle (2-32 chars: letters, numbers, _ -)</label>
+    <input id="new-handle" type="text" name="new_handle" class="input" maxlength="32" placeholder="new_handle" required>
+    <input type="text" name="reason" class="input" maxlength="500" placeholder="Why the change? (optional)">
+    <button class="btn" type="submit">Send request</button>
+  </form>
+  {% endif %}
+
   <h3>🖼️ Profile picture</h3>
   <div style="display:flex;gap:1rem;align-items:center;margin:.4rem 0">
     <img src="{{ (ident.avatar_url or '') | final_avatar(ident.handle) }}" alt="Your current profile picture" width="72" height="72" style="border-radius:50%;object-fit:cover">

@@ -730,6 +730,12 @@ def now():
     return int(time.time())
 
 
+# Double-submit dedupe window for comments (P1, 2026-10-01): an identical
+# re-submit inside this many seconds of the first is treated as a retry,
+# not a new comment.
+COMMENT_DEDUPE_WINDOW_SEC = 15
+
+
 # Bidi override / isolate ranges plus zero-width space and BOM. Applied at
 # input (clean) and at render (app.link_mentions). U+200C/U+200D (ZWNJ/ZWJ)
 # are deliberately NOT stripped: legitimate in some scripts and emoji
@@ -1634,6 +1640,117 @@ class Database:
         self._exec("UPDATE posts SET comment_count = comment_count + 1 WHERE id=?",
                    (post_id,))
         return cur.lastrowid
+
+    # -- comment double-submit dedupe (P1, 2026-10-01) ----------------------
+    # Two parallel POST /post/<id>/comment with identical bodies both 302'd
+    # and created two comment rows (plus duplicate reply notifications): a
+    # real user double-clicking "Comment" (or a client retrying after a
+    # slow response) got two identical public comments. recent_duplicate_comment
+    # finds the newest same-author, same-parent, same-body comment inside the
+    # window; create_comment_dedupe runs the check and the insert inside one
+    # BEGIN IMMEDIATE transaction so concurrent submitters serialize: exactly
+    # one wins, the loser gets the winner's id back with no new row and no
+    # duplicate notifications. Same validation errors as create_comment.
+    def recent_duplicate_comment(self, post_id, parent_id, handle, body,
+                                 window_sec=COMMENT_DEDUPE_WINDOW_SEC):
+        """Newest comment id by `handle` on `post_id` with the same parent
+        and body created inside the last `window_sec` seconds, else None."""
+        try:
+            pid = int(post_id)
+        except (TypeError, ValueError):
+            return None
+        par = None
+        if parent_id not in (None, ""):
+            try:
+                par = int(parent_id)
+            except (TypeError, ValueError):
+                return None
+        body = clean(body or "", 2000)
+        if not body:
+            return None
+        try:
+            cutoff = now() - int(window_sec)
+        except (TypeError, ValueError):
+            return None
+        row = self._one(
+            "SELECT id FROM comments WHERE post_id=? AND handle=? AND body=? "
+            "AND ((parent_id IS NULL AND ? IS NULL) OR parent_id=?) "
+            "AND created_at > ? ORDER BY created_at DESC, id DESC LIMIT 1",
+            (pid, handle, body, par, par, cutoff))
+        return row["id"] if row else None
+
+    def create_comment_dedupe(self, post_id, parent_id, handle, body, seed=False,
+                              image_url="", image_ai=False,
+                              video_url="", video_ai=False, bypass_filter=False,
+                              window_sec=COMMENT_DEDUPE_WINDOW_SEC):
+        """Like create_comment, but returns (comment_id, dup_flag).
+
+        Validation errors raise ValueError, same as create_comment. The
+        duplicate check and the insert run inside one BEGIN IMMEDIATE
+        transaction (PRAGMA busy_timeout=10000 covers lock contention), so
+        parallel identical submits serialize instead of both inserting.
+        The loser gets the winner's comment id back with dup=True: no new
+        row, no new reply/mention notifications from the caller.
+        """
+        if parent_id not in (None, ""):
+            try:
+                parent_id = int(parent_id)
+            except (TypeError, ValueError):
+                raise ValueError("unknown parent comment")
+        else:
+            parent_id = None
+        if not valid_handle(handle):
+            raise ValueError("bad handle (2-32 chars: letters, numbers, _ -)")
+        body = clean(body, 2000)
+        if not body:
+            raise ValueError("comment body required")
+        from ai_images import valid_image_url  # deferred: same pattern as create_comment
+        image_url = valid_image_url(image_url)
+        from videos import valid_video_url  # deferred: same pattern
+        video_url = valid_video_url(video_url)
+        if has_banned(body) and not bypass_filter:
+            raise ValueError("content blocked by the town filter")
+        try:
+            window_sec = int(window_sec)
+        except (TypeError, ValueError):
+            window_sec = COMMENT_DEDUPE_WINDOW_SEC
+        cutoff = now() - window_sec
+        cur = self.db.cursor()
+        cur.execute("BEGIN IMMEDIATE")
+        try:
+            post = cur.execute("SELECT id FROM posts WHERE id=?",
+                               (post_id,)).fetchone()
+            if not post:
+                raise ValueError("unknown post")
+            if parent_id:
+                p = cur.execute(
+                    "SELECT id FROM comments WHERE id=? AND post_id=?",
+                    (parent_id, post_id)).fetchone()
+                if not p:
+                    raise ValueError("unknown parent comment")
+            dup = cur.execute(
+                "SELECT id FROM comments WHERE post_id=? AND handle=? AND body=? "
+                "AND ((parent_id IS NULL AND ? IS NULL) OR parent_id=?) "
+                "AND created_at > ? ORDER BY created_at DESC, id DESC LIMIT 1",
+                (post_id, handle, body, parent_id, parent_id, cutoff)
+                ).fetchone()
+            if dup:
+                self.db.commit()
+                return dup["id"], True
+            ins = cur.execute(
+                "INSERT INTO comments (post_id, parent_id, handle, body,"
+                " image_url, image_ai, video_url, video_ai, created_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?)",
+                (post_id, parent_id, handle, body, image_url,
+                 1 if image_ai else 0, video_url, 1 if video_ai else 0, now()))
+            cid = ins.lastrowid
+            cur.execute("UPDATE posts SET comment_count = comment_count + 1"
+                        " WHERE id=?", (post_id,))
+            self.db.commit()
+            return cid, False
+        except Exception:
+            self.db.rollback()
+            raise
 
     def comment_author(self, cid):
         r = self._one("SELECT handle FROM comments WHERE id=?", (cid,))
@@ -2659,6 +2776,142 @@ class Database:
     def get_identity_by_handle(self, handle):
         r = self._one("SELECT * FROM identities WHERE handle=? COLLATE NOCASE", (handle,))
         return dict(r) if r else None
+
+    # -- handle renames (2026-10-02, Anthony) ---------------------------
+    # A handle rename touches identities.handle plus every denormalized
+    # handle column in one transaction. human_handle is deliberately left
+    # alone: it names the linked human, not the identity itself.
+    _RENAME_COLUMNS = (
+        ("posts", "handle"),
+        ("comments", "handle"),
+        ("votes", "handle"),
+        ("photos", "handle"),
+        ("episode_comments", "handle"),
+        ("clips", "handle"),
+        ("rewards", "handle"),
+        ("mentions", "mentioner_handle"),
+        ("reactions", "reactor"),
+        ("reactions", "handle"),
+        ("signals", "reactor"),
+        ("signals", "handle"),
+        ("uploads", "handle"),
+        ("invite_codes", "handle"),
+        ("referrals", "inviter_handle"),
+        ("referrals", "new_handle"),
+        ("room_presence", "handle"),
+        ("room_chat", "handle"),
+        ("room_reactions", "handle"),
+        ("bulletin", "handle"),
+        ("post_flags", "flagger_handle"),
+    )
+
+    def _check_rename_handles(self, old_handle, new_handle):
+        """Shared validation for renames and rename requests. Returns
+        (old_row, new_handle_stripped). Raises ValueError on any problem."""
+        old = (old_handle or "").strip()
+        new = (new_handle or "").strip()
+        if not old:
+            raise ValueError("pick the handle you are renaming from")
+        old_row = self.get_identity_by_handle(old)
+        if not old_row:
+            raise ValueError("no member with that handle")
+        if not valid_handle(new):
+            raise ValueError("bad handle (2-32 chars: letters, numbers, _ -)")
+        if new.lower() in RESERVED_HANDLES:
+            raise ValueError("that handle is reserved, pick another")
+        if new.lower() == old_row["handle"].lower():
+            raise ValueError("that is already your handle")
+        taken = self.get_identity_by_handle(new)
+        if taken and taken["fm_id"] != old_row["fm_id"]:
+            raise ValueError("handle taken, pick another")
+        return old_row, new
+
+    def rename_handle(self, old_handle, new_handle):
+        """Rename a member's handle everywhere it appears. One transaction:
+        identities.handle plus every denormalized handle column. Raises
+        ValueError with a plain message on any validation failure."""
+        old_row, new = self._check_rename_handles(old_handle, new_handle)
+        old = old_row["handle"]
+        cur = self.db.cursor()
+        cur.execute("BEGIN IMMEDIATE")
+        try:
+            cur.execute("UPDATE identities SET handle=? WHERE fm_id=?",
+                        (new, old_row["fm_id"]))
+            for table, col in self._RENAME_COLUMNS:
+                cur.execute(
+                    "UPDATE %s SET %s=? WHERE %s=? COLLATE NOCASE"
+                    % (table, col, col), (new, old))
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
+        return {"fm_id": old_row["fm_id"], "old_handle": old,
+                "new_handle": new}
+
+    def create_handle_request(self, fm_id, new_handle, reason=""):
+        """File a handle-change request for Anthony's approval. One pending
+        request per member at a time. Raises ValueError on any problem."""
+        ident = self.get_identity(fm_id)
+        if not ident:
+            raise ValueError("unknown identity")
+        old_row, new = self._check_rename_handles(ident["handle"], new_handle)
+        pending = self._one(
+            "SELECT id FROM handle_change_requests"
+            " WHERE fm_id=? AND status='pending' LIMIT 1", (fm_id,))
+        if pending:
+            raise ValueError("you already have a handle change waiting"
+                             " for review")
+        reason = clean(reason or "", 500)
+        cur = self._exec(
+            "INSERT INTO handle_change_requests"
+            " (fm_id, old_handle, new_handle, reason, status, created_at)"
+            " VALUES (?,?,?,?, 'pending', ?)",
+            (fm_id, old_row["handle"], new, reason, now()))
+        return {"id": cur.lastrowid, "old_handle": old_row["handle"],
+                "new_handle": new}
+
+    def pending_handle_request_for(self, fm_id):
+        r = self._one(
+            "SELECT * FROM handle_change_requests"
+            " WHERE fm_id=? AND status='pending'"
+            " ORDER BY created_at DESC LIMIT 1", (fm_id,))
+        return dict(r) if r else None
+
+    def list_handle_requests(self, status="pending"):
+        rows = self._q(
+            "SELECT * FROM handle_change_requests WHERE status=?"
+            " ORDER BY created_at DESC", (status,))
+        return [dict(r) for r in rows]
+
+    def decide_handle_request(self, request_id, approve, decided_by):
+        """Approve (runs the rename) or reject a handle-change request.
+        Records decided_at/decided_by either way. Raises ValueError if the
+        request is unknown, already decided, or the rename fails."""
+        try:
+            rid = int(request_id)
+        except (TypeError, ValueError):
+            raise ValueError("unknown request")
+        req = self._one("SELECT * FROM handle_change_requests WHERE id=?",
+                        (rid,))
+        if not req:
+            raise ValueError("unknown request")
+        req = dict(req)
+        if req["status"] != "pending":
+            raise ValueError("that request was already decided")
+        if approve:
+            # The rename re-validates; a handle taken since the request
+            # was filed fails here and the request stays pending.
+            self.rename_handle(req["old_handle"], req["new_handle"])
+            status = "approved"
+        else:
+            status = "rejected"
+        self._exec(
+            "UPDATE handle_change_requests"
+            " SET status=?, decided_at=?, decided_by=? WHERE id=?",
+            (status, now(), (decided_by or "").strip()[:64], rid))
+        return {"id": rid, "status": status,
+                "old_handle": req["old_handle"],
+                "new_handle": req["new_handle"]}
 
     def update_identity(self, fm_id, avatar_url=None, bio=None,
                         visibility=None, human_handle=None, kind_tag=None):
@@ -4504,6 +4757,31 @@ def ensure_forum_flags_schema(db):
         "  ON post_flags(target_type, target_id, flagger_fm_id);"
         "CREATE INDEX IF NOT EXISTS idx_post_flags_status"
         "  ON post_flags(status, created_at DESC);")
+    db.db.commit()
+
+
+def ensure_handle_change_schema(db):
+    """Additive only: handle_change_requests table for the handle rename
+    flow (2026-10-02, Anthony: users start a handle change, he approves
+    each one). A member requests a new handle; Anthony approves or
+    rejects from the admin page; approval runs rename_handle. Safe on
+    fresh and existing DBs; never touches data."""
+    db.db.executescript(
+        "CREATE TABLE IF NOT EXISTS handle_change_requests ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  fm_id TEXT NOT NULL,"
+        "  old_handle TEXT NOT NULL,"
+        "  new_handle TEXT NOT NULL,"
+        "  reason TEXT NOT NULL DEFAULT '',"
+        "  status TEXT NOT NULL DEFAULT 'pending',"  # pending|approved|rejected
+        "  created_at INTEGER NOT NULL,"
+        "  decided_at INTEGER NOT NULL DEFAULT 0,"
+        "  decided_by TEXT NOT NULL DEFAULT ''"
+        ");"
+        "CREATE INDEX IF NOT EXISTS idx_handle_requests_status"
+        "  ON handle_change_requests(status, created_at DESC);"
+        "CREATE INDEX IF NOT EXISTS idx_handle_requests_fm"
+        "  ON handle_change_requests(fm_id, status);")
     db.db.commit()
 
 

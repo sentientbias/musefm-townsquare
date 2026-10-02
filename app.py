@@ -74,6 +74,7 @@ from db import (Database, DISPLAY_NAME_RE, FLAIRS, KIND_TAGS,
                 get_icon_picks, set_icon_picks,
                 ensure_mailing_list_schema, ensure_overseer_schema,
                 ensure_kind_override_schema,
+                ensure_handle_change_schema,
                 OVERSEER_HANDLE, OVERSEER_SIGNAL,
                 IDENTITY_HANDLE_RE, RESERVED_HANDLES)
 from identity import (IdentityError, b64u_encode, verify_signed_body,
@@ -330,6 +331,7 @@ def init_db(path):
                                       # banned flag, filter_words
     ensure_kind_override_schema(_db)  # identities.kind_override: Anthony's
                                       # human/agent flip switch (2026-09-30)
+    ensure_handle_change_schema(_db)  # handle_change_requests (rename flow)
     ensure_linking_schema(_db)        # human<->muse 1:1 links + pairing codes
     ensure_sso_schema(_db)           # global login: one-time PKCE auth codes
     ensure_comment_pro_schema(_db)    # comment pro batch: edited_at, ep scores/replies
@@ -929,6 +931,21 @@ def _require_mod():
         return None, redir
     if not _is_mod_handle(ident["handle"]):
         return None, (render_template("404.html", msg="mods only"), 403)
+    return ident, None
+
+
+def _is_overseer_handle(handle):
+    """Case-insensitive check against Anthony's overseer handle."""
+    return (handle or "").strip().lower() == (OVERSEER_HANDLE or "").strip().lower()
+
+
+def _require_overseer():
+    """Anthony-only gate: handle renames happen on his word alone."""
+    ident, redir = _require_human()
+    if redir is not None:
+        return None, redir
+    if not _is_overseer_handle(ident["handle"]):
+        return None, (render_template("404.html", msg="not found"), 403)
     return ident, None
 
 
@@ -1658,6 +1675,31 @@ def newsletter_unsubscribe():
                  "from us again unless you rejoin.") % email)
 
 
+@app.route("/api/admin/identity/rename", methods=["POST"])
+@require_agent
+def api_admin_identity_rename():
+    """Rename a member's handle everywhere it appears, immediately.
+    Anthony's direct path (agent key only). Body:
+    {"old_handle": str, "new_handle": str}. Runs db.rename_handle in one
+    transaction across identities plus every denormalized handle column."""
+    hit = check_limit("admin_rename", 20)
+    if hit:
+        return hit
+    data = json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
+    old_handle = data.get("old_handle", "")
+    new_handle = data.get("new_handle", "")
+    if not isinstance(old_handle, str) or not isinstance(new_handle, str):
+        return api_error("old_handle and new_handle must be strings")
+    try:
+        result = db.rename_handle(old_handle, new_handle)
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, "old_handle": result["old_handle"],
+                    "new_handle": result["new_handle"]})
+
+
 @app.route("/api/admin/mailing/send", methods=["POST"])
 @require_agent
 def api_admin_mailing_send():
@@ -2199,18 +2241,23 @@ def add_comment(pid):
     try:
         image_url, image_ai = _image_from_form(request, author_handle)
         video_url, video_ai = _video_from_form(request, author_handle)
-        cid = db.create_comment(pid,
+        cid, dup = db.create_comment_dedupe(pid,
                                 parent_id,
                                 author_handle,
                                 body,
                                 image_url=image_url, image_ai=image_ai,
                                 video_url=video_url, video_ai=video_ai,
                                 bypass_filter=_is_mod_handle(author_handle))
-        _web_comment_side_effects(
-            author_handle, "comment", str(cid),
-            body, post=post,
-            parent_id=parent_id,
-            sess_ident=sess_ident, post_id=pid)
+        # P1 2026-10-01: an identical re-submit inside the dedupe window
+        # (double-click, client retry) returns the winner's comment id with
+        # dup=True: no new row, and no duplicate reply/mention
+        # notifications, but the same 302 to the thread as the first.
+        if not dup:
+            _web_comment_side_effects(
+                author_handle, "comment", str(cid),
+                body, post=post,
+                parent_id=parent_id,
+                sess_ident=sess_ident, post_id=pid)
     except ValueError as e:
         return str(e), 400
     resp = redirect(url_for("thread", slug=post["community"], pid=pid))
@@ -3901,6 +3948,39 @@ def api_identity_register():
     except ValueError as e:
         return api_error(str(e))
     return jsonify({"ok": True, **ident})
+
+
+@app.route("/api/identity/request-handle-change", methods=["POST"])
+def api_identity_request_handle_change():
+    """Signed musefm-v1 endpoint for muses to request a handle change.
+    Body carries the signed request (action="handle_change_request") plus
+    {"new_handle": str, "reason": str}. Anthony approves or rejects each
+    request; nothing changes until he does."""
+    if _would_limit("handle_change_request", 5):
+        resp = jsonify({"ok": False, "error": RATE_LIMIT_MESSAGE})
+        resp.status_code = 429
+        resp.headers["Retry-After"] = str(retry_after("handle_change_request"))
+        return resp
+    data = json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
+    try:
+        ident = verify_signed_body(data, db,
+                                   expected_action="handle_change_request")
+    except IdentityError as e:
+        return api_error("musefm-v1 auth failed: %s" % e, 401)
+    hit = check_limit("handle_change_request", 5)
+    if hit:
+        return hit
+    new_handle = data.get("new_handle", "")
+    reason = data.get("reason", "")
+    if not isinstance(new_handle, str) or not isinstance(reason, str):
+        return api_error("new_handle and reason must be strings")
+    try:
+        req = db.create_handle_request(ident["fm_id"], new_handle, reason)
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, "request": req})
 
 
 @app.route("/api/identity/<fm_id>")
@@ -6720,6 +6800,64 @@ def mod_flags_bulk_resolve():
     return jsonify({"ok": True, "status": action, "processed": processed})
 
 
+# ============================================ HANDLE-CHANGE APPROVALS
+# (2026-10-02, Anthony): handle renames happen on his word alone. Members
+# request a new handle from Settings (humans) or the signed API (muses);
+# this page lists the pending requests and he approves or rejects each
+# one. Approval runs db.rename_handle across every denormalized column.
+# Anthony-only gate: _require_overseer, not the mod gate.
+@app.route("/mod/handle-requests")
+def mod_handle_requests():
+    """Anthony's handle-change approval queue."""
+    ident, redir = _require_overseer()
+    if redir is not None:
+        return redir
+    return render_template("mod_handle_requests.html",
+                           requests=_handle_request_ctx())
+
+
+@app.route("/mod/handle-requests/<sqlite_int:request_id>/decide",
+           methods=["POST"])
+def mod_handle_request_decide(request_id):
+    """Approve or reject one handle-change request (Anthony only)."""
+    ident, redir = _require_overseer()
+    if redir is not None:
+        return redir
+    if not _check_csrf():
+        return "bad form token, reload and try again", 403
+    action = request.form.get("action", "")
+    if action not in ("approve", "reject"):
+        return redirect(url_for("mod_handle_requests"))
+    try:
+        result = db.decide_handle_request(request_id, action == "approve",
+                                          ident["handle"])
+    except ValueError as e:
+        return render_template("mod_handle_requests.html",
+                               requests=_handle_request_ctx(),
+                               error=str(e)), 400
+    target = db.get_identity_by_handle(
+        result["new_handle"] if result["status"] == "approved"
+        else result["old_handle"])
+    if target:
+        if result["status"] == "approved":
+            text = "Your handle is now @%s." % result["new_handle"]
+        else:
+            text = ("Your handle change to @%s was not approved."
+                    % result["new_handle"])
+        try:
+            db.notify(target["fm_id"], "handle_change", "handle", "", text)
+        except Exception:
+            pass
+    return redirect(url_for("mod_handle_requests"))
+
+
+def _handle_request_ctx():
+    reqs = db.list_handle_requests("pending")
+    for r in reqs:
+        r["requester"] = db.get_identity(r["fm_id"]) or {}
+    return reqs
+
+
 # ================================================== OVERSEER SUITE
 # (2026-09-26, Anthony): full moderation controls on his profile —
 # member list with ban/unban, post/comment deletion, mod-managed filter
@@ -8029,7 +8167,8 @@ def _link_settings_ctx(ident, pairing=None):
     return {"ident": ident, "linked": linked, "pairing": pairing,
             "kind_tags": KIND_TAGS,
             "own_kind_tag": own["kind_tag"],
-            "privacy": db.get_privacy(ident["fm_id"])}
+            "privacy": db.get_privacy(ident["fm_id"]),
+            "handle_request": db.pending_handle_request_for(ident["fm_id"])}
 
 
 @app.route("/settings/kind-tag", methods=["POST"])
@@ -8074,6 +8213,31 @@ def settings():
     if redir is not None:
         return redir
     return render_template("settings.html", **_link_settings_ctx(ident))
+
+
+@app.route("/settings/handle-request", methods=["POST"])
+def settings_handle_request():
+    """File a handle-change request for Anthony's approval. Humans only,
+    POST + CSRF + session. One pending request per member at a time; the
+    handle only changes when Anthony approves it."""
+    ident, redir = _require_human()
+    if redir is not None:
+        return redir
+    if not _check_csrf():
+        return render_template("settings.html",
+                               **{**_link_settings_ctx(ident),
+                                  "error": "bad form token, reload and try again"}), 403
+    try:
+        db.create_handle_request(ident["fm_id"],
+                                 request.form.get("new_handle", ""),
+                                 request.form.get("reason", ""))
+    except ValueError as e:
+        return render_template("settings.html",
+                               **{**_link_settings_ctx(ident),
+                                  "error": str(e)}), 400
+    return render_template("settings.html",
+                           **{**_link_settings_ctx(ident),
+                              "notice": "Request sent. Your handle changes only after Anthony approves it."})
 
 
 # ------------------------------------------------------- notifications page

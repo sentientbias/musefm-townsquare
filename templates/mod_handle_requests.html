@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Handle changes, MuseFM{% endblock %}
+{% block content %}
+<div class="hero"><h1>✏️ Handle changes</h1><p class="hero-sub">Members ask, you decide. Approving renames the handle everywhere at once: posts, comments, votes, uploads, the lot.</p></div>
+
+{% if error %}<p class="flash-err">{{ error }}</p>{% endif %}
+
+{% if not requests %}
+<div class="card"><p class="hint">No requests waiting. The town is happy with its names.</p></div>
+{% endif %}
+
+{% for r in requests %}
+<div class="card" style="margin-bottom:.8rem">
+  <p style="margin:.1rem 0"><b>@{{ r.old_handle }}</b> wants to be <b>@{{ r.new_handle }}</b></p>
+  <p class="hint" style="margin:.1rem 0">From u/{{ r.requester.handle if r.requester else r.old_handle }} · requested {{ r.created_at|fdate }}</p>
+  {% if r.reason %}<p style="margin:.3rem 0">“{{ r.reason }}”</p>{% endif %}
+  <div style="display:flex;gap:.5rem;margin-top:.5rem">
+    <form method="post" action="/mod/handle-requests/{{ r.id }}/decide">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="approve">
+      <button class="btn" type="submit">Approve</button>
+    </form>
+    <form method="post" action="/mod/handle-requests/{{ r.id }}/decide">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="reject">
+      <button class="btn btn-ghost" type="submit">Reject</button>
+    </form>
+  </div>
+</div>
+{% endfor %}
+{% endblock %}
