@@ -1974,8 +1974,8 @@ def _image_from_form(req, handle):
     An uploaded file wins; the AI-generated checkbox marks provenance.
     Returns ('', False) when no file is given.
 
-    Human uploads always land in the mod-approval queue (status pending):
-    they go live only after a mod approves them.
+    2026-10-02, Anthony: human In the Air photo uploads approve
+    immediately so the photo displays right after posting.
     """
     f = req.files.get("image_file")
     if not (f and f.filename):
@@ -1985,12 +1985,9 @@ def _image_from_form(req, handle):
     try:
         uid, _stored = ai_images.create_image_upload(
             db, None, handle or "anon", f.filename, raw, UPLOAD_DIR, ai_flag,
-            status="pending")
+            status="approved")
     except ValueError as e:
         raise ValueError(str(e))
-    _notify_mods("mod_pending", "mod_queue", uid,
-                 "🖼️ Image #%d by u/%s is waiting for review" %
-                 (uid, handle or "anon"))
     return url_for("serve_image", uid=uid), ai_flag
 
 
@@ -8884,10 +8881,10 @@ def api_upload_image():
         return api_error("file_sha256 does not match the uploaded bytes", 400)
     ai_flag = str(data.get("ai_generated", "")).strip().lower() in (
         "1", "true", "yes", "on")
-    # Moderation: agent uploads already passed through the generation
-    # engine's own content filters, so ai_generated uploads go live
-    # immediately. Anything else waits for mod approval.
-    status = "approved" if ai_flag else "pending"
+    # 2026-10-02, Anthony: photos display once posted. Every signed
+    # upload approves immediately, AI or not — the uploader's signature
+    # is the provenance attestation. Mods can still remove after the fact.
+    status = "approved"
     try:
         uid, _stored = ai_images.create_image_upload(
             db, ident["fm_id"], ident["handle"], f.filename, raw, UPLOAD_DIR,
@@ -10395,24 +10392,18 @@ def wall_page():
             image_url = ""
             photo = request.files.get("photo")
             if photo and photo.filename:
-                # Wall photo: human upload through the session. Mods go
-                # live immediately; everyone else waits in the approval
-                # queue like every other human upload.
+                # 2026-10-02, Anthony: wall photos display once posted.
+                # Human wall uploads approve immediately.
                 raw = photo.read(ai_images.MAX_IMG_BYTES + 1)
                 if len(raw) > ai_images.MAX_IMG_BYTES:
                     raise ValueError("photo too big (max 4 MB)")
-                is_mod_poster = _is_mod_handle(sess_ident["handle"])
                 try:
                     uid, _stored = ai_images.create_image_upload(
                         db, sess_ident["fm_id"], sess_ident["handle"],
                         photo.filename, raw, UPLOAD_DIR,
-                        False, status="approved" if is_mod_poster else "pending")
+                        False, status="approved")
                 except ValueError as e:
                     raise ValueError(str(e))
-                if not is_mod_poster:
-                    _notify_mods("mod_pending", "mod_queue", uid,
-                                 "🖼️ Image #%d by u/%s is waiting for review" %
-                                 (uid, sess_ident["handle"]))
                 image_url = url_for("serve_image", uid=uid)
             # Use the dict bulletin_post returns directly: re-reading the
             # latest row could grab someone else's note under concurrency
