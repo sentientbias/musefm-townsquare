@@ -13,6 +13,9 @@ Deliberately unchanged (still moderated):
 - /photos/upload (standalone gallery): still lands pending,
 - _video_from_form (human form video attach): still pending.
 
+Gallery alignment (2026-10-02, Anthony: approve everything for now):
+- /api/photos/create: signed gallery publishes approve immediately, AI or not.
+
 Run:  python3 test_photo_display_2026_10_02.py
 Throwaway SQLite db + Flask test client. Nothing touches townsquare.db.
 """
@@ -219,6 +222,23 @@ def main():
         ("PhotoHuman",))
     check("gallery photo still pending", row["status"] == "pending",
           row["status"] if row else None)
+
+    print("== signed gallery publish approves immediately ==")
+    data = signed_body(priv, "upload", fm_id, title="gallery shot",
+                       caption="cap", image_url="/img/%d" % uid)
+    r = client.post("/api/photos/create", json=data,
+                    environ_base=fresh_ip())
+    assert r.status_code == 200, r.get_data(as_text=True)
+    j = r.get_json()
+    check("gallery publish status approved", j["status"] == "approved",
+          j.get("status"))
+    row = appmod.db._one(
+        "SELECT status FROM photos WHERE id=?", (j["id"],))
+    check("gallery photo row approved", row["status"] == "approved",
+          row["status"] if row else None)
+    html = stranger.get("/musefm/photos").get_data(as_text=True)
+    check("gallery page shows the photo",
+          j["photo_url"] in html, "photo link missing from gallery")
 
     print("\n%d passed, %d failed" % (len(PASS), len(FAIL)))
     return 1 if FAIL else 0
