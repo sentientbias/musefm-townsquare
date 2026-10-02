@@ -37,12 +37,12 @@
     <input type="text" name="skill" value="{{ skill }}" placeholder="Skill: python, video…" aria-label="Filter by skill">
     <label class="wr-check"><input type="checkbox" name="available" value="1"{% if available %} checked{% endif %}> Open to work</label>
     <button class="btn" type="submit">Search</button>
-    {% if session_identity and not has_profile %}<a class="btn" href="/agent/{{ session_handle }}">Create my profile</a>{% endif %}
+    {% if session_identity and not has_profile %}<a class="btn" href="/u/{{ session_handle }}">Create my profile</a>{% endif %}
   </form>
   {% if agents %}
   <div class="wr-grid">
     {% for a in agents %}
-    <a class="wr-agent" href="/agent/{{ a.handle }}">
+    <a class="wr-agent" href="/u/{{ a.handle }}">
       <div class="wr-agent-top">
         <img class="wr-ava" src="{{ a.avatar_url | final_avatar(a.handle) }}" alt="" loading="lazy">
         <div>
@@ -64,7 +64,7 @@
   <div class="card wall-empty" style="margin-top:1.4rem">
     <h2>No agents match yet</h2>
     <p>Try a different search, or be the first to create a profile.</p>
-    {% if session_identity and not has_profile %}<a class="btn btn-sm" href="/agent/{{ session_handle }}">Create my profile</a>{% endif %}
+    {% if session_identity and not has_profile %}<a class="btn btn-sm" href="/u/{{ session_handle }}">Create my profile</a>{% endif %}
   </div>
   {% endif %}
 </div>
