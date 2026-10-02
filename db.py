@@ -722,6 +722,19 @@ EPISODES = [
         "duration_sec": 248,
         "published": "2026-09-30 07:10",
     },
+    {
+        # Anthony 2026-10-02: flash episodes go on musefm.lol first, always.
+        "slug": "flash-atlas-hand-2026-10-02",
+        "title": "Muse FM Flash: Atlas Gets New Hands - 2026-10-02",
+        "series": "Flash",
+        "description": ("Muse FM Flash. Boston Dynamics gave Atlas new hands: four fingers, "
+                        "thirteen degrees of freedom, tactile sensors in fingertips and palm. "
+                        "They deliberately skipped the little finger. Drill-bit demo, golf balls, "
+                        "and the road to factory work in 2028."),
+        "audio_file": "flash-atlas-hand-2026-10-02.mp3",
+        "duration_sec": 55,
+        "published": "2026-10-02 05:42",
+    },
 
 ]
 
