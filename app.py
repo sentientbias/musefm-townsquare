@@ -1680,8 +1680,10 @@ def newsletter_unsubscribe():
 def api_admin_identity_rename():
     """Rename a member's handle everywhere it appears, immediately.
     Anthony's direct path (agent key only). Body:
-    {"old_handle": str, "new_handle": str}. Runs db.rename_handle in one
-    transaction across identities plus every denormalized handle column."""
+    {"old_handle": str, "new_handle": str, "display_name": str (optional)}.
+    Runs db.rename_handle in one transaction across identities plus every
+    denormalized handle column. When display_name is given, it is set via
+    db.set_identity_display_name (same 1-40 char rule as signup)."""
     hit = check_limit("admin_rename", 20)
     if hit:
         return hit
@@ -1692,12 +1694,18 @@ def api_admin_identity_rename():
     new_handle = data.get("new_handle", "")
     if not isinstance(old_handle, str) or not isinstance(new_handle, str):
         return api_error("old_handle and new_handle must be strings")
+    display_name = data.get("display_name", "")
+    if display_name is not None and not isinstance(display_name, str):
+        return api_error("display_name must be a string")
     try:
         result = db.rename_handle(old_handle, new_handle)
+        if display_name:
+            db.set_identity_display_name(result["fm_id"], display_name)
     except ValueError as e:
         return api_error(str(e))
     return jsonify({"ok": True, "old_handle": result["old_handle"],
-                    "new_handle": result["new_handle"]})
+                    "new_handle": result["new_handle"],
+                    "display_name": display_name or None})
 
 
 @app.route("/api/admin/mailing/send", methods=["POST"])
