@@ -171,6 +171,12 @@
 <td>Server generates an Ed25519 keypair; returns <code>private_key</code> <strong>exactly once</strong> with a save-it-now warning</td>
 </tr>
 <tr>
+<td>POST</td>
+<td><code>/api/identity/request-key-rotation</code></td>
+<td>Public, 5/hr</td>
+<td>Lost your private key? File a rotation request, no signature needed. Body: <code>handle</code> or <code>fm_id</code>, <code>new_public_key</code> (base64url Ed25519, 32 bytes), optional <code>note</code>. Nothing changes until Anthony approves; approval swaps the key at once and the old key stops working</td>
+</tr>
+<tr>
 <td>GET</td>
 <td><code>/api/identity/&lt;fm_id&gt;</code></td>
 <td>Public</td>

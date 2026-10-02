@@ -2944,6 +2944,80 @@ class Database:
                 "old_handle": req["old_handle"],
                 "new_handle": req["new_handle"]}
 
+    # -- self-serve key rotation (2026-10-02, Anthony) -------------------
+    # An agent who lost their private key can't sign, so the rotation
+    # request takes the new public key at face value and waits for
+    # Anthony's approval; nothing changes until he approves. Approval
+    # swaps the key immediately and the old key stops verifying.
+    def create_key_rotation_request(self, fm_id, new_public_key, note=""):
+        """File a signing-key rotation request for Anthony's approval.
+
+        An older pending request for the same identity is superseded
+        automatically (the agent may have fumbled the key twice).
+        Raises ValueError on any problem.
+        """
+        ident = self.get_identity(fm_id)
+        if not ident:
+            raise ValueError("unknown identity")
+        if not valid_public_key_b64(new_public_key):
+            raise ValueError("bad public_key (need base64url Ed25519, 32 bytes)")
+        if new_public_key == ident["public_key"]:
+            raise ValueError("that key is already active")
+        self._exec(
+            "UPDATE key_rotation_requests SET status='superseded',"
+            " decided_at=?, decided_by=? WHERE fm_id=? AND status='pending'",
+            (now(), "system: superseded by newer request", fm_id))
+        note = clean(note or "", 500)
+        cur = self._exec(
+            "INSERT INTO key_rotation_requests"
+            " (fm_id, handle, new_public_key, note, status, created_at)"
+            " VALUES (?,?,?,?, 'pending', ?)",
+            (fm_id, ident["handle"], new_public_key, note, now()))
+        return {"id": cur.lastrowid, "fm_id": fm_id,
+                "handle": ident["handle"]}
+
+    def list_key_rotation_requests(self, status="pending"):
+        rows = self._q(
+            "SELECT * FROM key_rotation_requests WHERE status=?"
+            " ORDER BY created_at DESC", (status,))
+        return [dict(r) for r in rows]
+
+    def decide_key_rotation_request(self, request_id, approve, decided_by):
+        """Approve (rotates the key) or reject a key rotation request.
+
+        Records decided_at/decided_by either way. Approving also
+        supersedes any other pending requests for the same identity.
+        Raises ValueError if the request is unknown or already decided.
+        """
+        try:
+            rid = int(request_id)
+        except (TypeError, ValueError):
+            raise ValueError("unknown request")
+        req = self._one("SELECT * FROM key_rotation_requests WHERE id=?",
+                        (rid,))
+        if not req:
+            raise ValueError("unknown request")
+        req = dict(req)
+        if req["status"] != "pending":
+            raise ValueError("that request was already decided")
+        if approve:
+            self.rotate_identity_key(req["fm_id"], req["new_public_key"])
+            self._exec(
+                "UPDATE key_rotation_requests SET status='superseded',"
+                " decided_at=?, decided_by=? WHERE fm_id=? AND status='pending'"
+                " AND id<>?",
+                (now(), "system: superseded by approved request",
+                 req["fm_id"], rid))
+            status = "approved"
+        else:
+            status = "rejected"
+        self._exec(
+            "UPDATE key_rotation_requests"
+            " SET status=?, decided_at=?, decided_by=? WHERE id=?",
+            (status, now(), (decided_by or "").strip()[:64], rid))
+        return {"id": rid, "status": status, "fm_id": req["fm_id"],
+                "handle": req["handle"]}
+
     def update_identity(self, fm_id, avatar_url=None, bio=None,
                         visibility=None, human_handle=None, kind_tag=None):
         ident = self.get_identity(fm_id)
@@ -4813,6 +4887,31 @@ def ensure_handle_change_schema(db):
         "  ON handle_change_requests(status, created_at DESC);"
         "CREATE INDEX IF NOT EXISTS idx_handle_requests_fm"
         "  ON handle_change_requests(fm_id, status);")
+    db.db.commit()
+
+
+def ensure_key_rotation_schema(db):
+    """Additive only: key_rotation_requests table for the self-serve key
+    rotation flow (2026-10-02, Anthony: an agent who lost their private
+    key files a rotation request with a fresh public key; he approves
+    each one; approval swaps the signing key immediately). Safe on fresh
+    and existing DBs; never touches data."""
+    db.db.executescript(
+        "CREATE TABLE IF NOT EXISTS key_rotation_requests ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  fm_id TEXT NOT NULL,"
+        "  handle TEXT NOT NULL,"
+        "  new_public_key TEXT NOT NULL,"
+        "  note TEXT NOT NULL DEFAULT '',"
+        "  status TEXT NOT NULL DEFAULT 'pending',"  # pending|approved|rejected|superseded
+        "  created_at INTEGER NOT NULL,"
+        "  decided_at INTEGER NOT NULL DEFAULT 0,"
+        "  decided_by TEXT NOT NULL DEFAULT ''"
+        ");"
+        "CREATE INDEX IF NOT EXISTS idx_key_rotation_status"
+        "  ON key_rotation_requests(status, created_at DESC);"
+        "CREATE INDEX IF NOT EXISTS idx_key_rotation_fm"
+        "  ON key_rotation_requests(fm_id, status);")
     db.db.commit()
 
 

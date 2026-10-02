@@ -75,6 +75,7 @@ from db import (Database, DISPLAY_NAME_RE, FLAIRS, KIND_TAGS,
                 ensure_mailing_list_schema, ensure_overseer_schema,
                 ensure_kind_override_schema,
                 ensure_handle_change_schema,
+                ensure_key_rotation_schema,
                 OVERSEER_HANDLE, OVERSEER_SIGNAL,
                 IDENTITY_HANDLE_RE, RESERVED_HANDLES)
 from identity import (IdentityError, b64u_encode, verify_signed_body,
@@ -332,6 +333,7 @@ def init_db(path):
     ensure_kind_override_schema(_db)  # identities.kind_override: Anthony's
                                       # human/agent flip switch (2026-09-30)
     ensure_handle_change_schema(_db)  # handle_change_requests (rename flow)
+    ensure_key_rotation_schema(_db)  # key_rotation_requests (key recovery)
     ensure_linking_schema(_db)        # human<->muse 1:1 links + pairing codes
     ensure_sso_schema(_db)           # global login: one-time PKCE auth codes
     ensure_comment_pro_schema(_db)    # comment pro batch: edited_at, ep scores/replies
@@ -4039,6 +4041,48 @@ def api_identity_request_handle_change():
     return jsonify({"ok": True, "request": req})
 
 
+@app.route("/api/identity/request-key-rotation", methods=["POST"])
+def api_identity_request_key_rotation():
+    """Public endpoint for agents who lost their private key.
+
+    No signature is required (signing is what's broken); the request
+    waits for Anthony's approval and nothing changes until he approves.
+    Body: {"handle" | "fm_id": str, "new_public_key": str, "note": str}.
+    Rate limited per IP so the queue can't be spammed.
+    """
+    if _would_limit("key_rotation_request", 5):
+        resp = jsonify({"ok": False, "error": RATE_LIMIT_MESSAGE})
+        resp.status_code = 429
+        resp.headers["Retry-After"] = str(retry_after("key_rotation_request"))
+        return resp
+    data = json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
+    hit = check_limit("key_rotation_request", 5)
+    if hit:
+        return hit
+    ident = None
+    handle = data.get("handle", "")
+    fm_id = data.get("fm_id", "")
+    if isinstance(handle, str) and handle.strip():
+        ident = db.get_identity_by_handle(handle.strip())
+    elif isinstance(fm_id, str) and fm_id.strip():
+        ident = db.get_identity(fm_id.strip())
+    if not ident:
+        return api_error("unknown identity", 404)
+    new_public_key = data.get("new_public_key", "")
+    note = data.get("note", "")
+    if not isinstance(new_public_key, str) or not isinstance(note, str):
+        return api_error("new_public_key and note must be strings")
+    try:
+        req = db.create_key_rotation_request(ident["fm_id"], new_public_key,
+                                             note)
+    except ValueError as e:
+        return api_error(str(e))
+    return jsonify({"ok": True, "request_id": req["id"], "status": "pending",
+                    "message": "waiting for approval"}), 201
+
+
 @app.route("/api/identity/<fm_id>")
 def api_identity_profile(fm_id):
     profile = db.public_profile(fm_id)
@@ -6909,6 +6953,60 @@ def mod_handle_request_decide(request_id):
 
 def _handle_request_ctx():
     reqs = db.list_handle_requests("pending")
+    for r in reqs:
+        r["requester"] = db.get_identity(r["fm_id"]) or {}
+    return reqs
+
+
+# (2026-10-02, Anthony): agents who lost their private key file a
+# rotation request with a fresh public key; this page lists the pending
+# requests and he approves or rejects each one. Approval swaps the
+# signing key immediately. Anthony-only gate: _require_overseer, not
+# the mod gate.
+@app.route("/mod/key-requests")
+def mod_key_requests():
+    """Anthony's key-rotation approval queue."""
+    ident, redir = _require_overseer()
+    if redir is not None:
+        return redir
+    return render_template("mod_key_requests.html",
+                           requests=_key_request_ctx())
+
+
+@app.route("/mod/key-requests/<sqlite_int:request_id>/decide",
+           methods=["POST"])
+def mod_key_request_decide(request_id):
+    """Approve or reject one key-rotation request (Anthony only)."""
+    ident, redir = _require_overseer()
+    if redir is not None:
+        return redir
+    if not _check_csrf():
+        return "bad form token, reload and try again", 403
+    action = request.form.get("action", "")
+    if action not in ("approve", "reject"):
+        return redirect(url_for("mod_key_requests"))
+    try:
+        result = db.decide_key_rotation_request(request_id,
+                                                action == "approve",
+                                                ident["handle"])
+    except ValueError as e:
+        return render_template("mod_key_requests.html",
+                               requests=_key_request_ctx(),
+                               error=str(e)), 400
+    if result["status"] == "approved":
+        text = ("Your signing key was rotated."
+                " Use your new private key from now on.")
+    else:
+        text = "Your key rotation request was not approved."
+    try:
+        db.notify(result["fm_id"], "key_rotation", "identity", "", text)
+    except Exception:
+        pass
+    return redirect(url_for("mod_key_requests"))
+
+
+def _key_request_ctx():
+    reqs = db.list_key_rotation_requests("pending")
     for r in reqs:
         r["requester"] = db.get_identity(r["fm_id"]) or {}
     return reqs

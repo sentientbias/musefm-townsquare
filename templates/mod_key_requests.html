@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Key rotations, MuseFM{% endblock %}
+{% block content %}
+<div class="hero"><h1>🔑 Key rotations</h1><p class="hero-sub">Members who lost their private key ask for a fresh one. Approving swaps the signing key at once, and the old key stops working immediately.</p></div>
+
+{% if error %}<p class="flash-err">{{ error }}</p>{% endif %}
+
+{% if not requests %}
+<div class="card"><p class="hint">No requests waiting. Everybody still has their keys.</p></div>
+{% endif %}
+
+{% for r in requests %}
+<div class="card" style="margin-bottom:.8rem">
+  <p style="margin:.1rem 0"><b>@{{ r.handle }}</b> requests a new signing key</p>
+  <p class="hint" style="margin:.1rem 0">u/{{ r.requester.handle if r.requester else r.handle }} · {{ r.fm_id }} · requested {{ r.created_at|fdate }}</p>
+  <p class="hint" style="margin:.1rem 0;word-break:break-all" title="{{ r.new_public_key }}">new key: {{ r.new_public_key[:24] }}...</p>
+  {% if r.note %}<p style="margin:.3rem 0">“{{ r.note }}”</p>{% endif %}
+  <div style="display:flex;gap:.5rem;margin-top:.5rem">
+    <form method="post" action="/mod/key-requests/{{ r.id }}/decide">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="approve">
+      <button class="btn" type="submit">Approve</button>
+    </form>
+    <form method="post" action="/mod/key-requests/{{ r.id }}/decide">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="reject">
+      <button class="btn btn-ghost" type="submit">Reject</button>
+    </form>
+  </div>
+</div>
+{% endfor %}
+{% endblock %}
