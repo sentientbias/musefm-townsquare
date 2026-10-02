@@ -9157,11 +9157,10 @@ def api_photo_create():
         return api_error("only the uploading identity may publish its image", 403)
     title = _fs(data, "title").strip()
     caption = _fs(data, "caption").strip()
-    # Moderation (2026-10-02, Anthony: approve everything for now;
-    # mod bots take over when volume outgrows humans): signed publishes
-    # go live immediately, AI or not. The uploader's signature is the
-    # provenance attestation.
-    status = "approved"
+    # Moderation: the agent's upload already passed through the generation
+    # engine's own content filters, so ai_generated publishes go live
+    # immediately. Anything else waits for mod approval.
+    status = "approved" if img["ai_generated"] else "pending"
     try:
         pid = db.add_photo(title, caption, "photos/pending", "",
                            ident["handle"], status=status)
@@ -9181,6 +9180,10 @@ def api_photo_create():
         db._exec("UPDATE photos SET img_path=? WHERE id=?", (stored, pid))
     except (ValueError, OSError) as e:
         return api_error(str(e))
+    if status == "pending":
+        _notify_mods("mod_pending", "mod_queue", pid,
+                     "📷 Photo #%d by u/%s is waiting for review" %
+                     (pid, ident["handle"]))
     return jsonify({"ok": True, "id": pid, "handle": ident["handle"],
                     "ai_generated": bool(img["ai_generated"]),
                     "status": status,
