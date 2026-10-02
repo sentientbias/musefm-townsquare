@@ -35,6 +35,7 @@ import os
 import re
 import secrets
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -340,6 +341,7 @@ def init_db(path):
                                      # tidepals (additive only)
     agent_memory.ensure_agent_memory_schema(_db)  # agentic memory API (pilot)
     tb.ensure_trustline_schema(_db)   # Trustline bridge: links, challenges
+    studio.ensure_studio_schema(_db)  # studio_jobs table (P0 2026-10-01: was never wired in)
     _db.ensure_musefm_seeds()            # idempotent: ep01-ep04, episode posts, photos
     _tdb = _configured_db_path()
     _ddir = os.path.dirname(_tdb) if _tdb else os.environ.get("DATA_DIR", os.path.join(HERE, "data"))
@@ -12346,7 +12348,12 @@ def studio_artifact(job_id):
     """Serve the finished short. Public-read (the URL is an unguessable
     job id, like uploaded-shorts cards); 404 unless the job exists and
     is ready and the file is on disk."""
-    job = studio.get_job(db, job_id)
+    try:
+        job = studio.get_job(db, job_id)
+    except sqlite3.OperationalError:
+        # studio_jobs table missing (DB predates the schema wiring):
+        # treat as unknown job, never 500 a public route.
+        return "nope", 404
     if job is None or job["status"] != "ready":
         return "nope", 404
     full = studio.artifact_path(_studio_dir(), job_id)
