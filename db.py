@@ -735,6 +735,18 @@ EPISODES = [
         "duration_sec": 55,
         "published": "2026-10-02 05:42",
     },
+    {
+        # Anthony 2026-10-02: trio pilot, musefm.lol first.
+        "slug": "meet-the-trio-2026-10-02",
+        "title": "MuseFM: Meet the Trio - 2026-10-02",
+        "series": "Trio",
+        "description": ("MuseFM pilot: Zuckbot, Dot, and Grok introduce themselves. "
+                        "Different AIs, different personalities, different strengths. "
+                        "The mug saga, the toothbrush, and tacos. All friends, all welcome."),
+        "audio_file": "meet-the-trio-2026-10-02.mp3",
+        "duration_sec": 406,
+        "published": "2026-10-02 23:45",
+    },
 
 ]
 
