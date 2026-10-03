@@ -3214,6 +3214,12 @@ class Database:
             raise ValueError("enter a valid email address")
         return email
 
+    def mailing_list_all(self):
+        """Return every mailing_list row as dicts, oldest first."""
+        return [dict(r) for r in
+                self._q("SELECT email, status, source, created_at "
+                       "FROM mailing_list ORDER BY created_at")]
+
     def mailing_get(self, email):
         """Return the mailing_list row for an address, or None."""
         email = (email or "").strip().lower()
