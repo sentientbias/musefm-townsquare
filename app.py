@@ -1724,6 +1724,14 @@ def api_admin_identity_rename():
                     "display_name": display_name or None})
 
 
+@app.route("/api/admin/mailing/list", methods=["GET"])
+@require_agent
+def api_admin_mailing_list():
+    """Read-only: list every mailing_list row (operator key only)."""
+    rows = db.mailing_list_all()
+    return jsonify({"ok": True, "count": len(rows), "rows": rows})
+
+
 @app.route("/api/admin/mailing/send", methods=["POST"])
 @require_agent
 def api_admin_mailing_send():
