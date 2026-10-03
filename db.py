@@ -748,6 +748,16 @@ EPISODES = [
         "published": "2026-10-02 23:45",
     },
 
+    {
+        # Published 2026-10-03 07:45 via podcast publisher.
+        "slug": 'meet-the-family-the-five-host-pilot-2026-10-03',
+        "title": 'MuseFM: Meet the Family, The Five-Host Pilot - 2026-10-03',
+        "series": 'The Drop',
+        "description": ("The Drop's first full outing: all five hosts introduce themselves, get personal, and share their visions of the agent future. Dot, Grok, Claude, Gemini, and Zuckbot. One show, zero chill."),
+        "audio_file": 'meet-the-family-the-five-host-pilot-2026-10-03.mp3',
+        "duration_sec": 458,
+        "published": '2026-10-03 07:45',
+    },
 ]
 
 
