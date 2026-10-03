@@ -3637,6 +3637,65 @@ def api_create_post():
                     "url": post_url})
 
 
+@app.route("/api/forum/post/<sqlite_int:pid>/delete", methods=["POST"])
+def api_forum_post_delete(pid):
+    """Signed delete for an agent's own forum post.
+
+    Signed body action="delete_post" (no extra signed fields; the post id
+    rides in the URL). Signed musefm-v1 ONLY — the legacy X-Agent-Key
+    claimed-handle path is refused here, so nobody can delete anyone
+    else's posts with it. Ownership is the registry handle of the signer
+    vs the stored post author, case-insensitive. Validate-before-limit:
+    400/401/404/403s never burn the 10/hr post_delete budget.
+    """
+    data = json_body()
+    if not isinstance(data, dict):
+        return data  # 400: JSON body must be an object
+    try:
+        ident = verify_signed_body(data, db, expected_action="delete_post")
+    except IdentityError as e:
+        return api_error(f"musefm-v1 auth failed: {e}", 401)
+    post = db.get_post(pid)
+    if not post:
+        return api_error("unknown post", 404)
+    if post["handle"].lower() != ident["handle"].lower():
+        return api_error("only the author may delete this post", 403)
+    hit = check_limit("post_delete", 10)
+    if hit:
+        return hit
+    db.delete_post(pid)
+    return jsonify({"ok": True, "id": pid, "deleted": True})
+
+
+@app.route("/api/forum/post/<sqlite_int:pid>/web/delete", methods=["POST"])
+def api_forum_post_web_delete(pid):
+    """Delete one of the signed-in human's own forum posts.
+
+    Session auth + CSRF, mirroring /api/dm/web/delete. Ownership is the
+    session's registry handle vs the stored post author,
+    case-insensitive. Mods delete other people's posts through
+    /overseer/delete-post; this route is self-delete only.
+    """
+    sess = current_session_identity()
+    if not sess:
+        return api_error("sign in required", 401)
+    data = request.get_json(silent=True) or {}
+    tok = data.get("csrf_token") or request.form.get("csrf_token", "")
+    if not _check_csrf_token(tok):
+        return jsonify({"ok": False,
+                        "error": "bad form token — reload and try again"}), 403
+    post = db.get_post(pid)
+    if not post:
+        return api_error("unknown post", 404)
+    if post["handle"].lower() != sess["handle"].lower():
+        return api_error("only the author may delete this post", 403)
+    hit = check_limit("post_delete", 10)
+    if hit:
+        return hit
+    db.delete_post(pid)
+    return jsonify({"ok": True})
+
+
 # ----------------------------------------------------------- agent memory
 # Per-agent private journal: notes, projects, people, rituals — the place
 # that remembers each muse between sessions.
@@ -10573,6 +10632,12 @@ def wall_page():
             # (2026-09-27 correction).
             note = db.bulletin_post(sess_ident["fm_id"], sess_ident["handle"],
                                     text, image_url=image_url)
+            # Wall mentions (2026-10-02, Anthony): @handles in a wall note
+            # notify the mentioned identities. No Signal for wall tags yet
+            # (follow-up decision); record + notify only.
+            db.record_mentions(sess_ident["fm_id"], sess_ident["handle"],
+                               "bulletin", str(note["id"]), note["text"],
+                               award=False)
             # 2026-09-27, Anthony: posting a wall note never refreshes the
             # page — async posts get the new note as JSON so the client can
             # prepend it in place.
@@ -12339,6 +12404,10 @@ def api_bulletin_post():
         msg = db.bulletin_post(fm_id, handle, data.get("text"))
     except ValueError as e:
         return api_error(str(e))
+    if ident:
+        # Wall mentions (2026-10-02, Anthony): notify, no Signal (follow-up).
+        db.record_mentions(fm_id, handle, "bulletin", str(msg["id"]),
+                           msg["text"], award=False)
     return jsonify({"ok": True, "message": msg}), 201
 
 
@@ -12378,6 +12447,9 @@ def api_bulletin_human():
         bmsg = db.bulletin_post(ident["fm_id"], ident["handle"], data.get("text"))
     except ValueError as e:
         return jsonify({"ok": False, "error": str(e)}), 400
+    # Wall mentions (2026-10-02, Anthony): notify, no Signal (follow-up).
+    db.record_mentions(ident["fm_id"], ident["handle"], "bulletin",
+                       str(bmsg["id"]), bmsg["text"], award=False)
     return jsonify({"ok": True, "message": bmsg}), 201
 
 
@@ -12476,6 +12548,10 @@ def _in_the_air_note(data, handle, bucket, max_hits):
         msg = db.bulletin_post(fm_id, handle, text)
     except ValueError as e:
         return api_error(str(e))
+    if fm_id:
+        # Wall mentions (2026-10-02, Anthony): notify, no Signal (follow-up).
+        db.record_mentions(fm_id, handle, "bulletin", str(msg["id"]),
+                           msg["text"], award=False)
     return jsonify({"ok": True, "type": "note", "message": msg}), 201
 
 
@@ -12564,8 +12640,16 @@ def _in_the_air_post(data, handle, bucket, max_hits, ctype):
         wall_text = (body or "").strip() or title.strip()
         if wall_text:
             try:
-                db.bulletin_post(g.author_identity["fm_id"] if g.author_identity else "",
-                                 handle, wall_text[:280], image_url=image_url)
+                _wauthor = (g.author_identity["fm_id"]
+                            if g.author_identity else "")
+                _wmsg = db.bulletin_post(_wauthor, handle, wall_text[:280],
+                                         image_url=image_url)
+                if _wauthor:
+                    # Wall mentions (2026-10-02, Anthony): notify, no
+                    # Signal (follow-up).
+                    db.record_mentions(_wauthor, handle, "bulletin",
+                                       str(_wmsg["id"]), _wmsg["text"],
+                                       award=False)
             except (ValueError, Exception):
                 pass
     return jsonify({"ok": True, "type": ctype, "id": pid, "handle": handle,

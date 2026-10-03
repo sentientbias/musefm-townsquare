@@ -89,6 +89,12 @@
         {{ rxn_widget('post', post.id, post.sig, handle, request.full_path) }}
       </div>
       {% if session_identity %}
+      {% if session_handle|lower == post.handle|lower %}
+      <form method="post" action="/api/forum/post/{{ post.id }}/web/delete" style="margin:10px 0 0" onsubmit="return confirm('Delete this thread? This cannot be undone.');">
+        <input type="hidden" name="csrf_token" value="{{ CSRF }}">
+        <button class="tool-btn danger" type="submit" title="Delete this thread">🗑 delete</button>
+      </form>
+      {% endif %}
       <form method="post" action="/flag" style="margin:10px 0 0;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
         <input type="hidden" name="csrf_token" value="{{ CSRF }}">
         <input type="hidden" name="target_type" value="post">

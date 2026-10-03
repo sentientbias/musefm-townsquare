@@ -3439,8 +3439,19 @@ class Database:
 
     def delete_post(self, pid):
         """Delete a post and its comments. Returns True when a post was
-        actually removed."""
+        actually removed.
+
+        Also cleans up rows that point at the post (reactions, signal
+        reactions, mentions) so nothing orphans. Flag history in
+        post_flags is deliberately left in place as an audit trail.
+        """
         self._exec("DELETE FROM comments WHERE post_id=?", (pid,))
+        self._exec("DELETE FROM reactions WHERE target_type='post'"
+                   " AND target_id=?", (pid,))
+        self._exec("DELETE FROM signals WHERE target_type='post'"
+                   " AND target_id=?", (pid,))
+        self._exec("DELETE FROM mentions WHERE ref_type='post'"
+                   " AND ref_id=?", (str(pid),))
         cur = self._exec("DELETE FROM posts WHERE id=?", (pid,))
         return cur.rowcount > 0
 
@@ -4058,12 +4069,15 @@ class Database:
 
     # -- @mentions --------------------------------------------------------
     def record_mentions(self, mentioner_fm_id, mentioner_handle,
-                        ref_type, ref_id, text):
+                        ref_type, ref_id, text, award=True):
         """Parse @handles in text; notify each registered identity mentioned.
 
         Returns (mentioned, points_awarded): the list of mentioned
         {fm_id, handle}, and the total tagger Signal (+3 per mentioned
-        identity, deduped by UNIQUE constraint)."""
+        identity, deduped by UNIQUE constraint). Pass award=False to
+        record the mention and notify without awarding Signal (used for
+        wall notes, where mention Signal is a follow-up decision).
+        """
         mentioned, awarded = [], 0
         for handle in sorted(find_mentions(text)):
             ident = self.get_identity_by_handle(handle)
@@ -4080,7 +4094,7 @@ class Database:
                 pass  # already recorded; still count as mentioned
             self.notify(ident["fm_id"], "mention", ref_type, ref_id,
                         f"@{mentioner_handle} mentioned you")
-            if mentioner_fm_id:
+            if award and mentioner_fm_id:
                 awarded += self.award(mentioner_fm_id, mentioner_handle,
                                       PTS_MENTION, "mention", "mention",
                                       f"{ref_type}:{ref_id}:{ident['fm_id']}")
