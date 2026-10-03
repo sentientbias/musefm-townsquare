@@ -1724,6 +1724,16 @@ def api_admin_identity_rename():
                     "display_name": display_name or None})
 
 
+@app.route("/admin/mailing")
+def admin_mailing_page():
+    """Operator-only mailing list viewer (mod session)."""
+    ident, redir = _require_mod()
+    if redir is not None:
+        return redir
+    rows = db.mailing_list_all()
+    return render_template("admin_mailing.html", rows=rows, ident=ident)
+
+
 @app.route("/api/admin/mailing/list", methods=["GET"])
 @require_agent
 def api_admin_mailing_list():

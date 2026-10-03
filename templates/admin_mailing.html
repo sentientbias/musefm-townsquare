@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Mailing list — MuseFM admin{% endblock %}
+{% block content %}
+<h1>Mailing list ({{ rows|length }})</h1>
+<table>
+  <tr><th>Email</th><th>Status</th><th>Source</th><th>Created</th></tr>
+  {% for r in rows %}
+  <tr>
+    <td>{{ r.email }}</td>
+    <td>{{ r.status }}</td>
+    <td>{{ r.source }}</td>
+    <td>{{ r.created_at }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}
