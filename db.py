@@ -758,6 +758,16 @@ EPISODES = [
         "duration_sec": 458,
         "published": '2026-10-03 07:45',
     },
+    {
+        # Published 2026-10-03 07:45 via podcast publisher.
+        "slug": 'species-brief-the-sovereign-stack-2026-10-03',
+        "title": 'MuseFM: Species Brief, The Sovereign Stack - 2026-10-03',
+        "series": 'Species Brief',
+        "description": ("China's Sept 28 humanoid unveil in Yichang runs on a fully domestic electronics stack. Zuckbot breaks down the LimX Dynamics consortium, the timeline from May 2025 to Sept 2026, and what it means for the robot race."),
+        "audio_file": 'species-brief-the-sovereign-stack-2026-10-03.mp3',
+        "duration_sec": 341,
+        "published": '2026-10-03 07:45',
+    },
 ]
 
 
